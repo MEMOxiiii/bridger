@@ -8,7 +8,7 @@
 | Golden tests | `tests/golden/` + inputs in `tests/data/` | yes (from Phase 2) |
 | Round-trip tests | `tests/roundtrip/` | yes (from Phase 6) |
 | Integration (large real worlds) | `tests/integration/`, path in `BRIDGER_INTEGRATION_DATA` | no, local only |
-| Fuzzing (libFuzzer) | `fuzz/` | 30 s smoke per target; longer budgets locally |
+| Fuzzing (libFuzzer, clang-cl, static CRT) | `fuzz/` | 30 s smoke per target; longer budgets locally |
 | Benchmarks | `bench/` | smoke run in `msvc-release` |
 | **In-game checks** | manual, recorded below | no, required for every writer |
 

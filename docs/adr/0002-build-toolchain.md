@@ -38,6 +38,17 @@ details settled while implementing Phase 0.
   - **`zlib` added**: leveldb-mcpe's Bedrock compressors are implemented on zlib (ADR 0004). minizip-ng uses it
     as well.
 
+- **The fuzz preset uses the static CRT** (`/MT`, triplet `x64-windows-static`, its own
+  `build/vcpkg_installed_static`). Upstream LLVM ships libFuzzer for Windows only as a static-CRT library, and
+  mixing it with `/MD` objects fails at link time (`/failifmismatch: RuntimeLibrary`).
+- **Sanitizer runtimes are discovered, not hardcoded.** CMake links clang-cl targets with lld-link directly, so
+  the clang driver never adds the ASan/libFuzzer runtimes. At configure time `cmake/Sanitizers.cmake` asks the
+  compiler (`clang-cl -### ...`) which runtime libraries it would link, and passes exactly those. Library names
+  differ between LLVM releases and the copy bundled with Visual Studio.
+- **vcpkg manifest features**: the core libraries are always installed. `render`, `app`, `tests`, `benchmarks`
+  and `tracy` are default features. The fuzz preset sets `VCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON` and builds only
+  what the format libraries need.
+
 ## Consequences
 
 - Building requires a developer shell or an IDE that provides one (VS, VS Code CMake Tools).
