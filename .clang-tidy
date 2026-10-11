@@ -1,0 +1,45 @@
+---
+# Run: clang-tidy -p build/msvc-debug <file>   (needs compile_commands.json from a Ninja preset)
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cert-err33-c,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-slicing,
+  misc-const-correctness,
+  misc-definitions-in-headers,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  performance-*,
+  portability-*,
+  readability-container-size-empty,
+  readability-else-after-return,
+  readability-identifier-naming,
+  readability-implicit-bool-conversion,
+  readability-make-member-function-const,
+  readability-redundant-*,
+  readability-simplify-boolean-expr
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/.*/include/bridger/.*'
+FormatStyle: file
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase,        value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,            value: CamelCase  }
+  - { key: readability-identifier-naming.StructCase,           value: CamelCase  }
+  - { key: readability-identifier-naming.EnumCase,             value: CamelCase  }
+  - { key: readability-identifier-naming.EnumConstantCase,     value: CamelCase  }
+  - { key: readability-identifier-naming.FunctionCase,         value: lower_case }
+  - { key: readability-identifier-naming.VariableCase,         value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase,        value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,  value: _          }
+  - { key: readability-identifier-naming.ConstexprVariableCase,   value: CamelCase }
+  - { key: readability-identifier-naming.ConstexprVariablePrefix, value: k         }
+  - { key: readability-implicit-bool-conversion.AllowPointerConditions, value: true }

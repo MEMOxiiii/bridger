@@ -1,0 +1,29 @@
+# Build output
+/build/
+/out/
+CMakeUserPresets.json
+
+# vcpkg
+/vcpkg_installed/
+
+# IDEs
+/.vs/
+/.vscode/
+/.idea/
+*.user
+*.suo
+
+# Fuzzing artifacts
+crash-*
+leak-*
+timeout-*
+oom-*
+/fuzz/corpus/
+
+# Test outputs and large local worlds (integration tests take paths from env vars)
+/tests/integration/data/
+*.mcworld.tmp
+*.bridger-tmp
+
+# Profiling
+*.tracy

@@ -1,0 +1,37 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+IndentCaseLabels: false
+NamespaceIndentation: None
+FixNamespaceComments: true
+PointerAlignment: Left
+ReferenceAlignment: Left
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBraces: Attach
+SpaceBeforeCpp11BracedList: false
+Cpp11BracedListStyle: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  # 1. Own module headers
+  - Regex: '^<bridger/'
+    Priority: 2
+  # 2. Third-party headers (contain a slash or a dot)
+  - Regex: '^<.*[/.].*>'
+    Priority: 3
+  # 3. Standard library
+  - Regex: '^<[a-z_]+>'
+    Priority: 4
+  # 0. Local quoted headers (main header first)
+  - Regex: '^".*"'
+    Priority: 1
+SortIncludes: CaseSensitive

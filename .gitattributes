@@ -1,0 +1,20 @@
+# Normalize text files to LF in the repository.
+* text=auto eol=lf
+
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary test data and Minecraft formats — never touch line endings.
+*.nbt         binary
+*.schem       binary
+*.schematic   binary
+*.litematic   binary
+*.mcstructure binary
+*.mcworld     binary
+*.mca         binary
+*.dat         binary
+*.ldb         binary
+*.brmap       binary
+*.spv         binary
+*.png         binary
+*.zip         binary
