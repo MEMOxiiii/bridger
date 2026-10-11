@@ -10,10 +10,7 @@ function(bridger_set_warnings target)
             /permissive-
             /utf-8
             /Zc:__cplusplus
-            /Zc:preprocessor
             /Zc:inline
-            /external:anglebrackets
-            /external:W0
             /w14242  # conversion, possible loss of data
             /w14254  # larger bit field to smaller
             /w14263  # member function does not override base virtual
@@ -28,7 +25,12 @@ function(bridger_set_warnings target)
             /w14905 /w14906  # string literal casts
             /w14928  # illegal copy-initialization
         )
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            # MSVC-only: conforming preprocessor; no warnings from <angle-bracket> (third-party) headers.
+            # clang-cl rejects these as unused arguments (fatal under /WX); it already treats
+            # -imsvc (vcpkg) include paths as system headers.
+            target_compile_options(${target} PRIVATE /Zc:preprocessor /external:anglebrackets /external:W0)
+        else()
             # clang-cl understands most MSVC flags; add the clang-specific ones it lacks.
             target_compile_options(${target} PRIVATE
                 -Wno-c++98-compat -Wno-c++98-compat-pedantic
