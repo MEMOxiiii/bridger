@@ -1,0 +1,52 @@
+# Third-party components
+
+Every dependency is listed here with its license and the reason it is used. Licenses were taken from each
+package's vcpkg port metadata (baseline `2026.07.29`) and the upstream repository. Check them again whenever a
+dependency is added or upgraded.
+
+"Shipped" means the component's code ends up in a Bridger release binary. Build/test-only tools are not
+distributed. Release zips include the license texts of all shipped components (`docs/release.md`).
+
+## Libraries (vcpkg)
+
+| Component | Version | License | Shipped | Used for |
+|---|---|---|---|---|
+| [libdeflate](https://github.com/ebiggers/libdeflate) | 1.25 | MIT | yes | Fast whole-buffer deflate/zlib/gzip for chunks and NBT |
+| [minizip-ng](https://github.com/zlib-ng/minizip-ng) | 4.1.0 | Zlib | yes | Reading/writing `.mcworld` zips and Minecraft `.jar` files. Built with the `zlib` feature only (no bzip2/lzma/zstd/crypto: not needed for these formats) |
+| [zlib](https://www.zlib.net/) | 1.3.2 | Zlib | yes | Required by leveldb-mcpe (Bedrock's raw-deflate block compression) and minizip-ng |
+| [oneTBB](https://github.com/oneapi-src/oneTBB) | 2023.1.0 | Apache-2.0 | yes | Parallel pipeline: task arena, `parallel_for`, concurrent containers |
+| [tl-expected](https://github.com/TartanLlama/expected) | 1.3.1 | CC0-1.0 | yes | `bridger::Result<T>` |
+| [xxHash](https://github.com/Cyan4973/xxHash) | 0.8.3 | BSD-2-Clause | yes | Registry interning, cache keys |
+| [spdlog](https://github.com/gabime/spdlog) | 1.17.0 | MIT | yes | Logging |
+| [{fmt}](https://github.com/fmtlib/fmt) | (spdlog dependency) | MIT | yes | Formatting backend of spdlog |
+| [CLI11](https://github.com/CLIUtils/CLI11) | 2.6.2 | BSD-3-Clause | yes | CLI argument parsing |
+| [SDL3](https://www.libsdl.org) | 3.4.12 | Zlib AND MIT AND Apache-2.0 | yes (app) | Windowing, input, file dialogs |
+| [Dear ImGui](https://github.com/ocornut/imgui) (docking) | 1.92.8 | MIT | yes (app) | Desktop UI |
+| [volk](https://github.com/zeux/volk) | 1.4.350.1 | MIT | yes (app) | Vulkan function loader |
+| [vk-bootstrap](https://github.com/charles-lunarg/vk-bootstrap) | 1.4.350 | MIT | yes (app) | Vulkan instance/device setup |
+| [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) | 3.4.0 | MIT | yes (app) | GPU memory allocation |
+| [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) | 1.4.350 | Apache-2.0 OR MIT | yes (headers) | Vulkan API declarations |
+| [Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) | 1.4.350.1 | Apache-2.0 | **no** | Pulled in by imgui's Vulkan backend port. `vulkan-1.dll` is never shipped; the GPU driver provides it |
+| [GLM](https://glm.g-truc.net) | 1.0.3 | MIT | yes | Math |
+| [stb](https://github.com/nothings/stb) (`stb_image`, `stb_image_write`) | 2024-07-29 | MIT OR Public Domain | yes | Loading textures from the user's resource packs, writing screenshots |
+| [nlohmann/json](https://github.com/nlohmann/json) | 3.12.0 | MIT | yes | Resource-pack blockstate/model JSON (render), mapping generator. Never in conversion hot paths |
+| [glslang](https://github.com/KhronosGroup/glslang) | 16.4.0 | BSD-3-Clause, BSD-2-Clause, MIT, Apache-2.0 (mixed; see upstream `LICENSE.txt`) | no (build tool) | GLSL → SPIR-V at build time |
+| [Catch2](https://github.com/catchorg/Catch2) | 3.15.3 | BSL-1.0 | no (tests) | Unit tests |
+| [Google Benchmark](https://github.com/google/benchmark) | 1.9.5 | Apache-2.0 | no (bench) | Benchmarks |
+| [Tracy](https://github.com/wolfpld/tracy) | 0.13.1 | BSD-3-Clause | only with `BRIDGER_ENABLE_TRACY=ON` (never in releases) | Profiling |
+
+## Git submodules
+
+| Component | Commit | License | Shipped | Used for |
+|---|---|---|---|---|
+| [leveldb-mcpe (Amulet-Team fork)](https://github.com/Amulet-Team/leveldb-mcpe) | `4846fc7` (2024-11-22) | BSD-3-Clause (Google LevelDB authors; Mojang modifications) | yes | Reading/writing Bedrock world databases. Mojang's original `Mojang/leveldb-mcpe` repository is no longer available (HTTP 404, checked 2026-10-11); see `docs/adr/0004-leveldb-mcpe-fork.md` |
+
+## Data
+
+No third-party data is included yet. Mapping data sources (Phase 3) will be listed here with their licenses
+before use.
+
+## Minecraft assets
+
+Bridger does **not** include or distribute any Mojang assets (textures, models, sounds, block data files). The
+viewer loads them at runtime from the user's own Minecraft installation or a resource pack the user provides.
