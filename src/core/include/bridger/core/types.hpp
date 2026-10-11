@@ -22,6 +22,11 @@ using usize = std::size_t;
 
 static_assert(sizeof(f32) == 4 && sizeof(f64) == 8, "IEEE-754 float sizes required");
 
+enum class Edition : u8 { Java, Bedrock };
+
+// Byte order of binary data (Java NBT is big-endian, Bedrock NBT little-endian).
+enum class Endian : u8 { Big, Little };
+
 // Edge length of a section (16x16x16 blocks), shared by both editions.
 inline constexpr i32 kSectionSize = 16;
 

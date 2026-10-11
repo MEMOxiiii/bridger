@@ -45,7 +45,7 @@
     },
     "tests": {
       "description": "Unit tests",
-      "dependencies": ["catch2"]
+      "dependencies": ["catch2", "nlohmann-json"]
     },
     "benchmarks": {
       "description": "Benchmarks",

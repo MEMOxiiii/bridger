@@ -24,4 +24,9 @@ namespace bridger::platform {
 // to an absolute, normalized path. Elsewhere: returns the absolute path unchanged.
 [[nodiscard]] Result<std::filesystem::path> to_long_path(const std::filesystem::path& path);
 
+// "<dir>/<name>.<16 random hex digits>.<suffix>" in the same directory as `path`,
+// so a later rename never crosses volumes. Does not touch the file system.
+[[nodiscard]] Result<std::filesystem::path> sibling_temp_path(const std::filesystem::path& path,
+                                                              std::string_view suffix);
+
 } // namespace bridger::platform

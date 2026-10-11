@@ -20,6 +20,7 @@ enum class ErrorCode : u16 {
     NotImplemented,
     // I/O and platform
     FileNotFound,
+    AlreadyExists,
     AccessDenied,
     IoError,
     // Data

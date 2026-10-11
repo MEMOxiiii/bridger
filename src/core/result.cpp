@@ -10,6 +10,7 @@ std::string_view to_string(ErrorCode code) noexcept {
     case ErrorCode::InvalidArgument: return "invalid argument";
     case ErrorCode::NotImplemented: return "not implemented";
     case ErrorCode::FileNotFound: return "file not found";
+    case ErrorCode::AlreadyExists: return "already exists";
     case ErrorCode::AccessDenied: return "access denied";
     case ErrorCode::IoError: return "I/O error";
     case ErrorCode::UnexpectedEof: return "unexpected end of data";
