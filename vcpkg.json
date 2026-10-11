@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "bridger",
+  "version-semver": "0.1.0",
+  "description": "High-performance Minecraft format converter and 3D viewer",
+  "license": "MPL-2.0",
+  "dependencies": [
+    {
+      "name": "libdeflate",
+      "default-features": false,
+      "features": ["compression", "decompression", "gzip", "zlib"]
+    },
+    {
+      "name": "minizip-ng",
+      "default-features": false,
+      "features": ["zlib"]
+    },
+    "zlib",
+    "tbb",
+    "tl-expected",
+    "xxhash",
+    "spdlog",
+    "cli11",
+    "sdl3",
+    {
+      "name": "imgui",
+      "features": ["docking-experimental", "sdl3-binding", "vulkan-binding"]
+    },
+    "volk",
+    "vk-bootstrap",
+    "vulkan-memory-allocator",
+    {
+      "name": "glslang",
+      "features": ["tools"]
+    },
+    "glm",
+    "stb",
+    "nlohmann-json",
+    "catch2",
+    "benchmark",
+    "tracy"
+  ]
+}
