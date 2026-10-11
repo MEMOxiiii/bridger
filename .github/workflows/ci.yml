@@ -107,8 +107,14 @@ jobs:
         if: matrix.fuzz
         shell: pwsh
         run: |
+          # Seeds per target (read-only); new inputs go to a scratch corpus dir.
+          $seeds = @{ nbt = @('tests/data/nbt'); schem = @('tests/data/schem', 'tests/data/schem/malformed') }
           Get-ChildItem build/${{ matrix.preset }}/bin/bridger_fuzz_*.exe | ForEach-Object {
-            & $_.FullName -max_total_time=30 -print_final_stats=1
+            $name = $_.BaseName -replace '^bridger_fuzz_', ''
+            $corpus = "fuzz-corpus/$name"
+            New-Item -ItemType Directory -Force $corpus | Out-Null
+            $extra = if ($seeds.ContainsKey($name)) { $seeds[$name] } else { @() }
+            & $_.FullName $corpus @extra -max_total_time=30 -print_final_stats=1 2>&1 | Tee-Object -Append ci-step.log
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
