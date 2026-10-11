@@ -113,8 +113,10 @@ jobs:
             $name = $_.BaseName -replace '^bridger_fuzz_', ''
             $corpus = "fuzz-corpus/$name"
             New-Item -ItemType Directory -Force $corpus | Out-Null
-            $extra = if ($seeds.ContainsKey($name)) { $seeds[$name] } else { @() }
-            & $_.FullName $corpus @extra -max_total_time=30 -print_final_stats=1 2>&1 | Tee-Object -Append ci-step.log
+            # Arrays passed to a native command expand to one argument per element.
+            [string[]]$extra = @()
+            if ($seeds.ContainsKey($name)) { $extra = $seeds[$name] }
+            & $_.FullName $corpus $extra -max_total_time=30 -print_final_stats=1 2>&1 | Tee-Object -Append ci-step.log
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
