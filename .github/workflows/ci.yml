@@ -13,7 +13,9 @@ concurrency:
 env:
   # Keep in sync with vcpkg-configuration.json ("reference").
   VCPKG_TAG: "2026.07.29"
-  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  # Not VCPKG_ROOT: the VS developer environment overwrites that with VS's bundled
+  # (too old) vcpkg. The bootstrap step exports VCPKG_ROOT after msvc-dev-cmd runs.
+  BRIDGER_VCPKG_DIR: ${{ github.workspace }}/vcpkg
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-binary-cache
   VCPKG_DISABLE_METRICS: "1"
 
@@ -60,8 +62,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
-          git clone --depth 1 --branch $env:VCPKG_TAG https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          "VCPKG_ROOT before override: $env:VCPKG_ROOT" | Tee-Object -Append ci-step.log
+          git -c advice.detachedHead=false clone --depth 1 --branch $env:VCPKG_TAG https://github.com/microsoft/vcpkg.git $env:BRIDGER_VCPKG_DIR 2>&1 | Tee-Object -Append ci-step.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:BRIDGER_VCPKG_DIR\bootstrap-vcpkg.bat" -disableMetrics 2>&1 | Tee-Object -Append ci-step.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_ROOT=$env:BRIDGER_VCPKG_DIR" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Check clang-cl
         if: startsWith(matrix.preset, 'clangcl')
@@ -69,14 +75,23 @@ jobs:
         run: clang-cl --version
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        shell: pwsh
+        run: |
+          cmake --preset ${{ matrix.preset }} 2>&1 | Tee-Object -Append ci-step.log
+          exit $LASTEXITCODE
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        shell: pwsh
+        run: |
+          cmake --build --preset ${{ matrix.preset }} 2>&1 | Tee-Object -Append ci-step.log
+          exit $LASTEXITCODE
 
       - name: Test
         if: matrix.test
-        run: ctest --preset ${{ matrix.preset }}
+        shell: pwsh
+        run: |
+          ctest --preset ${{ matrix.preset }} 2>&1 | Tee-Object -Append ci-step.log
+          exit $LASTEXITCODE
 
       - name: Benchmark smoke run
         if: matrix.bench
@@ -96,12 +111,27 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      # Job logs need a signed-in account; annotations are public. Surface the error lines.
+      - name: Report failure as annotation
+        if: failure()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ci-step.log)) { "::error title=${{ matrix.preset }}::failed before any logged step"; exit 0 }
+          $lines = Get-Content ci-step.log
+          $hits = $lines | Select-String -Pattern 'error|FAILED|fatal|not found|denied' | Select-Object -Last 25 | ForEach-Object { $_.Line }
+          $tail = $lines | Select-Object -Last 25
+          foreach ($pair in @(@('errors', $hits), @('log tail', $tail))) {
+            $msg = (($pair[1] -join "`n") -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A')
+            if ($msg.Length -gt 3500) { $msg = $msg.Substring($msg.Length - 3500) }
+            "::error title=${{ matrix.preset }} ($($pair[0]))::$msg"
+          }
+
       - name: Upload vcpkg logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: vcpkg-logs-${{ matrix.preset }}
           path: |
-            ${{ env.VCPKG_ROOT }}/buildtrees/**/*.log
+            ${{ env.BRIDGER_VCPKG_DIR }}/buildtrees/**/*.log
             build/${{ matrix.preset }}/vcpkg-manifest-install.log
           if-no-files-found: ignore
