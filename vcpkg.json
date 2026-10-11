@@ -20,24 +20,40 @@
     "tl-expected",
     "xxhash",
     "spdlog",
-    "cli11",
-    "sdl3",
-    {
-      "name": "imgui",
-      "features": ["docking-experimental", "sdl3-binding", "vulkan-binding"]
+    "cli11"
+  ],
+  "default-features": ["render", "app", "tests", "benchmarks", "tracy"],
+  "features": {
+    "render": {
+      "description": "Vulkan renderer (bridger_render)",
+      "dependencies": [
+        "volk",
+        "vk-bootstrap",
+        "vulkan-memory-allocator",
+        { "name": "glslang", "features": ["tools"] },
+        "glm",
+        "stb",
+        "nlohmann-json"
+      ]
     },
-    "volk",
-    "vk-bootstrap",
-    "vulkan-memory-allocator",
-    {
-      "name": "glslang",
-      "features": ["tools"]
+    "app": {
+      "description": "Desktop app (bridger-gui.exe)",
+      "dependencies": [
+        "sdl3",
+        { "name": "imgui", "features": ["docking-experimental", "sdl3-binding", "vulkan-binding"] }
+      ]
     },
-    "glm",
-    "stb",
-    "nlohmann-json",
-    "catch2",
-    "benchmark",
-    "tracy"
-  ]
+    "tests": {
+      "description": "Unit tests",
+      "dependencies": ["catch2"]
+    },
+    "benchmarks": {
+      "description": "Benchmarks",
+      "dependencies": ["benchmark"]
+    },
+    "tracy": {
+      "description": "Tracy profiler client (used with BRIDGER_ENABLE_TRACY=ON)",
+      "dependencies": ["tracy"]
+    }
+  }
 }

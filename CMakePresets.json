@@ -62,7 +62,12 @@
       "inherits": "clangcl",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build/vcpkg_installed_static",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
         "BRIDGER_BUILD_FUZZERS": "ON",
+        "BRIDGER_BUILD_CLI": "OFF",
         "BRIDGER_BUILD_TESTS": "OFF",
         "BRIDGER_BUILD_BENCHMARKS": "OFF",
         "BRIDGER_BUILD_APP": "OFF",
