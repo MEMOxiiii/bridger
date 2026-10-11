@@ -1,8 +1,9 @@
 // bridger.exe — command-line interface.
 //
-// Phase 0: only `--version` and `formats` work. `info` (Phase 2) and `convert`
-// (Phase 4) are registered so their interface is visible, but they report
+// `convert` (Phase 4) is registered so its interface is visible, but it reports
 // "not implemented" instead of pretending to work.
+
+#include "commands/commands.hpp"
 
 #include <bridger/core/log.hpp>
 #include <bridger/core/result.hpp>
@@ -16,9 +17,9 @@
 
 namespace {
 
-constexpr int kExitOk = 0;
-constexpr int kExitError = 1;
-constexpr int kExitNotImplemented = 3;
+using bridger::cli::kExitError;
+using bridger::cli::kExitNotImplemented;
+using bridger::cli::kExitOk;
 
 int not_implemented(std::string_view command, std::string_view phase) {
     bridger::log::error("'{}' is not implemented yet (planned for {}).", command, phase);
@@ -66,7 +67,7 @@ int main(int argc, char** argv) {
         print_formats();
         return kExitOk;
     }
-    if (info_cmd->parsed()) return not_implemented("info", "Phase 2");
+    if (info_cmd->parsed()) return bridger::cli::run_info(info_input);
     if (convert_cmd->parsed()) return not_implemented("convert", "Phase 4");
     return kExitError;
 }

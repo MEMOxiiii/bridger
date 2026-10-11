@@ -1,0 +1,78 @@
+{
+ "biomes": {
+  "0,0,0": "minecraft:plains",
+  "1,0,0": "minecraft:plains",
+  "2,0,0": "minecraft:plains",
+  "3,0,0": "minecraft:desert",
+  "4,0,0": "minecraft:desert"
+ },
+ "block_entities": [
+  {
+   "id": "minecraft:chest",
+   "keys": [
+    "CustomName",
+    "Items"
+   ],
+   "pos": [
+    1,
+    1,
+    1
+   ]
+  }
+ ],
+ "data_version": 4556,
+ "entities": [
+  {
+   "id": "minecraft:armor_stand",
+   "keys": [
+    "Invisible"
+   ],
+   "pos": [
+    2.5,
+    1.0,
+    1.5
+   ]
+  }
+ ],
+ "metadata": {
+  "author": "bridger",
+  "date_ms": 1760000000000,
+  "name": "Test House",
+  "required_mods": [
+   "examplemod"
+  ]
+ },
+ "non_air": {
+  "0,0,0": "minecraft:stone",
+  "0,0,1": "minecraft:stone",
+  "0,0,2": "minecraft:stone",
+  "1,0,0": "minecraft:stone",
+  "1,0,1": "minecraft:stone",
+  "1,0,2": "minecraft:stone",
+  "1,1,1": "minecraft:chest[facing=north,type=single,waterlogged=true]",
+  "2,0,0": "minecraft:stone",
+  "2,0,1": "minecraft:stone",
+  "2,0,2": "minecraft:stone",
+  "2,1,1": "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]",
+  "3,0,0": "minecraft:stone",
+  "3,0,1": "minecraft:stone",
+  "3,0,2": "minecraft:stone",
+  "4,0,0": "minecraft:stone",
+  "4,0,1": "minecraft:stone",
+  "4,0,2": "minecraft:stone",
+  "4,3,2": "minecraft:water[level=0]"
+ },
+ "offset": [
+  1,
+  -2,
+  3
+ ],
+ "palette_size": 5,
+ "size": [
+  5,
+  4,
+  3
+ ],
+ "version": 2,
+ "warnings": 0
+}

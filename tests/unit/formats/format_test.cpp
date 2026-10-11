@@ -14,9 +14,11 @@ TEST_CASE("Formats are found by extension and name, case-insensitively", "[forma
 }
 
 TEST_CASE("Nothing claims support before it has passed acceptance", "[formats]") {
-    // Phase 0: no reader or writer exists yet. Update this test as formats ship.
+    // Update this test as formats ship. Supported requires golden tests, a fuzz target,
+    // a benchmark and (for writers) the in-game checklist.
     for (const auto& f : all_formats()) {
-        CHECK(f.read == Support::Planned);
+        CAPTURE(f.name);
+        CHECK(f.read == (f.id == FormatId::SpongeSchem ? Support::InProgress : Support::Planned));
         CHECK(f.write == Support::Planned);
         CHECK(&info(f.id) == &f);
     }

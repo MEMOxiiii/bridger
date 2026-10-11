@@ -12,7 +12,7 @@
 
 namespace bridger::formats {
 
-enum class Edition : u8 { Java, Bedrock };
+using bridger::Edition;
 
 enum class FormatId : u8 {
     LegacySchematic, // .schematic (MCEdit, numeric ids)

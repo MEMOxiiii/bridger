@@ -1,0 +1,8 @@
+{
+ "v2_no_palette": "UnsupportedFormat",
+ "v3_bad_block_entity_pos": "Malformed",
+ "v3_bad_palette_index": "Malformed",
+ "v3_long_data": "Malformed",
+ "v3_short_data": "Malformed",
+ "v4_unsupported": "UnsupportedVersion"
+}

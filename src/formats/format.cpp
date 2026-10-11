@@ -13,7 +13,7 @@ using enum Support;
 constexpr std::array kFormats{
     FormatInfo{FormatId::LegacySchematic, Edition::Java, "schematic", ".schematic",
                "MCEdit legacy schematic (numeric ids)", Planned, Planned},
-    FormatInfo{FormatId::SpongeSchem, Edition::Java, "schem", ".schem", "Sponge schematic v1-v3", Planned,
+    FormatInfo{FormatId::SpongeSchem, Edition::Java, "schem", ".schem", "Sponge schematic v1-v3", InProgress,
                Planned},
     FormatInfo{FormatId::Litematic, Edition::Java, "litematic", ".litematic", "Litematica schematic", Planned,
                Planned},
