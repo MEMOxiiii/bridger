@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with vcpkg-configuration.json ("reference").
+  VCPKG_TAG: "2026.07.29"
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-binary-cache
+  VCPKG_DISABLE_METRICS: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: windows-2022
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: msvc-asan        # unit tests under AddressSanitizer
+            test: true
+          - preset: msvc-release     # unit tests + benchmark smoke run
+            test: true
+            bench: true
+          - preset: clangcl-release  # second compiler
+            test: true
+          - preset: msvc-debug       # build only
+          - preset: clangcl-fuzz     # build fuzzers + short smoke run
+            fuzz: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-${{ matrix.preset }}
+          restore-keys: |
+            vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-
+            vcpkg-${{ env.VCPKG_TAG }}-
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          git clone --depth 1 --branch $env:VCPKG_TAG https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Check clang-cl
+        if: startsWith(matrix.preset, 'clangcl')
+        shell: pwsh
+        run: clang-cl --version
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        if: matrix.test
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Benchmark smoke run
+        if: matrix.bench
+        shell: pwsh
+        run: |
+          Get-ChildItem build/${{ matrix.preset }}/bin/bridger_bench_*.exe | ForEach-Object {
+            & $_.FullName --benchmark_min_time=0.05s
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Fuzz smoke run (30 s per target)
+        if: matrix.fuzz
+        shell: pwsh
+        run: |
+          Get-ChildItem build/${{ matrix.preset }}/bin/bridger_fuzz_*.exe | ForEach-Object {
+            & $_.FullName -max_total_time=30 -print_final_stats=1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Upload vcpkg logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs-${{ matrix.preset }}
+          path: |
+            ${{ env.VCPKG_ROOT }}/buildtrees/**/*.log
+            build/${{ matrix.preset }}/vcpkg-manifest-install.log
+          if-no-files-found: ignore
