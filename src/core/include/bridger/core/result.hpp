@@ -42,6 +42,19 @@ struct ErrorContext {
     std::string file;
     std::optional<u64> offset;
     std::optional<ChunkPos> chunk;
+
+    // Use these instead of partial designated initializers ({.offset = x}), which
+    // clang warns about (-Wmissing-designated-field-initializers).
+    [[nodiscard]] static ErrorContext at_offset(u64 offset) {
+        ErrorContext ctx;
+        ctx.offset = offset;
+        return ctx;
+    }
+    [[nodiscard]] static ErrorContext at_chunk(ChunkPos chunk) {
+        ErrorContext ctx;
+        ctx.chunk = chunk;
+        return ctx;
+    }
 };
 
 class Error {

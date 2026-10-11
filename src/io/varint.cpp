@@ -8,7 +8,8 @@ Result<Out> decode_varint(std::span<const u8> data) noexcept {
     constexpr unsigned kBits = sizeof(T) * 8;
     T value = 0;
     for (usize i = 0; i < MaxBytes; ++i) {
-        if (i >= data.size()) return make_error(ErrorCode::UnexpectedEof, "truncated varint", {.offset = i});
+        if (i >= data.size())
+            return make_error(ErrorCode::UnexpectedEof, "truncated varint", ErrorContext::at_offset(i));
         const u8 byte = data[i];
         const unsigned shift = static_cast<unsigned>(i) * 7;
         const T group = static_cast<T>(byte & 0x7F);
@@ -16,7 +17,7 @@ Result<Out> decode_varint(std::span<const u8> data) noexcept {
         if (i == MaxBytes - 1) {
             const unsigned remaining = kBits - shift;
             if ((byte & 0x80) != 0 || (group >> remaining) != 0)
-                return make_error(ErrorCode::Malformed, "varint overflows its type", {.offset = i});
+                return make_error(ErrorCode::Malformed, "varint overflows its type", ErrorContext::at_offset(i));
         }
         value |= static_cast<T>(group << shift);
         if ((byte & 0x80) == 0) return Out{value, i + 1};
