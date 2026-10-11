@@ -83,7 +83,8 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build --preset ${{ matrix.preset }} 2>&1 | Tee-Object -Append ci-step.log
+          # -k 0: keep going after a failure so one run reports every compile error.
+          cmake --build --preset ${{ matrix.preset }} -- -k 0 2>&1 | Tee-Object -Append ci-step.log
           exit $LASTEXITCODE
 
       - name: Test
@@ -118,11 +119,14 @@ jobs:
         run: |
           if (-not (Test-Path ci-step.log)) { "::error title=${{ matrix.preset }}::failed before any logged step"; exit 0 }
           $lines = Get-Content ci-step.log
-          $hits = $lines | Select-String -Pattern 'error|FAILED|fatal|not found|denied' | Select-Object -Last 25 | ForEach-Object { $_.Line }
+          # Unique compiler/linker diagnostics first (the same header error repeats per TU).
+          $hits = $lines | Select-String -Pattern 'error[ :]|FAILED|fatal|denied' |
+            ForEach-Object { $_.Line -replace '^\S*\\(src|tests|bench|fuzz|third_party)\\', '$1\' } |
+            Where-Object { $_ -notmatch '^FAILED: ' } | Select-Object -Unique | Select-Object -First 40
           $tail = $lines | Select-Object -Last 25
           foreach ($pair in @(@('errors', $hits), @('log tail', $tail))) {
             $msg = (($pair[1] -join "`n") -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A')
-            if ($msg.Length -gt 3500) { $msg = $msg.Substring($msg.Length - 3500) }
+            if ($msg.Length -gt 6000) { $msg = $msg.Substring(0, 6000) }
             "::error title=${{ matrix.preset }} ($($pair[0]))::$msg"
           }
 
