@@ -50,7 +50,9 @@ Requirements:
 ```bat
 git clone --recursive https://github.com/MEMOxiiii/bridger.git
 cd bridger
-:: from an "x64 Native Tools Command Prompt for VS 2022":
+:: from an "x64 Native Tools Command Prompt for VS 2022".
+:: Set VCPKG_ROOT *here*: the prompt points it at Visual Studio's bundled vcpkg, which is too old.
+set VCPKG_ROOT=%USERPROFILE%\vcpkg
 cmake --preset msvc-release
 cmake --build --preset msvc-release
 ctest --preset msvc-release

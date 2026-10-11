@@ -13,8 +13,10 @@ benchmark behind it. A conversion must never corrupt or silently lose user data.
 ## Commands
 
 Run these from a **VS 2022 x64 developer shell** ("x64 Native Tools Command Prompt" or "Developer PowerShell"),
-with `VCPKG_ROOT` pointing at a vcpkg checkout of tag `2026.07.29`. The first configure builds every dependency
-and takes a long time; later runs use vcpkg's binary cache.
+with `VCPKG_ROOT` pointing at a standalone vcpkg checkout of tag `2026.07.29`. **Set `VCPKG_ROOT` after the
+developer shell has started:** the shell overwrites it with the vcpkg bundled with Visual Studio, which is too
+old for this baseline. For example: `set VCPKG_ROOT=%USERPROFILE%\vcpkg`. The first configure builds every
+dependency (about 7 minutes on a 16-thread laptop); later runs use vcpkg's binary cache.
 
 | Task | Command |
 |---|---|
