@@ -23,5 +23,6 @@ These identifiers are part of the formats Bridger reads and writes. Fill them in
 
 ## Watch list
 
-- Bedrock **26.60** is planned for 2026-10-27, Java **26.4** for Q4 2026. The pin stays at 26.3 / 26.52 unless the
-  maintainer decides otherwise. Moving it is a compatibility change, so it needs approval (see `AGENTS.md`).
+- Bedrock **26.60** is planned for 2026-10-27, Java **26.4** for Q4 2026.
+- **Decision (maintainer, 2026-10-11): stay on Bedrock 26.52** (and Java 26.3) for v1. Moving the pin is a
+  compatibility change and needs the maintainer's approval (see `AGENTS.md`).

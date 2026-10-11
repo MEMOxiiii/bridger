@@ -1,16 +1,15 @@
 # Data-safety guarantees
 
-> **Status (Phase 0):** these are the guarantees Bridger is designed to provide. The atomic-replace machinery is
-> implemented and tested in Phase 1. Until a guarantee is marked **implemented** below, it is a design
-> commitment, not a fact about the shipped binary.
+> **Status (Phase 2):** a guarantee marked **implemented** below has code and tests behind it. Anything else is
+> a design commitment, not a fact about the shipped binary.
 
 | Guarantee | Status |
 |---|---|
-| Inputs are never modified | design (Phase 1) |
-| Same-directory temp file → flush → validate → atomic move | design (Phase 1) |
-| Recovery procedure on replace failure | design (Phase 1) |
-| No silent data loss (conversion report) | partial (`ConversionReport` type exists; populated from Phase 3) |
-| Untrusted-input limits | design (Phase 1 NBT, then per format) |
+| Inputs are never modified | **implemented** for readers (inputs are memory-mapped read-only); applies to writers from Phase 4 |
+| Same-directory temp file → flush → validate → atomic move | **implemented**: `platform::AtomicFileWriter` (`src/platform/atomic_replace.cpp`) |
+| Recovery procedure on replace failure | **implemented and failure-tested**: `tests/unit/platform/file_test.cpp` injects a failure at every step (create, write, flush, close, rename, each `ReplaceFileW` error code, failed restore, destination failing validation) |
+| No silent data loss (conversion report) | partial: readers report every non-fatal problem as a warning; the `ConversionReport` is populated from Phase 3 |
+| Untrusted-input limits | **implemented** for decompression, NBT and `.schem` (see `docs/formats/nbt.md`, `sponge-schem.md`); fuzzed |
 
 ## 1. Inputs are never modified
 

@@ -32,6 +32,19 @@ oracles**, and none of their code is copied.
 **Test data:** commit only files we made ourselves or are allowed to commit. Never commit Mojang assets or other
 people's worlds.
 
+- `tests/data/generate_test_data.py` writes all committed test files with **nbtlib** (an independent NBT
+  implementation, MIT), plus the expected results in `tests/golden/` computed by the script itself. Regenerate
+  with `python -m pip install nbtlib==2.0.4 && python tests/data/generate_test_data.py`. The output is
+  deterministic, so commit the results.
+- `tests/data/nbt/`: NBT reference files (big- and little-endian, plus gzip) for the byte-exact round-trip test.
+- `tests/data/schem/`: Sponge v1/v2/v3 schematics, one crossing section borders with a 300-entry palette, and
+  `malformed/` files with the expected error code in `tests/golden/schem/malformed.json`.
+
+**Fuzz budgets:** CI runs 30 s per target. Before a phase is closed, every target runs at least **60 s** locally
+with seeds (`tests/data/nbt` for `fuzz_nbt`; `tests/data/schem` and `tests/data/schem/malformed` for
+`fuzz_schem`). Phase 1–2 local run (2026-10-11): varint 336k, nbt 544k, compression 1.06M, schem 384k
+executions, no findings.
+
 ## In-game checklist
 
 The game is the final judge. A writer is not done until its output passes this checklist in the pinned game

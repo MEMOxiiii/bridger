@@ -8,7 +8,8 @@ Bridger is a Windows desktop tool, written in C++20, that converts Minecraft str
 formats (`.schem`, `.schematic`, `.litematic`, structure `.nbt`, Anvil worlds) and Bedrock formats
 (`.mcstructure`, `.mcworld`), and renders them in 3D. Speed is a core feature, and every speed claim needs a
 benchmark behind it. A conversion must never corrupt or silently lose user data.
-**Current phase: 0 (foundation).** Nothing converts yet; see `README.md` → "Format support".
+**Current phase: 2 done (NBT, safe output writing, IR, `.schem` reader).** Nothing converts yet; see `README.md` →
+"Format support". Phase 0.5 (Bedrock world spike) is pending: it needs a manual in-game check.
 
 ## Commands
 
@@ -79,8 +80,14 @@ The full planned file tree (every header per module) comes from the original bui
 additions to it are recorded here as required:
 
 - `third_party/CMakeLists.txt`: builds the leveldb-mcpe submodule as a static library (ADR 0004).
-- `bench/bench_io.cpp`: benchmarks for low-level I/O primitives (varint, endian).
-- `fuzz/fuzz_varint.cpp`: fuzz target for varint decoding.
+- `bench/bench_io.cpp`: benchmarks for low-level I/O primitives (varint, endian). `bench/bench_schem.cpp`:
+  end-to-end `.schem` reading.
+- `fuzz/fuzz_varint.cpp`, `fuzz/fuzz_compression.cpp`: fuzz targets for varint decoding and decompression.
+- `src/platform/*.cpp` (outside `win32/`): OS-independent platform logic (the atomic-commit protocol, temp
+  names). The OS calls live behind `platform::FileOps` in `win32/`.
+- `src/cli/commands/commands.hpp`: declarations shared by `main.cpp` and the command files.
+- `tests/unit/test_util.hpp`: shared test helpers. `tests/data/generate_test_data.py`: generates all committed
+  test data and the golden files with nbtlib (see `docs/testing.md`).
 - `src/platform/win32/paths_win32.cpp`: Windows implementation files carry a `_win32` suffix so their object
   files never clash with a future `posix/` twin.
 
@@ -104,6 +111,11 @@ the deliberate exceptions.)
 - All strings are UTF-8. Convert to OS paths only through `bridger::platform::path_from_utf8` / `path_to_utf8`.
   Never build a `std::filesystem::path` from a narrow string on Windows (it uses the ANSI code page).
 - Logging: use `bridger::log::*`, never spdlog directly. It writes to stderr, so stdout stays machine-readable.
+- **NBT views in loops:** never `for (x : *view.as_list())` or `*view.as_compound()`. The temporary
+  `std::optional` dies before the loop body (C++20). Use `view.items()` / `view.entries()`. ASan found this
+  in Phase 1.
+- **No recursion over untrusted nesting.** Walk trees with explicit stacks (see `docs/formats/nbt.md`). A legal
+  512-deep NBT document must not overflow the stack in any build.
 - Prefer simple, readable code; optimize where a benchmark or Tracy shows it matters. But never adopt a design
   that blocks the performance plan.
 

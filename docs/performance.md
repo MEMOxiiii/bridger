@@ -14,7 +14,8 @@
 | Area | Executable | Measures | Status |
 |---|---|---|---|
 | I/O primitives | `bridger_bench_io` | varint decode (items/s, MB/s), BE loads (MB/s) | harness only (Phase 0) |
-| NBT | `bridger_bench_nbt` | parse throughput MB/s | Phase 1 |
+| NBT | `bridger_bench_nbt` | parse / walk / materialize / write MB/s, gzip decompress | **baseline recorded** |
+| Sponge `.schem` | `bridger_bench_schem` | end-to-end read, blocks/s | **baseline recorded** |
 | Region | `bridger_bench_region` | chunks/s | Phase 5 |
 | Translation | `bridger_bench_translate` | sections/s | Phase 3 |
 | Meshing | `bridger_bench_mesher` | sections/s | Phase 7 |
@@ -37,5 +38,25 @@ are a reference point, **not targets**. Targets are set once real code exists (P
 | 2026-10-11 | Phase 0 | A | `BM_DecodeVarint32/1048576/5000` | 50.7 M items/s, 95 MiB/s |
 | 2026-10-11 | Phase 0 | A | `BM_LoadBigEndianU64` (64 KiB) | 16.9 GiB/s |
 
-Note: varint decode goes through `Result<>` once per value. Phase 2 (Sponge reader) adds a bulk decoder for
-whole arrays with a single error check, then re-measures.
+Note: `BM_DecodeVarint32` goes through `Result<>` once per value. The Sponge reader uses an inline bulk decoder
+instead (see `BM_SchemRead` below).
+
+### Phase 1–2 baselines (2026-10-11, Machine A, `msvc-release`)
+
+Synthetic inputs built inside the benchmarks: the NBT document is ~9.8 MB (20,000 block-entity compounds with
+item lists, a 4 MB byte array, a 512 KB long array); the schematic is v3, 256 × 128 × 256 = 8.4 M blocks, with
+a 64-entry palette. Medians of 3 repetitions.
+
+| Benchmark | What it measures | Result |
+|---|---|---|
+| `BM_NbtParse/0` | full validation, big-endian (zero-copy) | 1.37 GiB/s |
+| `BM_NbtParse/1` | full validation, little-endian | 1.29 GiB/s |
+| `BM_NbtParseAndWalk` | validate + visit every block entity's `Pos` | 1.08 GiB/s |
+| `BM_NbtMaterialize` | owning tree from a parsed document | 182 MiB/s |
+| `BM_NbtWrite` | owning tree → bytes | 523 MiB/s |
+| `BM_GzipDecompress` | libdeflate gzip, decompressed bytes | 613 MiB/s |
+| `BM_SchemRead/1` | `.schem` gzip file → IR structure | 54.7 ms = 155 M blocks/s |
+| `BM_SchemRead/0` | same, raw NBT (no gzip) | 39.4 ms = 217 M blocks/s |
+
+Observations, not yet acted on: materializing is ~7× slower than validating (one heap allocation per tag);
+readers should keep using views. Gzip accounts for ~30% of `.schem` read time.

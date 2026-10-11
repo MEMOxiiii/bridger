@@ -41,6 +41,12 @@ distributed. Release zips include the license texts of all shipped components (`
 |---|---|---|---|---|
 | [leveldb-mcpe (Amulet-Team fork)](https://github.com/Amulet-Team/leveldb-mcpe) | `4846fc7` (2024-11-22) | BSD-3-Clause (Google LevelDB authors; Mojang modifications) | yes | Reading/writing Bedrock world databases. Mojang's original `Mojang/leveldb-mcpe` repository is no longer available (HTTP 404, checked 2026-10-11); see `docs/adr/0004-leveldb-mcpe-fork.md` |
 
+## Tools (not shipped, not linked)
+
+| Component | Version | License | Used for |
+|---|---|---|---|
+| [nbtlib](https://github.com/vberlier/nbtlib) | 2.0.4 | MIT | `tests/data/generate_test_data.py` writes the committed test files with it, so the NBT reader is tested against an independent implementation |
+
 ## Data
 
 No third-party data is included yet. Mapping data sources (Phase 3) will be listed here with their licenses

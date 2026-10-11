@@ -9,14 +9,15 @@ is a native Windows tool written in C++20. It aims to be faster and more reliabl
 tests, benchmarks and in-game checks. It never modifies your input files, and it reports anything it could not
 convert exactly.
 
-> **Status: early development (Phase 0, foundation).** Bridger cannot convert anything yet. The first public
-> release, **0.1.0**, will convert `.schem` → new `.mcworld` from the command line.
+> **Status: early development (Phase 2).** Bridger can read Sponge `.schem` files (`bridger info`), but it
+> cannot convert anything yet. The first public release, **0.1.0**, will convert `.schem` → new `.mcworld` from
+> the command line.
 
 ## Format support
 
 | Format | Edition | Read | Write |
 |---|---|---|---|
-| `.schem` (Sponge v1–v3) | Java | planned (0.1.0) | planned (0.3.0) |
+| `.schem` (Sponge v1–v3) | Java | in progress (0.1.0) | planned (0.3.0) |
 | `.schematic` (MCEdit legacy) | Java | planned (0.2.0) | — |
 | `.litematic` | Java | planned (0.2.0) | planned (0.3.0) |
 | Structure `.nbt` | Java | planned (0.2.0) | planned (0.3.0) |
@@ -66,7 +67,7 @@ The first configure builds all dependencies with vcpkg, which takes a while. Pre
 ```text
 bridger --version
 bridger formats                                   # list formats and their support status
-bridger info <file>                               # (Phase 2)
+bridger info <file>                               # describe a .schem file (other formats later)
 bridger convert <input> <output> [options]        # (Phase 4)
     --target-version X   --fallback air|marker   --report report.json   --format <name>
     --into-world <existing.mcworld>   --place-at x,y,z   --air keep|replace
@@ -81,12 +82,19 @@ The desktop app (`bridger-gui.exe`: drag and drop, 3D preview, convert, report) 
 
 ## Performance
 
-No numbers yet. Bridger publishes only **measured** results, with machine specs and reproduction steps
-([docs/performance.md](docs/performance.md)).
+Bridger publishes only **measured** results, with machine specs and reproduction steps. The full table is in
+[docs/performance.md](docs/performance.md). Early baselines on an Intel i7-13620H laptop (`msvc-release`):
+
+| Operation | Result |
+|---|---|
+| NBT validation (zero-copy) | 1.37 GiB/s |
+| Reading a gzip `.schem` into the IR (256 × 128 × 256) | 155 M blocks/s (54.7 ms) |
+
+These measure Bridger alone. No comparison with other tools has been measured yet.
 
 ## Known limitations
 
-- Nothing converts yet (Phase 0).
+- Nothing converts yet. Only `.schem` files can be read (Phase 2).
 - Windows x64 only for now. The code keeps OS-specific parts in one module so other platforms can be added
   later.
 - One Java and one Bedrock version at a time (see above).
