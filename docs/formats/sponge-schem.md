@@ -1,6 +1,6 @@
 # Sponge schematic (`.schem`)
 
-Versions covered: **1, 2 and 3** (reading). Writing comes in Phase 6.
+Versions covered: **1, 2 and 3** (reading), **3** (writing).
 Implementation: `src/formats/java/sponge_schem.cpp`.
 
 ## Container
@@ -83,6 +83,16 @@ Read and shown by `bridger info`, not used for conversion:
 - NBT limits from `docs/formats/nbt.md`.
 - Decoding runs one 16-block-high slab at a time (memory ≈ `Width*Length*16*4` bytes) into IR sections, with no
   per-block heap allocation.
+
+## Writing (version 3)
+
+Code: `src/formats/java/java_writers.cpp`. `{"": {Schematic: {...}}}`, gzip-compressed [3]: `Version` 3,
+`DataVersion` (the pinned 5023 for translated content; a Java source keeps its own), `Width/Height/Length`
+(at most 65535, else `LimitExceeded`), `Offset`, `Metadata {Name, Author, Date}`, `Blocks {Palette, Data,
+BlockEntities [{Pos, Id, Data}]}`, `Biomes {Palette, Data}` (per block, when the structure has biomes) and an
+empty `Entities` list. Palette indices start at 0 in order of first use. The file is re-read with Bridger's reader
+and compared block by block before it is moved into place; `tests/integration/validate_java_output.py` checks it
+with nbtlib.
 
 ## Open questions
 

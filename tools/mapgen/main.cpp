@@ -20,6 +20,7 @@
 #include <iterator>
 #include <climits>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -320,7 +321,8 @@ int main(int argc, char** argv) {
     if (!args.overrides.empty() && fs::exists(args.overrides / "blocks.json")) {
         std::unordered_map<std::string, u32> java_by_string;
         for (u32 i = 0; i < java_count; ++i) java_by_string.emplace(java_state_string(java, i), i);
-        for (const json& o : read_json(args.overrides / "blocks.json").at("overrides")) {
+        const json override_file = read_json(args.overrides / "blocks.json"); // must outlive the loop
+        for (const json& o : override_file.at("overrides")) {
             if (!o.contains("comment")) die("override without a comment: " + o.dump());
             const std::string js = o.at("java");
             const auto jit = java_by_string.find(js);
@@ -405,8 +407,11 @@ int main(int argc, char** argv) {
             legacy_blocks.push_back({static_cast<u16>(id), static_cast<u8>(data), *state});
         }
         std::unordered_map<std::string, bool> item_registry;
-        if (!args.java_registries.empty())
-            for (const auto& [k, v] : read_json(args.java_registries).at("minecraft:item").at("entries").items()) item_registry[k] = true;
+        if (!args.java_registries.empty()) {
+            const json registries = read_json(args.java_registries); // must outlive the loop
+            for (const auto& [k, v] : registries.at("minecraft:item").at("entries").items()) item_registry[k] = true;
+            if (item_registry.empty()) die("registries.json has no items");
+        }
         for (const auto& [key, target] : leg.at("items").items()) {
             std::string name = target.get<std::string>();
             for (const json& r : rules.at("item_renames"))
@@ -439,6 +444,47 @@ int main(int argc, char** argv) {
             if (jb.name == palette.states[b].name) score += 100;
             for (usize p = 0; p < values.size(); ++p) score += values[p] == defaults[p] ? 1 : 0;
             if (score > best[b]) { best[b] = score; java_of_bedrock[b] = j; }
+        }
+    }
+    // Bedrock-only states (property combinations Java never produces, e.g. extra Bedrock
+    // properties): the Java state of the same-named Bedrock state with the most equal
+    // properties. Used as a lossy fallback and reported as such.
+    std::vector<std::pair<u32, u32>> nearest; // bedrock state -> java state
+    std::map<std::string, usize> no_java;      // Bedrock block names without any Java equivalent
+    std::map<std::string, std::string> reverse_overrides;
+    if (!args.overrides.empty() && fs::exists(args.overrides / "reverse_blocks.json")) {
+        const json rules = read_json(args.overrides / "reverse_blocks.json"); // must outlive the loop
+        for (const auto& [bedrock, target] : rules.at("blocks").items()) {
+            const std::string t = target.get<std::string>();
+            if (std::none_of(java.blocks.begin(), java.blocks.end(), [&](const JavaBlock& jb) { return jb.name == t; }))
+                die("reverse_blocks.json: unknown Java block " + t);
+            reverse_overrides.emplace(bedrock, t);
+        }
+    }
+    {
+        std::unordered_map<std::string, std::vector<u32>> by_name;
+        for (u32 b = 0; b < palette.states.size(); ++b) by_name[palette.states[b].name].push_back(b);
+        for (u32 b = 0; b < palette.states.size(); ++b) {
+            if (java_of_bedrock[b] != UINT32_MAX) continue;
+            const BState& s = palette.states[b];
+            int best_score = -1;
+            u32 best_java = UINT32_MAX;
+            for (const u32 o : by_name[s.name]) {
+                if (java_of_bedrock[o] == UINT32_MAX) continue;
+                int score = 0;
+                for (const BProp& p : s.props)
+                    for (const BProp& q : palette.states[o].props)
+                        if (p.key == q.key && p.type == q.type && p.ivalue == q.ivalue && p.svalue == q.svalue) ++score;
+                if (score > best_score) { best_score = score; best_java = java_of_bedrock[o]; }
+            }
+            if (best_java == UINT32_MAX) {
+                // overrides/reverse_blocks.json: a Java stand-in block (its default state).
+                if (const auto it = reverse_overrides.find(s.name); it != reverse_overrides.end())
+                    for (const JavaBlock& jb : java.blocks)
+                        if (jb.name == it->second) best_java = jb.default_state;
+            }
+            if (best_java != UINT32_MAX) nearest.emplace_back(b, best_java);
+            else ++no_java[s.name];
         }
     }
     struct ReverseItem { std::string bedrock; i16 damage; std::string java; };
@@ -503,7 +549,7 @@ int main(int argc, char** argv) {
 
     std::vector<u8>& out = blob.bytes();
     out.insert(out.end(), {'B', 'R', 'M', 'A', 'P', 0});
-    blob.u16_(2); // format version
+    blob.u16_(3); // format version
     // DataVersion and version id come from the server jar's version.json, which
     // fetch_sources.py extracts next to the generated reports.
     u32 data_version = 0;
@@ -589,6 +635,9 @@ int main(int argc, char** argv) {
     }
     blob.u32_(static_cast<u32>(reverse_biomes.size()));
     for (const auto& [id, name] : reverse_biomes) { blob.u32_(static_cast<u32>(id)); blob.u32_(blob.intern(name)); }
+    // Format 3 addition.
+    blob.u32_(static_cast<u32>(nearest.size()));
+    for (const auto& [b, j] : nearest) { blob.u32_(b); blob.u32_(j); }
 
     {
         std::ofstream f(args.out, std::ios::binary);
@@ -613,12 +662,19 @@ int main(int argc, char** argv) {
     r << "| Legacy item ids mapped to Java items | " << legacy_items.size() << " |\n";
     r << "| Bedrock states with a Java equivalent (reverse direction) | "
       << std::count_if(java_of_bedrock.begin(), java_of_bedrock.end(), [](u32 j) { return j != UINT32_MAX; }) << " of "
-      << palette.states.size() << " |\n\n";
+      << palette.states.size() << " |\n";
+    r << "| Bedrock-only states mapped to the nearest Java state (lossy, reported) | " << nearest.size() << " |\n";
+    r << "| Bedrock states without any Java equivalent (fallback block, reported) | "
+      << std::accumulate(no_java.begin(), no_java.end(), usize{0}, [](usize a, const auto& kv) { return a + kv.second; })
+      << " in " << no_java.size() << " blocks |\n\n";
     r << "Context-dependent states are decided by the context stage in `src/translate/translator.cpp` and `src/translate/block_entity_translator.cpp` (double chests, bed "
          "colors, waterlogging), not by this table.\n\n";
     r << "## Unmapped Java states\n\n";
     if (unmapped.empty()) r << "None.\n";
     for (const auto& u : unmapped) r << "- `" << u << "`\n";
+    r << "\n## Bedrock blocks without a Java equivalent\n\n";
+    if (no_java.empty()) r << "None.\n";
+    for (const auto& [name, count] : no_java) r << "- `" << name << "` (" << count << " states)\n";
     std::printf("mapped %zu / %zu, unmapped %zu, waterlogged %zu, renamed %zu, reverse reachable %zu / %zu\n", mapped,
                 java_count, unmapped.size(), waterlogged, renamed, reachable, palette.states.size());
     std::printf("wrote %s (%zu bytes)\n", args.out.string().c_str(), out.size());

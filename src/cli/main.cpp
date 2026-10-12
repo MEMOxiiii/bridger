@@ -49,13 +49,13 @@ int main(int argc, char** argv) {
     bridger::cli::ConvertArgs conv;
     auto* convert_cmd = app.add_subcommand("convert", "Convert between formats (0.1.0: .schem -> new .mcworld)");
     convert_cmd->add_option("input", conv.input, "Input file")->required();
-    convert_cmd->add_option("output", conv.output, "Output file")->required();
+    convert_cmd->add_option("output", conv.output, "Output file, or a Java world folder (no extension)")->required();
     convert_cmd->add_option("--format", conv.format, "Output format name (overrides the extension)");
     convert_cmd->add_option("--report", conv.report_path, "Write the conversion report as JSON");
     convert_cmd->add_option("--fallback", conv.fallback, "Block for unmapped states: air|marker")->capture_default_str();
     convert_cmd->add_option("--air", conv.air, "Structure air: keep|replace existing blocks")->capture_default_str();
     convert_cmd->add_option("--place-at", conv.place_at, "World position x,y,z of the structure's corner");
-    convert_cmd->add_option("--into-world", conv.into_world, "Place into a copy of an existing world (0.2.0)");
+    convert_cmd->add_option("--into-world", conv.into_world, "Place into a copy of an existing .mcworld (needs --place-at)");
     convert_cmd->add_option("--name", conv.level_name, "World name (default: input file name)");
     convert_cmd->add_flag("--clip", conv.clip, "Cut parts outside the build height (reported)");
     convert_cmd->add_flag("--shift-to-fit", conv.shift_to_fit, "Move vertically to fit the build height");

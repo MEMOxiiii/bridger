@@ -17,7 +17,7 @@
 | NBT | `bridger_bench_nbt` | parse / walk / materialize / write MB/s, gzip decompress | **baseline recorded** |
 | Sponge `.schem` | `bridger_bench_schem` | end-to-end read, blocks/s | **baseline recorded** |
 | Java chunks | `bridger_bench_anvil` | chunk decode, decode + translate + encode + store (chunks/s) | **baseline recorded** |
-| Translation | `bridger_bench_translate` | sections/s | **baseline recorded** |
+| Translation | `bridger_bench_translate` | sections/s, both directions | **baseline recorded** |
 | Meshing | `bridger_bench_mesher` | sections/s | Phase 7 |
 | End-to-end | `bridger_bench_e2e` | `.schem` → `.mcworld` on disk, incl. validation | **baseline recorded** |
 | Viewer | (in-app) | time to first frame, FPS | Phase 7 |
@@ -96,3 +96,26 @@ buffer for new worlds took the chunk phase from 9.9 s to 1.7 s; flushing the mem
 `CompactRange` took the database step from 11.4 s to 4.9 s. What remains is single-threaded deflate inside
 LevelDB: with deflate level 1 instead of the default the total was 6.0 s, but the world grew from 6.9 MB to
 10.1 MB, so the default level was kept.
+
+### Phase 6 baselines (2026-10-12, Machine A, `msvc-release`, medians of 3)
+
+| Benchmark | What it measures | Result |
+|---|---|---|
+| `BM_TranslateToJava` | Bedrock → Java of the `BM_TranslateStructure` structure (8.4 M blocks; 262 k stairs get the shape rule, waterlogged ones layer 2) | 66.2 ms = 31.3 k sections/s |
+| `BM_ChunkEncode` | Java chunk column → NBT → zlib (region writer) | 1.37 ms = 804 chunks/s |
+| `BM_ChunkDecode` (re-run) | as in Phase 5 | 0.88 ms = 1.14 k chunks/s |
+| `BM_ChunkDecodeTranslateWrite` (re-run) | as in Phase 5, now through `encode_column` + one write batch | 5.44 ms = 194 chunks/s (Phase 5: 2.54 ms; see note) |
+
+The first `BM_TranslateToJava` measured 362 ms. A per-state cache of what the neighbour rules need (rule, facing,
+half, connection flags), a cache of `with_property` results, and writing a position only when its state changed
+brought it to 66 ms.
+
+**Whole world, Bedrock → Java** (CLI, the 4096-chunk world from Phase 5 converted to `.mcworld`, then
+`bridger convert big.mcworld <folder>`): `--threads 1` 21.9 s and 24.1 s; all 16 threads between 4.3 s and 17.1 s
+over five runs. The machine ran at its 2.4 GHz base clock with other programs active during these runs, so the
+multi-threaded figure varies widely; it needs a quiet re-measurement. Reading the world's chunk list alone
+(`bridger info`) takes 1.0 s.
+
+Note: `BM_ChunkDecodeTranslateWrite` doubled between the Phase 5 and Phase 6 runs. The code path gained the
+`EncodedColumn` copy and the 64 MB write buffer, but the same noisy conditions applied; it is recorded here as
+measured and will be re-checked on a quiet machine before any claim is made.

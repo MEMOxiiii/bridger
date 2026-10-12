@@ -14,16 +14,16 @@ constexpr std::array kFormats{
     FormatInfo{FormatId::LegacySchematic, Edition::Java, "schematic", ".schematic",
                "MCEdit legacy schematic (numeric ids)", InProgress, Planned},
     FormatInfo{FormatId::SpongeSchem, Edition::Java, "schem", ".schem", "Sponge schematic v1-v3", InProgress,
-               Planned},
+               InProgress},
     FormatInfo{FormatId::Litematic, Edition::Java, "litematic", ".litematic", "Litematica schematic", InProgress,
-               Planned},
+               InProgress},
     FormatInfo{FormatId::StructureNbt, Edition::Java, "nbt", ".nbt", "Java structure block file", InProgress,
-               Planned},
-    FormatInfo{FormatId::JavaWorld, Edition::Java, "java-world", "", "Java world (Anvil)", InProgress, Planned},
+               InProgress},
+    FormatInfo{FormatId::JavaWorld, Edition::Java, "java-world", "", "Java world (Anvil)", InProgress, InProgress},
     FormatInfo{FormatId::McStructure, Edition::Bedrock, "mcstructure", ".mcstructure",
-               "Bedrock structure file", Planned, InProgress},
+               "Bedrock structure file", InProgress, InProgress},
     FormatInfo{FormatId::McWorld, Edition::Bedrock, "mcworld", ".mcworld", "Bedrock world (zipped LevelDB)",
-               Planned, InProgress},
+               InProgress, InProgress},
 };
 
 constexpr char ascii_lower(char c) noexcept { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c; }

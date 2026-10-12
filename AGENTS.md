@@ -8,8 +8,9 @@ Bridger is a Windows desktop tool, written in C++20, that converts Minecraft str
 formats (`.schem`, `.schematic`, `.litematic`, structure `.nbt`, Anvil worlds) and Bedrock formats
 (`.mcstructure`, `.mcworld`), and renders them in 3D. Speed is a core feature, and every speed claim needs a
 benchmark behind it. A conversion must never corrupt or silently lose user data.
-**Current phase: 4 implemented (`.schem` → new `.mcworld`).** All automated and independent checks pass; the
-in-game checklist (`docs/testing.md`) is the remaining gate for release 0.1.0. Phase 0.5's questions are folded
+**Current phase: 6 implemented (both directions: Java structures and worlds ⇄ `.mcstructure`/`.mcworld`, Java
+writers, placement into existing worlds).** All automated and independent checks pass; the in-game checklists
+(`docs/testing.md`) are the remaining gates for releases 0.1.0–0.3.0. Phase 0.5's questions are folded
 into that checklist (`docs/formats/bedrock-world.md`, "Open questions").
 
 ## Commands
@@ -108,6 +109,14 @@ additions to it are recorded here as required:
 - `fuzz/fuzz_java_structure.cpp` (structure `.nbt`, `.litematic`, legacy `.schematic`), `fuzz/fuzz_mcstructure.cpp`,
   `fuzz/fuzz_anvil_chunk.cpp`; `bench/bench_anvil.cpp` (chunk decode and per-chunk conversion).
 - `tests/data/javaworld/`: generated Java worlds (`generate_test_data.py`, `generate_java_world`).
+- `formats/java/java_writers.hpp` (+ `.cpp`): the `.schem`/`.nbt`/`.litematic` writers share palette and block
+  entity code, so they live in one file instead of one per reader. `formats/java/anvil/anvil_writer.hpp`: chunk,
+  region, level.dat and world_gen_settings.dat writing. `formats/bedrock/mcworld/bedrock_world_reader.hpp`.
+- `src/translate/reverse_translator.cpp`, `reverse_block_entities.cpp` (Bedrock → Java) and `tables.hpp`
+  (internal tables shared by both directions); `tools/mapgen/overrides/reverse_blocks.json`.
+- `src/core/parallel.cpp` implements `core/parallel.hpp`.
+- Round-trip tests live in `tests/unit/translate/roundtrip_test.cpp` and `tests/unit/formats/reverse_test.cpp`
+  (no `tests/roundtrip/` folder). `tests/integration/validate_java_output.py`: independent check of Java output.
 
 Module pattern: public headers in `src/<m>/include/bridger/<m>/`, `.cpp` next to them in `src/<m>/`, namespace
 `bridger::<m>`, one static library `bridger_<m>` (alias `bridger::<m>`) created by `bridger_add_module()`.

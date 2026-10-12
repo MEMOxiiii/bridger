@@ -18,11 +18,9 @@ TEST_CASE("Nothing claims support before it has passed acceptance", "[formats]")
     // a benchmark and (for writers) the in-game checklist.
     for (const auto& f : all_formats()) {
         CAPTURE(f.name);
-        const bool java_reader = f.id == FormatId::SpongeSchem || f.id == FormatId::StructureNbt ||
-                                 f.id == FormatId::Litematic || f.id == FormatId::LegacySchematic ||
-                                 f.id == FormatId::JavaWorld;
-        CHECK(f.read == (java_reader ? Support::InProgress : Support::Planned));
-        CHECK(f.write == (f.id == FormatId::McWorld || f.id == FormatId::McStructure ? Support::InProgress : Support::Planned));
+        // Phase 6: every format is read and written except legacy .schematic (read only).
+        CHECK(f.read == Support::InProgress);
+        CHECK(f.write == (f.id == FormatId::LegacySchematic ? Support::Planned : Support::InProgress));
         CHECK(&info(f.id) == &f);
     }
 }

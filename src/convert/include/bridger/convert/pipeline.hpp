@@ -6,6 +6,7 @@
 #include <bridger/convert/placement.hpp>
 #include <bridger/convert/placement_policy.hpp>
 #include <bridger/core/result.hpp>
+#include <bridger/formats/bedrock/mcstructure.hpp>
 #include <bridger/formats/format.hpp>
 #include <bridger/translate/conversion_report.hpp>
 #include <bridger/translate/translator.hpp>
@@ -45,6 +46,10 @@ struct ConvertSummary {
 };
 
 [[nodiscard]] Result<ConvertSummary> convert(const ConvertOptions& options);
+
+// Resolves a Bedrock palette entry {name, states} to its index in the pinned palette (for
+// readers of Bedrock files; also used by `bridger info`).
+[[nodiscard]] formats::bedrock::StateLookupFn bedrock_state_lookup(const translate::MappingData& mapping);
 
 // Kept for 0.1.0 callers: convert() with .schem -> new .mcworld.
 [[nodiscard]] Result<ConvertSummary> convert_schem_to_new_mcworld(const ConvertOptions& options);

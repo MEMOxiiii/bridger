@@ -61,7 +61,10 @@ Result<JavaChunk> decode_chunk(std::span<const u8> nbt, std::shared_ptr<BlockSta
     if (const auto s = root.find("Status").as_string()) out.full = (*s == "minecraft:full" || *s == "full");
 
     const NbtView sections = root.find("sections", TagType::List);
-    i32 min_sy = root.find("yPos").as_int().value_or(INT32_MAX);
+    const auto y_pos = root.find("yPos").as_int();
+    // Section Y is a Byte, so the lowest section must be too (found by fuzzing: yPos -65526).
+    if (y_pos && (*y_pos < -128 || *y_pos > 127)) return make_error(ErrorCode::Malformed, "chunk: yPos outside the section range");
+    i32 min_sy = y_pos.value_or(INT32_MAX);
     i32 max_sy = INT32_MIN;
     for (const NbtView sec : sections.items()) {
         const auto y = sec.entries().find("Y").as_byte();

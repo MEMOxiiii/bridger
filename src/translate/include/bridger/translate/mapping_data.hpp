@@ -27,6 +27,8 @@
 //   u32 bedrock_state_count, bedrock_state_count * u32 java_state        (reverse, 0xFFFFFFFF = none)
 //   u32 n, n * { u32 bedrock_item, u16 damage, u32 java_item }           (reverse items)
 //   u32 n, n * { i32 bedrock_biome_id, u32 java_biome }                  (reverse biomes)
+// Format 3 adds:
+//   u32 n, n * { u32 bedrock_state, u32 java_state }   (Bedrock-only states -> nearest Java state, lossy)
 
 #include <bridger/core/block_state.hpp>
 #include <bridger/core/result.hpp>
@@ -44,7 +46,7 @@ namespace bridger::translate {
 using JavaStateId = u32;        // Java block state id of the pinned Java version
 using BedrockStateIndex = u32;  // index into the pinned Bedrock block palette
 
-inline constexpr u16 kBrmapFormatVersion = 2;
+inline constexpr u16 kBrmapFormatVersion = 3;
 
 // Per-Java-state flags stored in the blob.
 enum MappingFlags : u8 {
@@ -116,6 +118,9 @@ public:
     // Reverse direction (Bedrock -> Java): the most natural Java state for a Bedrock state
     // (never waterlogged: layer 2 decides that), items and biomes.
     [[nodiscard]] std::optional<JavaStateId> java_of_bedrock(BedrockStateIndex b) const noexcept;
+    // For Bedrock states Java cannot express exactly (Bedrock-only property values): the Java
+    // state of the same block with the most equal properties. Callers report it as lossy.
+    [[nodiscard]] std::optional<JavaStateId> nearest_java_of_bedrock(BedrockStateIndex b) const;
     [[nodiscard]] std::optional<std::string_view> java_item_of_bedrock(std::string_view bedrock_item, i16 damage) const;
     [[nodiscard]] std::optional<std::string_view> java_biome_of_bedrock(i32 bedrock_biome) const;
     // The same Java block with one property changed (e.g. waterlogged=true); nullopt if the

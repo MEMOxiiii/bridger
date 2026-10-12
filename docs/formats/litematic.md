@@ -39,6 +39,16 @@ first, **and an index may span two longs** (unlike Anvil's 1.16+ packing). Index
 Block entity `x/y/z` are relative to the region's minimum corner. Entity `Pos` is relative to the region too;
 entities without a valid `id` or a `Pos` list of 3 doubles are skipped with a warning.
 
+## Writing
+
+Code: `src/formats/java/java_writers.cpp`. One region named after the output file at `Position {0,0,0}` with a
+positive `Size`; `Version` 7, `SubVersion` 1, `MinecraftDataVersion`; `Metadata {Name, Author, Description,
+RegionCount, TotalVolume, TotalBlocks, TimeCreated, TimeModified, EnclosingSize}`; palette with air first (as
+Litematica's container starts), entries `{id, properties}` (Litematica reads palettes through Minecraft's own
+`NbtUtils`, which in 26.3 reads that spelling); `BlockStates` packed with `max(2, bits)` bits, spanning longs;
+`TileEntities` with region-relative `x/y/z`; empty `Entities`, `PendingBlockTicks`, `PendingFluidTicks`.
+Validated by re-reading and comparing every block. Loading in Litematica itself is part of the in-game check.
+
 ## Limits we enforce on input
 
 Volume and palette limits as for other structures; `BlockStates` must hold `volume × bits` bits; every index

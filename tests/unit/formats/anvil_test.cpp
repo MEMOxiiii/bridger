@@ -251,3 +251,11 @@ TEST_CASE("A pre-1.18 Java world is refused with a clear message", "[anvil][conv
     REQUIRE_FALSE(summary);
     CHECK_FALSE(std::filesystem::exists(o.output));
 }
+
+TEST_CASE("A chunk whose yPos does not fit a section byte is refused", "[anvil][fuzz]") {
+    // Found by fuzz_anvil_chunk: yPos -65526 decoded, but could not be written back.
+    const auto bytes = test::read_file(test::data_path("javaworld/fuzz_ypos_out_of_range.nbt"));
+    const auto c = java::decode_chunk(bytes, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>());
+    REQUIRE_FALSE(c);
+    CHECK(c.error().code() == ErrorCode::Malformed);
+}

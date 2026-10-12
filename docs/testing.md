@@ -23,8 +23,17 @@ catch reads or writes in the unused capacity of a `std::string` / `std::vector` 
 ASan.
 
 **Determinism test (from Phase 3):** converting with 1 thread and with N threads must produce semantically
-identical output after decoding. Whole-world conversion is the first parallel path; `tests/unit/formats/anvil_test.cpp`
-converts the test world with 1 and 8 threads and compares every LevelDB key and value.
+identical output after decoding. Whole-world conversion is the parallel path: `tests/unit/formats/anvil_test.cpp`
+converts the test Java world with 1 and 8 threads and compares every LevelDB key and value;
+`tests/unit/formats/reverse_test.cpp` converts a Bedrock world to Java with 1 and 8 threads and compares the region
+files byte for byte.
+
+**Round trip (Phase 6):** `tests/unit/translate/roundtrip_test.cpp` translates every in-game test structure Java →
+Bedrock → Java and requires every block state, biome, block entity id and container content back unchanged (stair
+shapes excepted where the neighbours do not justify them; a separate test checks that real corners, fences and
+panes are rebuilt). `reverse_test.cpp` does the same through files (`.schem` → `.mcstructure` → `.schem`/`.nbt`/
+`.litematic`) and checks a Bedrock world → Java world conversion. (The specification's `tests/roundtrip/` folder
+is not used: round-trip tests are ordinary unit tests next to the translator.)
 
 **Independent validation:** where possible, Bridger's output is opened with an independent implementation (an
 open-source reader for that format, or raw LevelDB tools) and compared. Such tools are used **only as test
@@ -47,6 +56,10 @@ people's worlds.
   external (`.mcc`) chunks, both palette spellings, a waterlogged block, biomes, a block entity, negative chunk
   coordinates, a partially generated chunk and a Nether folder; `old_layout/` holds a pre-1.18 chunk.
 
+**Independent validation of Java output:** `tests/integration/validate_java_output.py` re-reads written `.schem`,
+`.nbt`, `.litematic` files and Java world folders with nbtlib (palette indices, packed arrays, chunk coordinates,
+block entity positions, level.dat).
+
 **Independent validation of written worlds:** `tests/integration/validate_mcworld.py` opens a `.mcworld` with
 amulet-leveldb (test oracle only) and nbtlib, decodes every subchunk itself, checks every palette entry against the
 official Bedrock palette (exact types and block version), checks that layer 2 holds only air or liquids, and
@@ -58,6 +71,7 @@ compares the counts with Bridger's `--report`. Run it on the in-game test worlds
 |---|---|---|---|
 | 2026-10-12 | `AraluenBW1.21Solo.schem` (405 × 140 × 405, 23 M blocks, v3, DataVersion 3955) | WorldEdit, provided by the maintainer | read OK (`bridger info`); converted in 2.7 s; every block state mapped; 38/38 block entities translated; independent validation passed |
 | 2026-10-12 | All 1511 structure files in the Java 26.3 server jar (`data/minecraft/structure/**.nbt`) | Mojang (read from the local jar, never committed) | every file reads and converts to `.mcstructure`; the run found that Mojang writes `{id, properties}` palette entries |
+| 2026-10-12 | `momen2.mcworld` (Bedrock world, 676 chunks, flat generator) | provided by the maintainer | `bridger info` reads it; converted to a Java world in 0.43 s: every block mapped, 38 block entities; `validate_java_output.py` passes |
 | 2026-10-12 | `containers.schem` placed into a copy of the `orientations` test world with `--into-world` | generated | source world unchanged (hash); every untouched key byte-identical; overwritten block entities reported; independent validation passed |
 
 **Fuzz budgets:** CI runs 30 s per target. Before a phase is closed, every target runs at least **60 s** locally
@@ -71,6 +85,13 @@ inputs**, no crashes: a structure `.nbt` with size 0 x 196608 x 131074 and a `.m
 (the pipeline's block count did the same). `Structure::create` now refuses a zero axis next to non-zero ones
 (regression test in `tests/unit/core/ir_test.cpp`). Second run (60 s each, `-report_slow_units=5`): java_structure
 485k, mcstructure 544k, anvil_chunk 495k, subchunk 692k, zip 95k, schem 651k, nbt 617k executions, no findings.
+Phase 6 (2026-10-12, 60 s each): `fuzz_mcstructure` now also runs Bedrock → Java translation and the `.schem` and
+`.litematic` writers on every accepted input, `fuzz_anvil_chunk` re-encodes every accepted chunk with Bridger's
+writer and requires the same blocks after decoding again, and `fuzz_subchunk` also runs the raw-palette decoder.
+The first run found one bug: a chunk with `yPos` −65526 decoded, but its sections (Y is a Byte) could not be
+written back; the decoder now refuses a `yPos` outside −128..127 (regression input
+`tests/data/javaworld/fuzz_ypos_out_of_range.nbt`). Second run: java_structure 623k, mcstructure 271k,
+anvil_chunk 45k, subchunk 370k, zip 86k, schem 384k, nbt 418k executions, no findings.
 
 ## In-game checklist
 
@@ -104,6 +125,19 @@ terrain regenerates over the structure after walking away and back.
 5. **entities**: an armor stand, an item frame with an item, a painting.
 6. **borders**: a structure crossing chunk borders (x/z) and sub-chunk borders (y), including negative
    coordinates.
+
+### Phase 5–6 additions
+
+Files in `build/ingame-test/phase56/`, made with the build under test (commands in the folder's `README.txt`):
+
+| File | Game | What to check |
+|---|---|---|
+| `containers.mcstructure`, `orientations.mcstructure` | Bedrock 26.52 | Load with a structure block (put the file in a behaviour pack's `structures/` folder or use `/structure load`): same blocks, chest contents, double chest opens as one |
+| `placed.mcworld` | Bedrock 26.52 | The `orientations` structure placed at −6, −60, 3 next to the build in the `containers` world (same chunks); both builds intact, nothing else changed |
+| `javaworld.mcworld` | Bedrock 26.52 | Converted from the generated Java test world: terrain chunks present, chest with 3 diamonds at 3, 70, 5, desert biome on the x ≥ 8 side |
+| `containers.schem`, `containers.litematic` | Java 26.3 (WorldEdit / Litematica) | Loads; same blocks and chest contents as the Bedrock world |
+| `containers.nbt`, `orientations.nbt` | Java 26.3 | Copy to `<world>/generated/minecraft/structure/` and load with a structure block: blocks, stairs (including corners), chest contents |
+| `Bridger containers` (folder) | Java 26.3 | Copy to `saves/`: the world opens; the structure and its flat ground are there; light is correct (no black areas); chests open with their items; chunks around it generate; note whether the seed in `/seed` matches the Bedrock world's |
 
 ### Procedure
 

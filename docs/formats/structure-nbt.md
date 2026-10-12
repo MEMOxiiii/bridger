@@ -32,6 +32,13 @@ both are accepted (`nbt_helpers.hpp`, `state_from_compound`). Names without a na
 `nbt` on a block entry is the block entity (its own `id`; the position comes from `pos`). Entities keep their
 `nbt` minus `id`, `Pos` and `UUID`.
 
+## Writing
+
+Code: `src/formats/java/java_writers.cpp`. Gzip-compressed: `DataVersion`, `size`, one `palette` of
+`{id, properties}` (the spelling `NbtUtils.writeBlockState` uses in the 26.3 server), `blocks` listing **every**
+position (air included, so a structure block reproduces the volume exactly) with `nbt` = block entity (`id` +
+data), and an empty `entities` list. Validated by re-reading and comparing every block.
+
 ## Limits we enforce on input
 
 Volume ≤ `max_volume`, palette ≤ `max_palette_size`, state indices inside the palette; blocks outside `size`

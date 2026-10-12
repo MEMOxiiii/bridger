@@ -24,8 +24,10 @@ struct WorldBounds {
     i32 surface_y = -61; // top block of the flat layers
 };
 
-// May replace `structure` with a clipped copy (HeightPolicy::Clip).
+// May replace `structure` with a clipped copy (HeightPolicy::Clip). `air` is the empty block
+// in the structure's id domain (kAirStateId for Java, the palette index of air for Bedrock).
 [[nodiscard]] Result<Placement> place_in_new_world(Structure& structure, const PlacementPolicy& policy,
-                                                   const WorldBounds& bounds, translate::ConversionReport& report);
+                                                   const WorldBounds& bounds, translate::ConversionReport& report,
+                                                   StateId air = kAirStateId);
 
 } // namespace bridger::convert

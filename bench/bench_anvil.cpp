@@ -3,6 +3,7 @@
 // Reported as chunks per second; a 2000 x 2000 block world is ~15 600 chunks.
 
 #include <bridger/formats/bedrock/mcworld/bedrock_world.hpp>
+#include <bridger/formats/java/anvil/anvil_writer.hpp>
 #include <bridger/formats/java/anvil/chunk_codec.hpp>
 #include <bridger/io/nbt/nbt_writer.hpp>
 #include <bridger/io/nbt/nbt_view.hpp>
@@ -110,6 +111,22 @@ void BM_ChunkDecode(benchmark::State& state) {
     state.counters["chunks/s"] = benchmark::Counter(static_cast<double>(state.iterations()), benchmark::Counter::kIsRate);
 }
 BENCHMARK(BM_ChunkDecode)->Unit(benchmark::kMillisecond);
+
+// Java chunk writing (Bedrock world -> Java world): encode a decoded column back to NBT and
+// zlib-compress it as the region writer does.
+void BM_ChunkEncode(benchmark::State& state) {
+    const auto chunk = make_chunk();
+    const auto decoded = formats::java::decode_chunk(chunk, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>()).value();
+    for (auto _ : state) {
+        auto nbt = formats::java::encode_chunk(decoded.column, decoded.pos, decoded.min_y, 5023);
+        if (!nbt) state.SkipWithError("encode failed");
+        formats::java::RegionWriter region(0, 0);
+        if (!region.add(0, 0, *nbt)) state.SkipWithError("compress failed");
+        benchmark::DoNotOptimize(region);
+    }
+    state.counters["chunks/s"] = benchmark::Counter(static_cast<double>(state.iterations()), benchmark::Counter::kIsRate);
+}
+BENCHMARK(BM_ChunkEncode)->Unit(benchmark::kMillisecond);
 
 void BM_ChunkDecodeTranslateWrite(benchmark::State& state) {
     const auto chunk = make_chunk();

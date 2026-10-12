@@ -53,4 +53,22 @@ void BM_TranslateStructure(benchmark::State& state) {
 }
 BENCHMARK(BM_TranslateStructure)->Unit(benchmark::kMillisecond);
 
+// Bedrock -> Java on the Bedrock form of the same structure: palette stage, layer 2 ->
+// waterlogged, and the stair-shape context rule at every stair.
+void BM_TranslateToJava(benchmark::State& state) {
+    const Structure java = make_java_structure();
+    const auto* mapping = translate::MappingData::embedded().value();
+    translate::ConversionReport forward;
+    const Structure bedrock = translate::translate_to_bedrock(java, *mapping, {}, forward).value();
+    for (auto _ : state) {
+        translate::ConversionReport report;
+        auto out = translate::translate_to_java(bedrock, *mapping, {}, report);
+        benchmark::DoNotOptimize(out);
+    }
+    const auto sections = static_cast<i64>(java.sections_x()) * java.sections_y() * java.sections_z();
+    state.SetItemsProcessed(static_cast<i64>(state.iterations()) * sections);
+    state.SetLabel("items = sections (16^3), 8.4M blocks");
+}
+BENCHMARK(BM_TranslateToJava)->Unit(benchmark::kMillisecond);
+
 } // namespace

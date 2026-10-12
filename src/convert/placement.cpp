@@ -6,10 +6,13 @@ namespace bridger::convert {
 namespace {
 
 // Copy of `s` restricted to local y in [y_begin, y_end), counting dropped non-air blocks.
-Result<Structure> clip_y(const Structure& s, u32 y_begin, u32 y_end, translate::ConversionReport& report) {
+Result<Structure> clip_y(const Structure& s, u32 y_begin, u32 y_end, StateId air, translate::ConversionReport& report) {
     const Extent size = s.size();
     BRIDGER_TRY(Structure out, Structure::create(s.block_registry_ptr(), s.biome_registry_ptr(),
                                                  Extent{size.x, y_end - y_begin, size.z}, s.source()));
+    for (u32 sy = 0; sy < out.sections_y(); ++sy) // `air` is not 0 in the Bedrock id domain
+        for (u32 sz = 0; sz < out.sections_z(); ++sz)
+            for (u32 sx = 0; sx < out.sections_x(); ++sx) out.section(sx, sy, sz).blocks().fill(air);
     out.offset = s.offset;
     out.metadata = s.metadata;
     for (u32 y = 0; y < size.y; ++y)
@@ -18,7 +21,7 @@ Result<Structure> clip_y(const Structure& s, u32 y_begin, u32 y_end, translate::
                 const BlockPos p{static_cast<i32>(x), static_cast<i32>(y), static_cast<i32>(z)};
                 const StateId block = s.block(p);
                 if (y < y_begin || y >= y_end) {
-                    if (block != kAirStateId) report.add(translate::IssueKind::ClippedBlock, "block outside build height", p);
+                    if (block != air) report.add(translate::IssueKind::ClippedBlock, "block outside build height", p);
                     continue;
                 }
                 const BlockPos q{p.x, static_cast<i32>(y - y_begin), p.z};
@@ -42,7 +45,7 @@ Result<Structure> clip_y(const Structure& s, u32 y_begin, u32 y_end, translate::
 } // namespace
 
 Result<Placement> place_in_new_world(Structure& structure, const PlacementPolicy& policy, const WorldBounds& bounds,
-                                     translate::ConversionReport& report) {
+                                     translate::ConversionReport& report, StateId air) {
     const Extent size = structure.size();
     Placement p;
     if (policy.place_at) {
@@ -75,7 +78,7 @@ Result<Placement> place_in_new_world(Structure& structure, const PlacementPolicy
         case HeightPolicy::Clip: {
             const u32 y_begin = below > 0 ? static_cast<u32>(below) : 0u;
             const u32 y_end = above > 0 ? static_cast<u32>(height - above) : static_cast<u32>(height);
-            BRIDGER_TRY(structure, clip_y(structure, y_begin, y_end, report));
+            BRIDGER_TRY(structure, clip_y(structure, y_begin, y_end, air, report));
             p.origin.y += static_cast<i32>(y_begin);
             break;
         }

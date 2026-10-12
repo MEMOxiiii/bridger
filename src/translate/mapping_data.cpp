@@ -89,6 +89,7 @@ struct MappingData::Index {
     std::vector<u32> java_of_bedrock;
     std::unordered_map<std::string, std::string_view> reverse_items; // "<bedrock>|<damage>"
     std::unordered_map<i32, std::string_view> reverse_biomes;
+    std::unordered_map<u32, JavaStateId> nearest_java; // Bedrock-only states -> nearest Java state (lossy)
 };
 
 namespace {
@@ -241,6 +242,12 @@ Result<MappingData> MappingData::load(std::span<const u8> blob) {
         const auto id = static_cast<i32>(r.u32_());
         ix.reverse_biomes.emplace(id, str(r.u32_()));
     }
+    const u32 nearest_count = r.u32_();
+    for (u32 i = 0; i < nearest_count && r.ok(); ++i) {
+        const u32 b = r.u32_(), j = r.u32_();
+        if (b >= bedrock_count || j >= java_count) return bad("nearest-state entry out of range");
+        ix.nearest_java.emplace(b, j);
+    }
     if (!r.ok()) return bad("truncated");
     return m;
 }
@@ -329,6 +336,11 @@ std::optional<std::string_view> MappingData::java_item_of_bedrock(std::string_vi
         it != index_->reverse_items.end())
         return it->second;
     if (damage != 0) return java_item_of_bedrock(bedrock_item, 0); // on tools Damage is durability
+    return std::nullopt;
+}
+
+std::optional<JavaStateId> MappingData::nearest_java_of_bedrock(BedrockStateIndex b) const {
+    if (const auto it = index_->nearest_java.find(b); it != index_->nearest_java.end()) return it->second;
     return std::nullopt;
 }
 

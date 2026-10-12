@@ -31,7 +31,8 @@ Block index order is **z fastest, then y, then x**: `index = (x * sizeY + y) * s
 
 ## Reading
 
-Palette entries are matched against the pinned palette; unknown entries become air and each distinct name is
+Block entity positions are dropped (the block's index gives its position); `pairx`/`pairz`, which the game saves in
+world coordinates like `x/y/z`, are made structure-local by subtracting `structure_world_origin`. Palette entries are matched against the pinned palette; unknown entries become air and each distinct name is
 reported. Structure-void positions are read as air and counted. More than two layers: the extra layers are
 ignored with a warning.
 

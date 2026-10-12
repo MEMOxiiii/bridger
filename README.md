@@ -9,22 +9,23 @@ is a native Windows tool written in C++20. It aims to be faster and more reliabl
 tests, benchmarks and in-game checks. It never modifies your input files, and it reports anything it could not
 convert exactly.
 
-> **Status: early development (Phase 5).** `bridger convert` turns Java schematics (`.schem`, `.litematic`,
-> structure `.nbt`, legacy `.schematic`) and whole Java worlds into Bedrock worlds (`.mcworld`) or `.mcstructure`
-> files, and can place a structure into a copy of an existing Bedrock world. Everything passes the automated and
-> independent checks; the in-game checks that gate the releases (**0.1.0**, **0.2.0**) are pending.
+> **Status: early development (Phase 6).** `bridger convert` works in both directions: Java schematics
+> (`.schem`, `.litematic`, structure `.nbt`, legacy `.schematic`) and whole Java worlds become Bedrock worlds
+> (`.mcworld`) or `.mcstructure` files, a structure can be placed into a copy of an existing Bedrock world, and
+> `.mcstructure` files and Bedrock worlds become Java schematics and Java worlds. Everything passes the automated
+> and independent checks; the in-game checks that gate the releases (**0.1.0**–**0.3.0**) are pending.
 
 ## Format support
 
 | Format | Edition | Read | Write |
 |---|---|---|---|
-| `.schem` (Sponge v1–v3) | Java | in progress (0.1.0) | planned (0.3.0) |
+| `.schem` (Sponge v1–v3; writes v3) | Java | in progress (0.1.0) | in progress (0.3.0) |
 | `.schematic` (MCEdit legacy) | Java | in progress (0.2.0) | — |
-| `.litematic` | Java | in progress (0.2.0) | planned (0.3.0) |
-| Structure `.nbt` | Java | in progress (0.2.0) | planned (0.3.0) |
-| Java world (Anvil, 1.18+ layout, Overworld) | Java | in progress (0.2.0) | planned (0.3.0) |
-| `.mcstructure` | Bedrock | planned (0.3.0) | in progress (0.2.0) |
-| `.mcworld` (new world) | Bedrock | planned (0.3.0) | in progress (**0.1.0**, pending in-game check) |
+| `.litematic` | Java | in progress (0.2.0) | in progress (0.3.0) |
+| Structure `.nbt` | Java | in progress (0.2.0) | in progress (0.3.0) |
+| Java world (Anvil, 1.18+ layout, Overworld) | Java | in progress (0.2.0) | in progress (0.3.0) |
+| `.mcstructure` | Bedrock | in progress (0.3.0) | in progress (0.2.0) |
+| `.mcworld` (new world; reading: Overworld) | Bedrock | in progress (0.3.0) | in progress (**0.1.0**, pending in-game check) |
 | `.mcworld` (place into existing world → new output) | Bedrock | — | in progress (0.2.0) |
 
 "Supported" will mean: golden tests, a fuzz target, a benchmark, and a recorded in-game check all pass. Run
@@ -68,8 +69,8 @@ The first configure builds all dependencies with vcpkg, which takes a while. Pre
 ```text
 bridger --version
 bridger formats                                   # list formats and their support status
-bridger info <file>                               # describe a .schem file (other formats later)
-bridger convert <input> <output> [options]        # Java structure or world -> .mcworld / .mcstructure
+bridger info <file or world folder>               # describe any supported structure file or world
+bridger convert <input> <output> [options]        # any supported pair; see "bridger formats"
     --target-version X   --fallback air|marker   --report report.json   --format <name>
     --into-world <existing.mcworld>   --place-at x,y,z   --air keep|replace
     --clear-entities   --clip | --shift-to-fit   --threads N   --overwrite
@@ -82,6 +83,8 @@ bridger convert castle.schem castle.mcworld --report castle-report.json
 bridger convert castle.litematic castle.mcstructure
 bridger convert "C:\saves\My Java World" my-world.mcworld
 bridger convert tower.nbt out.mcworld --into-world survival.mcworld --place-at 120,64,-40
+bridger convert house.mcstructure house.schem
+bridger convert my-bedrock-world.mcworld "C:\saves\Converted World"     # no extension: a Java world folder
 ```
 
 A structure converted to a new world is placed on a superflat world, centered on x = 0, z = 0, and the world
@@ -113,8 +116,11 @@ These measure Bridger alone. No comparison with other tools has been measured ye
 
 ## Known limitations
 
-- Java → Bedrock only so far (Bedrock → Java is planned for 0.3.0).
-- Java worlds: only the Overworld, and only worlds saved by Java 1.18 or newer.
+- Worlds: only the Overworld, in both directions; Java worlds saved by Java 1.18 or newer.
+- A Java world folder is never overwritten: the destination folder must not exist.
+- Bedrock-only blocks (Education Edition chemistry, item frames as blocks, …) have no Java equivalent: they are
+  replaced and reported. Fence and pane connections rebuilt for Java use an approximation of which blocks are
+  solid; the game corrects any wrong one on the next block update.
 - Entities (armor stands, item frames, mobs) are not written yet; they are listed in the report.
 - Item components (enchantments, custom names, durability) and text formatting are dropped and reported.
 - Only whole-world conversion uses several threads; structures are converted on one thread.

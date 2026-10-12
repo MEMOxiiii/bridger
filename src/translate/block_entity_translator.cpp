@@ -5,8 +5,9 @@
 #include <bridger/io/nbt/nbt_writer.hpp>
 #include <bridger/translate/block_entity_translator.hpp>
 
+#include "tables.hpp"
+
 #include <array>
-#include <map>
 #include <string>
 
 namespace bridger::translate {
@@ -17,10 +18,8 @@ using io::nbt::NbtView;
 using io::nbt::NbtWriter;
 using io::nbt::TagType;
 
-// Dye colors in Bedrock's numeric order (bed "color" byte).
-constexpr std::array<std::string_view, 16> kDyeColors{
-    "white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray",
-    "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"};
+using tables::kDyeColors;
+using tables::dye_index;
 
 std::optional<i8> bed_color(std::string_view block_id) {
     // "minecraft:<color>_bed"
@@ -36,19 +35,9 @@ bool is_chest(std::string_view id) { return id == "minecraft:chest" || id == "mi
 
 // Block entities written with their id only (Bedrock ids as in Chunker's handler list).
 std::optional<std::string_view> simple_marker(std::string_view java_id) {
-    static const std::map<std::string_view, std::string_view> kMarkers{
-        {"minecraft:campfire", "Campfire"},  {"minecraft:soul_campfire", "Campfire"},
-        {"minecraft:bell", "Bell"},          {"minecraft:comparator", "Comparator"},
-        {"minecraft:lectern", "Lectern"},    {"minecraft:decorated_pot", "DecoratedPot"},
-        {"minecraft:daylight_detector", "DaylightDetector"}, {"minecraft:jukebox", "Jukebox"},
-        {"minecraft:beacon", "Beacon"},      {"minecraft:conduit", "Conduit"}};
-    if (const auto it = kMarkers.find(java_id); it != kMarkers.end()) return it->second;
-    return std::nullopt;
-}
-
-std::optional<i32> dye_index(std::string_view color) {
-    for (usize i = 0; i < kDyeColors.size(); ++i)
-        if (kDyeColors[i] == color) return static_cast<i32>(i);
+    if (java_id == "minecraft:soul_campfire") return "Campfire";
+    for (const tables::Pair& m : tables::kMarkers)
+        if (m.java == java_id) return m.bedrock;
     return std::nullopt;
 }
 
@@ -63,40 +52,18 @@ std::optional<i32> banner_color(std::string_view id) {
     return dye_index(rest);
 }
 
-// Bedrock SkullType by Java block (Chunker BedrockSkullBlockEntityHandler.SKULL_TO_ID).
+// Bedrock SkullType by Java block (tables::kSkulls).
 std::optional<i8> skull_type(std::string_view id) {
-    struct Entry {
-        std::string_view floor, wall;
-        i8 type;
-    };
-    static constexpr std::array<Entry, 7> kSkulls{{{"minecraft:skeleton_skull", "minecraft:skeleton_wall_skull", 0},
-                                                  {"minecraft:wither_skeleton_skull", "minecraft:wither_skeleton_wall_skull", 1},
-                                                  {"minecraft:zombie_head", "minecraft:zombie_wall_head", 2},
-                                                  {"minecraft:player_head", "minecraft:player_wall_head", 3},
-                                                  {"minecraft:creeper_head", "minecraft:creeper_wall_head", 4},
-                                                  {"minecraft:dragon_head", "minecraft:dragon_wall_head", 5},
-                                                  {"minecraft:piglin_head", "minecraft:piglin_wall_head", 6}}};
-    for (const Entry& e : kSkulls)
+    for (const tables::Skull& e : tables::kSkulls)
         if (id == e.floor || id == e.wall) return e.type;
     return std::nullopt;
 }
 
-// Java banner pattern id -> Bedrock short code (Java ids: data/minecraft/banner_pattern in the
-// 26.3 server jar; codes and pairing: Chunker JavaBannerPatternResolver + BedrockBannerPatternResolver).
+// Java banner pattern id -> Bedrock short code (tables::kBannerPatterns).
 std::optional<std::string_view> pattern_code(std::string_view java) {
-    static const std::map<std::string_view, std::string_view> kCodes{
-        {"base", "b"}, {"square_bottom_left", "bl"}, {"square_bottom_right", "br"}, {"square_top_left", "tl"},
-        {"square_top_right", "tr"}, {"stripe_bottom", "bs"}, {"stripe_top", "ts"}, {"stripe_left", "ls"},
-        {"stripe_right", "rs"}, {"stripe_center", "cs"}, {"stripe_middle", "ms"}, {"stripe_downright", "drs"},
-        {"stripe_downleft", "dls"}, {"small_stripes", "ss"}, {"cross", "cr"}, {"straight_cross", "sc"},
-        {"triangle_bottom", "bt"}, {"triangle_top", "tt"}, {"triangles_bottom", "bts"}, {"triangles_top", "tts"},
-        {"diagonal_left", "ld"}, {"diagonal_up_right", "rd"}, {"diagonal_up_left", "lud"}, {"diagonal_right", "rud"},
-        {"circle", "mc"}, {"rhombus", "mr"}, {"half_vertical", "vh"}, {"half_horizontal", "hh"},
-        {"half_vertical_right", "vhr"}, {"half_horizontal_bottom", "hhb"}, {"border", "bo"}, {"curly_border", "cbo"},
-        {"gradient", "gra"}, {"gradient_up", "gru"}, {"bricks", "bri"}, {"globe", "glb"}, {"creeper", "cre"},
-        {"skull", "sku"}, {"flower", "flo"}, {"mojang", "moj"}, {"piglin", "pig"}, {"flow", "flw"}, {"guster", "gus"}};
     if (java.starts_with("minecraft:")) java.remove_prefix(10);
-    if (const auto it = kCodes.find(java); it != kCodes.end()) return it->second;
+    for (const tables::Pair& p : tables::kBannerPatterns)
+        if (p.java == java) return p.bedrock;
     return std::nullopt;
 }
 
@@ -110,42 +77,20 @@ std::optional<std::string> potted_plant(std::string_view id) {
     return "minecraft:" + std::string(plant);
 }
 
-// Containers whose slot layout is the same in both editions: Java id -> Bedrock id
-// (Bedrock ids as used by Chunker's block entity handlers, docs/formats/bedrock-world.md).
-// The brewing stand is not listed: its slot order differs between editions.
+// Containers whose slot layout is the same in both editions (tables::kContainers).
 std::optional<std::string_view> simple_container(std::string_view java_id) {
-    struct Entry {
-        std::string_view java, bedrock;
-    };
-    static constexpr std::array<Entry, 9> kContainers{{{"minecraft:barrel", "Barrel"},
-                                                        {"minecraft:furnace", "Furnace"},
-                                                        {"minecraft:blast_furnace", "BlastFurnace"},
-                                                        {"minecraft:smoker", "Smoker"},
-                                                        {"minecraft:hopper", "Hopper"},
-                                                        {"minecraft:dispenser", "Dispenser"},
-                                                        {"minecraft:dropper", "Dropper"},
-                                                        {"minecraft:shulker_box", "ShulkerBox"},
-                                                        {"minecraft:chest", "Chest"}}};
-    for (const Entry& e : kContainers)
+    for (const tables::Pair& e : tables::kContainers)
         if (e.java == java_id) return e.bedrock;
     if (java_id == "minecraft:trapped_chest") return "Chest"; // Bedrock stores trapped chests as "Chest"
     return std::nullopt;
 }
 
-// Bedrock pairing of a Java double chest (GeyserMC DoubleChestBlockEntityTranslator):
-// the partner is beside the chest, its side given by facing and left/right.
+// Bedrock pairing of a Java double chest (tables::chest_partner).
 std::optional<BlockPos> chest_partner(const BlockState& s, BlockPos pos) {
     const auto type = s.property("type");
     const auto facing = s.property("facing");
-    if (!type || !facing || *type == "single") return std::nullopt;
-    const bool left = *type == "left";
-    BlockPos p = pos;
-    if (*facing == "east") p.z += left ? 1 : -1;
-    else if (*facing == "west") p.z += left ? -1 : 1;
-    else if (*facing == "south") p.x += left ? -1 : 1;
-    else if (*facing == "north") p.x += left ? 1 : -1;
-    else return std::nullopt;
-    return p;
+    if (!type || !facing) return std::nullopt;
+    return tables::chest_partner(*type, *facing, pos);
 }
 
 // Plain text of a Java text component: a plain string, a JSON string (pre-1.21.5

@@ -31,6 +31,14 @@ inline constexpr std::string_view kLocalPairZ = "pairz";
 [[nodiscard]] std::optional<BlockEntity> synthesize_block_entity(BlockPos pos, JavaStateId java_state,
                                                                  const MappingData& mapping);
 
+// Bedrock -> Java: translates one Bedrock block entity (little-endian NBT) given the Java
+// state chosen for its position. The result holds big-endian Java NBT without id/x/y/z
+// (BlockEntity::id is the Java id). nullopt when Java stores the data in the block itself
+// (flower pots) or the type is not supported (recorded in `report`).
+[[nodiscard]] std::optional<BlockEntity> translate_block_entity_to_java(const BlockEntity& bedrock, JavaStateId java_state,
+                                                                        const MappingData& mapping,
+                                                                        ConversionReport& report);
+
 // True for Java states whose Bedrock form depends on more than the state itself.
 [[nodiscard]] bool is_context_dependent(std::string_view java_block_id) noexcept;
 

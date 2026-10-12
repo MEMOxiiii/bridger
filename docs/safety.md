@@ -1,6 +1,6 @@
 # Data-safety guarantees
 
-> **Status (Phase 5):** a guarantee marked **implemented** below has code and tests behind it. Anything else is
+> **Status (Phase 6):** a guarantee marked **implemented** below has code and tests behind it. Anything else is
 > a design commitment, not a fact about the shipped binary.
 
 | Guarantee | Status |
@@ -11,12 +11,14 @@
 | No silent data loss (conversion report) | **implemented** for every conversion path: unmapped blocks (with fallback), lossy data, unsupported block entities, entities (not written yet), biomes, clipped blocks, block entities/entities removed by placement; reader warnings (skipped palette variants, structure void, unreadable or partially generated chunks, dimensions not converted) are shown and written to `--report` too |
 | Output validated before it replaces anything | **implemented**: new worlds are unzipped, their LevelDB opened, every subchunk decoded and the counts compared with what was written; `.mcstructure` files are re-read; placed worlds are compared key by key with the source (below); converted Java worlds are validated as a directory before zipping and the zip listing is checked before the move |
 | Untouched world data copied byte-for-byte | **implemented**: `validate_placed_world` checks every LevelDB key the placement did not touch is byte-identical to the source world and `level.dat` is unchanged; a test tampers with an untouched entry and expects the validation to fail |
-| Existing output is replaced only on request | **implemented**: `--overwrite` is required; without it the conversion stops before writing |
+| Existing output is replaced only on request | **implemented**: `--overwrite` is required; without it the conversion stops before writing. A Java world **folder** is never replaced, even with `--overwrite` |
+| Java world folders written atomically | **implemented**: built in a temp folder next to the destination, validated (every chunk re-read), then renamed into place with `MoveFileExW` (no replace); on failure the temp folder is removed and the destination was never touched |
 | Untrusted-input limits | **implemented** for decompression, NBT, zip and every reader (`.schem`, `.nbt`, `.litematic`, `.schematic`, `.mcstructure`, Anvil chunks and region files; see `docs/formats/`); fuzzed |
 
 ## 1. Inputs are never modified
 
-Bridger opens every input read-only. That includes worlds used as a placement target: `--into-world` reads the
+Bridger opens every input read-only (Bedrock worlds read for conversion to Java are unzipped into a scratch
+directory and only the copy is opened). That includes worlds used as a placement target: `--into-world` reads the
 existing world and writes a **new** output world. The original is never edited in place: it is unzipped into a
 scratch directory under `%TEMP%`, the copy is changed there, and the result is zipped into the output. Java world
 folders are only read.
@@ -61,6 +63,8 @@ What the OS does and does not promise:
 - `FlushFileBuffers` relies on the drive honouring flush requests. Drives with volatile write caches that ignore
   flushes can still lose data on power loss.
 - A `.mcworld` is a zip. The guarantees cover the zip file as a whole, not its internal entries.
+- Java world output is a folder of many files. The folder appears at its destination in one rename, but the files
+  inside are written with ordinary writes before that rename; Bridger does not flush each one individually.
 - Converted Java worlds are zipped by minizip-ng straight into the temp file (no full copy in memory). The temp
   file is then flushed by path, validated and moved like any other output.
 

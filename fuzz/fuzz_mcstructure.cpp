@@ -1,7 +1,11 @@
-// Fuzz target: the .mcstructure reader. Palette entries resolve by a cheap stand-in
-// lookup (name length) so every code path after the palette is reached.
+// Fuzz target: the .mcstructure reader, then Bedrock -> Java translation and the Java writers
+// on whatever it accepted. Palette entries resolve by a cheap stand-in lookup (name length)
+// to real Bedrock state indices, so every code path after the palette is reached.
 
 #include <bridger/formats/bedrock/mcstructure.hpp>
+#include <bridger/formats/java/java_writers.hpp>
+#include <bridger/translate/mapping_data.hpp>
+#include <bridger/translate/translator.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,5 +33,16 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
                 (void)s.block({static_cast<i32>(x), static_cast<i32>(y), static_cast<i32>(z)});
     for (const BlockEntity& be : s.block_entities)
         if (!s.contains(be.pos)) std::abort();
+
+    static const translate::MappingData* mapping = translate::MappingData::embedded().value();
+    translate::ConversionReport report;
+    auto java = translate::translate_to_java(s, *mapping, {}, report);
+    if (!java) return 0;
+    if (java->size() != s.size()) std::abort();
+    const formats::java::JavaWriteOptions wo{static_cast<i32>(mapping->java_data_version()), "fuzz", "fuzz", 0};
+    if (!formats::java::write_sponge_schem(*java, wo) && java->size().x <= 0xFFFF && java->size().y <= 0xFFFF &&
+        java->size().z <= 0xFFFF)
+        std::abort();
+    (void)formats::java::write_litematic(*java, wo);
     return 0;
 }

@@ -15,6 +15,9 @@
 #include <bridger/translate/conversion_report.hpp>
 #include <bridger/translate/mapping_data.hpp>
 
+#include <functional>
+#include <optional>
+
 namespace bridger::translate {
 
 enum class Fallback : u8 {
@@ -24,6 +27,10 @@ enum class Fallback : u8 {
 
 struct TranslateOptions {
     Fallback fallback = Fallback::Air;
+    // Bedrock -> Java only: the Bedrock state just outside the structure (a neighbouring chunk
+    // column when a world is converted column by column), so context rules see across borders.
+    // nullopt = unknown or absent, treated like air. Must be thread-safe if shared.
+    std::function<std::optional<u32>(BlockPos)> bedrock_outside;
 };
 
 // Input: a Java structure whose block/biome ids refer to its own registries.
@@ -33,6 +40,14 @@ struct TranslateOptions {
 // adds absolute x/y/z). Entities are not translated yet and are reported.
 [[nodiscard]] Result<Structure> translate_to_bedrock(const Structure& java, const MappingData& mapping,
                                                      const TranslateOptions& options, ConversionReport& report);
+
+// Bedrock -> Java (reverse_translator.cpp). Input: a Bedrock structure as produced by the
+// Bedrock readers (block layers hold BedrockStateIndex values, layer 2 the liquids, biome
+// layers Bedrock numeric ids, block entities little-endian Bedrock NBT with structure-local
+// positions and pairx/pairz). Output: a Java structure with its own registries (pinned Java
+// DataVersion) and big-endian Java block entities. The marker fallback is minecraft:sponge.
+[[nodiscard]] Result<Structure> translate_to_java(const Structure& bedrock, const MappingData& mapping,
+                                                  const TranslateOptions& options, ConversionReport& report);
 
 // The Bedrock biome id used where the source has no biome data (plains).
 inline constexpr i32 kDefaultBedrockBiome = 1;

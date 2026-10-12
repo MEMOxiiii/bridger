@@ -198,8 +198,14 @@ Result<McStructureFile> read_mcstructure(std::span<const u8> bytes, std::shared_
         be.id = std::string(data.entries().find("id").as_string().value_or(""));
         NbtWriter w(Endian::Little);
         w.begin_root_compound();
-        for (const io::nbt::NbtEntry& f : data.entries())
-            if (f.name != "x" && f.name != "y" && f.name != "z") w.write_view(f.name, f.value);
+        // Positions are dropped (be.pos is structure-local); the double-chest partner is stored
+        // in world coordinates like x/y/z and becomes structure-local too.
+        for (const io::nbt::NbtEntry& f : data.entries()) {
+            if (f.name == "x" || f.name == "y" || f.name == "z") continue;
+            if (f.name == "pairx" && f.value.as_int()) w.write_int("pairx", *f.value.as_int() - out.world_origin[0]);
+            else if (f.name == "pairz" && f.value.as_int()) w.write_int("pairz", *f.value.as_int() - out.world_origin[2]);
+            else w.write_view(f.name, f.value);
+        }
         w.end_compound();
         BRIDGER_TRY(std::vector<u8> encoded, std::move(w).finish());
         be.data = RawNbt{std::move(encoded), Endian::Little};
