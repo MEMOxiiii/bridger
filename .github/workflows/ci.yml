@@ -17,6 +17,7 @@ env:
   # (too old) vcpkg. The bootstrap step exports VCPKG_ROOT after msvc-dev-cmd runs.
   BRIDGER_VCPKG_DIR: ${{ github.workspace }}/vcpkg
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-binary-cache
+  VCPKG_DOWNLOADS: ${{ github.workspace }}/vcpkg-downloads
   VCPKG_DISABLE_METRICS: "1"
 
 jobs:
@@ -58,10 +59,20 @@ jobs:
             vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-
             vcpkg-${{ env.VCPKG_TAG }}-
 
+      # vcpkg's own tool downloads (cmake, 7zip, ...) are cached too: fewer network
+      # round-trips, and a transient GitHub 504 on a tool download no longer fails the job.
+      - name: Restore vcpkg tool downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DOWNLOADS }}
+          key: vcpkg-downloads-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-downloads-${{ env.VCPKG_TAG }}-
+
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE, $env:VCPKG_DOWNLOADS | Out-Null
           "VCPKG_ROOT before override: $env:VCPKG_ROOT" | Tee-Object -Append ci-step.log
           git -c advice.detachedHead=false clone --depth 1 --branch $env:VCPKG_TAG https://github.com/microsoft/vcpkg.git $env:BRIDGER_VCPKG_DIR 2>&1 | Tee-Object -Append ci-step.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
