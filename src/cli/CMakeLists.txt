@@ -1,4 +1,4 @@
-add_executable(bridger_cli main.cpp commands/commands.hpp commands/info.cpp)
+add_executable(bridger_cli main.cpp commands/commands.hpp commands/info.cpp commands/convert.cpp)
 set_target_properties(bridger_cli PROPERTIES OUTPUT_NAME bridger)
 target_link_libraries(bridger_cli PRIVATE
     bridger::core bridger::platform bridger::io bridger::formats bridger::translate bridger::convert

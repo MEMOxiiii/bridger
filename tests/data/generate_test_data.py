@@ -328,7 +328,182 @@ def generate_schem():
                                                       encoding="utf-8", newline="\n")
 
 
+# --------------------------------------------------------------------------- in-game test structures
+# Fixed structures for the in-game checklist (docs/testing.md). Every state is a valid
+# Java 26.3 state (checked against Mojang's generated blocks report).
+
+def v3_schem(size, blocks, block_entities=(), entities=()):
+    """blocks: {(x,y,z): state}; unspecified positions are air."""
+    w, h, l = size
+    palette = {"minecraft:air": 0}
+    idx = [0] * (w * h * l)
+    for (x, y, z), state in blocks.items():
+        if state not in palette:
+            palette[state] = len(palette)
+        idx[index_of(x, y, z, w, l)] = palette[state]
+    s = Compound({
+        "Version": Int(3), "DataVersion": Int(5023),
+        "Width": Short(w), "Height": Short(h), "Length": Short(l),
+        "Metadata": Compound({"Name": String("Bridger in-game test"), "Author": String("bridger")}),
+        "Blocks": Compound({
+            "Palette": Compound({k: Int(v) for k, v in palette.items()}),
+            "Data": byte_array(varints(idx)),
+            "BlockEntities": List[Compound]([Compound({"Pos": IntArray(list(p)), "Id": String(i), "Data": d})
+                                             for p, i, d in block_entities]),
+        }),
+    })
+    if entities:
+        s["Entities"] = List[Compound]([Compound({"Pos": List[Double](list(p)), "Id": String(i), "Data": d})
+                                        for p, i, d in entities])
+    return Compound({"Schematic": s})
+
+
+def items(*entries):
+    return List[Compound]([Compound({"Slot": Byte(slot), "id": String(item), "count": Int(count)})
+                           for slot, item, count in entries])
+
+
+def ingame_orientations():
+    b = {}
+    for x in range(12):
+        for z in range(10):
+            b[(x, 0, z)] = "minecraft:smooth_stone"
+    facings = ["north", "east", "south", "west"]
+    # Row 1: stairs, every facing, bottom (z=1) and top (z=2) halves.
+    for i, f in enumerate(facings):
+        b[(1 + 2 * i, 1, 1)] = f"minecraft:oak_stairs[facing={f},half=bottom,shape=straight,waterlogged=false]"
+        b[(1 + 2 * i, 2, 2)] = f"minecraft:oak_stairs[facing={f},half=top,shape=straight,waterlogged=false]"
+    # Inner/outer corner shapes.
+    for i, shape in enumerate(["inner_left", "inner_right", "outer_left", "outer_right"]):
+        b[(1 + 2 * i, 1, 4)] = f"minecraft:stone_brick_stairs[facing=north,half=bottom,shape={shape},waterlogged=false]"
+    # Doors: closed left hinge, open right hinge (lower + upper halves).
+    for i, (f, hinge, open_) in enumerate([("north", "left", "false"), ("east", "right", "true"),
+                                           ("south", "left", "true"), ("west", "right", "false")]):
+        x = 1 + 2 * i
+        b[(x, 1, 6)] = f"minecraft:oak_door[facing={f},half=lower,hinge={hinge},open={open_},powered=false]"
+        b[(x, 2, 6)] = f"minecraft:oak_door[facing={f},half=upper,hinge={hinge},open={open_},powered=false]"
+    # Logs on every axis, trapdoors.
+    for i, axis in enumerate(["x", "y", "z"]):
+        b[(9, 1 + i, 1)] = f"minecraft:oak_log[axis={axis}]"
+    b[(10, 1, 1)] = "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]"
+    b[(10, 1, 2)] = "minecraft:oak_trapdoor[facing=east,half=top,open=true,powered=false,waterlogged=false]"
+    # Rails: straight, curve, ascending, powered.
+    b[(1, 1, 8)] = "minecraft:rail[shape=east_west,waterlogged=false]"
+    b[(2, 1, 8)] = "minecraft:rail[shape=south_west,waterlogged=false]"
+    b[(2, 1, 9)] = "minecraft:rail[shape=north_south,waterlogged=false]"
+    b[(4, 1, 8)] = "minecraft:powered_rail[powered=true,shape=east_west,waterlogged=false]"
+    b[(5, 1, 8)] = "minecraft:powered_rail[powered=false,shape=ascending_east,waterlogged=false]"
+    b[(6, 2, 8)] = "minecraft:smooth_stone"
+    # Wall torches and a wall.
+    b[(8, 2, 8)] = "minecraft:wall_torch[facing=south]"
+    b[(8, 1, 8)] = "minecraft:stone_bricks"
+    b[(8, 2, 7)] = "minecraft:stone_bricks"
+    b[(10, 1, 8)] = "minecraft:stone_brick_wall[east=none,north=none,south=none,up=true,waterlogged=false,west=none]"
+    return v3_schem((12, 4, 10), b)
+
+
+def ingame_waterlogged():
+    b = {}
+    for x in range(10):
+        for z in range(5):
+            b[(x, 0, z)] = "minecraft:stone"
+    b[(1, 1, 1)] = "minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=true]"
+    b[(2, 1, 1)] = "minecraft:oak_slab[type=bottom,waterlogged=true]"
+    b[(3, 1, 1)] = "minecraft:oak_fence[east=false,north=false,south=false,waterlogged=true,west=false]"
+    b[(4, 1, 1)] = "minecraft:chest[facing=south,type=single,waterlogged=true]"
+    b[(5, 1, 1)] = "minecraft:lantern[hanging=false,waterlogged=true]"
+    b[(6, 1, 1)] = "minecraft:glass_pane[east=false,north=false,south=false,waterlogged=true,west=false]"
+    b[(7, 1, 1)] = "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=true]"
+    b[(2, 1, 3)] = "minecraft:water[level=0]"
+    b[(5, 1, 3)] = "minecraft:lava[level=0]"
+    for x in range(10):  # a rim so sources stay put
+        b[(x, 1, 4)] = "minecraft:glass"
+    return v3_schem((10, 3, 5), b, [((4, 1, 1), "minecraft:chest", Compound({"Items": items((0, "minecraft:cod", 3))}))])
+
+
+def ingame_containers():
+    b = {}
+    for x in range(12):
+        for z in range(4):
+            b[(x, 0, z)] = "minecraft:stone"
+    be = []
+    b[(1, 1, 1)] = "minecraft:chest[facing=south,type=single,waterlogged=false]"
+    be.append(((1, 1, 1), "minecraft:chest", Compound({"Items": items((0, "minecraft:diamond", 5), (13, "minecraft:oak_log", 64),
+                                                                       (26, "minecraft:diamond_sword", 1)),
+                                                       "CustomName": String("Single chest")})))
+    # Double chest facing north: left half at x=3 pairs with the right half at x=4 (x+1).
+    b[(3, 1, 1)] = "minecraft:chest[facing=north,type=left,waterlogged=false]"
+    b[(4, 1, 1)] = "minecraft:chest[facing=north,type=right,waterlogged=false]"
+    be.append(((3, 1, 1), "minecraft:chest", Compound({"Items": items((0, "minecraft:emerald", 10))})))
+    be.append(((4, 1, 1), "minecraft:chest", Compound({"Items": items((26, "minecraft:gold_ingot", 20))})))
+    b[(6, 1, 1)] = "minecraft:trapped_chest[facing=south,type=single,waterlogged=false]"
+    be.append(((6, 1, 1), "minecraft:trapped_chest", Compound({"Items": items((4, "minecraft:tnt", 2))})))
+    b[(7, 1, 1)] = "minecraft:barrel[facing=up,open=false]"
+    be.append(((7, 1, 1), "minecraft:barrel", Compound({"Items": items((0, "minecraft:white_wool", 16))})))
+    b[(8, 1, 1)] = "minecraft:furnace[facing=south,lit=false]"
+    be.append(((8, 1, 1), "minecraft:furnace", Compound({"Items": items((0, "minecraft:iron_ore", 8), (1, "minecraft:coal", 4))})))
+    b[(9, 1, 1)] = "minecraft:hopper[enabled=true,facing=down]"
+    be.append(((9, 1, 1), "minecraft:hopper", Compound({"Items": items((2, "minecraft:apple", 3))})))
+    b[(10, 1, 1)] = "minecraft:red_shulker_box[facing=up]"
+    be.append(((10, 1, 1), "minecraft:shulker_box", Compound({"Items": items((0, "minecraft:ender_pearl", 16))})))
+    return v3_schem((12, 3, 4), b, be)
+
+
+def ingame_signs_beds():
+    b = {}
+    for x in range(12):
+        for z in range(6):
+            b[(x, 0, z)] = "minecraft:stone"
+    be = []
+
+    def sign(lines, back=("", "", "", ""), glow=False, color="black"):
+        face = lambda ls: Compound({"messages": List[String]([String(t) for t in ls]), "color": String(color),
+                                    "has_glowing_text": Byte(1 if glow else 0)})
+        return Compound({"front_text": face(lines), "back_text": face(back), "is_waxed": Byte(0)})
+
+    b[(1, 1, 1)] = "minecraft:oak_sign[rotation=8,waterlogged=false]"
+    be.append(((1, 1, 1), "minecraft:sign", sign(("Bridger", "front", "line 3", "line 4"), ("back", "", "", "side"))))
+    b[(3, 1, 1)] = "minecraft:stone_bricks"
+    b[(3, 1, 2)] = "minecraft:oak_wall_sign[facing=south,waterlogged=false]"
+    be.append(((3, 1, 2), "minecraft:sign", sign(("Wall sign", "", "", ""))))
+    b[(5, 1, 1)] = "minecraft:oak_sign[rotation=0,waterlogged=false]"
+    be.append(((5, 1, 1), "minecraft:sign", sign(("Glowing", "text", "", ""), glow=True)))
+    # Beds: foot at z, head at z+1 when facing south.
+    for i, color in enumerate(["red", "white", "blue", "lime"]):
+        x = 1 + 2 * i
+        b[(x, 1, 3)] = f"minecraft:{color}_bed[facing=south,occupied=false,part=foot]"
+        b[(x, 1, 4)] = f"minecraft:{color}_bed[facing=south,occupied=false,part=head]"
+        be.append(((x, 1, 3), "minecraft:bed", Compound({})))
+        be.append(((x, 1, 4), "minecraft:bed", Compound({})))
+    ents = [((9.5, 1.0, 1.5), "minecraft:armor_stand", Compound({"Invisible": Byte(0)}))]
+    return v3_schem((12, 3, 6), b, be, ents)
+
+
+def ingame_borders():
+    """40x40x40: crosses chunk (x,z) and subchunk (y) borders; centered on 0,0 it also
+    spans negative coordinates. Corner pillars and a checkerboard floor show alignment."""
+    n = 40
+    b = {}
+    for x in range(n):
+        for z in range(n):
+            b[(x, 0, z)] = "minecraft:white_concrete" if ((x // 4 + z // 4) % 2) else "minecraft:black_concrete"
+    for x, z in [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1), (15, 15), (16, 16), (31, 31), (32, 32)]:
+        for y in range(1, n):
+            b[(x, y, z)] = "minecraft:glowstone" if y % 16 == 0 else "minecraft:quartz_block"
+    for y in range(1, n):  # a glass column every 16 blocks marks subchunk borders
+        b[(20, y, 20)] = "minecraft:red_stained_glass" if y % 16 == 0 else "minecraft:glass"
+    return v3_schem((n, n, n), b)
+
+
+def generate_ingame():
+    for name, root in [("orientations", ingame_orientations()), ("waterlogged", ingame_waterlogged()),
+                       ("containers", ingame_containers()), ("signs_beds", ingame_signs_beds()),
+                       ("borders", ingame_borders())]:
+        write_gzip(ROOT / "ingame" / f"{name}.schem", nbt_bytes(root, "", "big"))
+
+
 if __name__ == "__main__":
     generate_nbt()
     generate_schem()
+    generate_ingame()
     print("test data written")

@@ -1,7 +1,6 @@
 // bridger.exe — command-line interface.
 //
-// `convert` (Phase 4) is registered so its interface is visible, but it reports
-// "not implemented" instead of pretending to work.
+// Subcommands: formats, info, convert (see commands/).
 
 #include "commands/commands.hpp"
 
@@ -18,13 +17,7 @@
 namespace {
 
 using bridger::cli::kExitError;
-using bridger::cli::kExitNotImplemented;
 using bridger::cli::kExitOk;
-
-int not_implemented(std::string_view command, std::string_view phase) {
-    bridger::log::error("'{}' is not implemented yet (planned for {}).", command, phase);
-    return kExitNotImplemented;
-}
 
 void print_formats() {
     std::puts(std::format("{:<12} {:<8} {:<13} {:<12} {}", "NAME", "EDITION", "EXTENSION", "READ", "WRITE").c_str());
@@ -53,11 +46,21 @@ int main(int argc, char** argv) {
     auto* info_cmd = app.add_subcommand("info", "Show information about a structure or world file");
     info_cmd->add_option("input", info_input, "Input file")->required();
 
-    std::string convert_input;
-    std::string convert_output;
-    auto* convert_cmd = app.add_subcommand("convert", "Convert between formats");
-    convert_cmd->add_option("input", convert_input, "Input file")->required();
-    convert_cmd->add_option("output", convert_output, "Output file")->required();
+    bridger::cli::ConvertArgs conv;
+    auto* convert_cmd = app.add_subcommand("convert", "Convert between formats (0.1.0: .schem -> new .mcworld)");
+    convert_cmd->add_option("input", conv.input, "Input file")->required();
+    convert_cmd->add_option("output", conv.output, "Output file")->required();
+    convert_cmd->add_option("--format", conv.format, "Output format name (overrides the extension)");
+    convert_cmd->add_option("--report", conv.report_path, "Write the conversion report as JSON");
+    convert_cmd->add_option("--fallback", conv.fallback, "Block for unmapped states: air|marker")->capture_default_str();
+    convert_cmd->add_option("--air", conv.air, "Structure air: keep|replace existing blocks")->capture_default_str();
+    convert_cmd->add_option("--place-at", conv.place_at, "World position x,y,z of the structure's corner");
+    convert_cmd->add_option("--into-world", conv.into_world, "Place into a copy of an existing world (0.2.0)");
+    convert_cmd->add_option("--name", conv.level_name, "World name (default: input file name)");
+    convert_cmd->add_flag("--clip", conv.clip, "Cut parts outside the build height (reported)");
+    convert_cmd->add_flag("--shift-to-fit", conv.shift_to_fit, "Move vertically to fit the build height");
+    convert_cmd->add_flag("--clear-entities", conv.clear_entities, "Remove entities in the target area (existing worlds)");
+    convert_cmd->add_flag("--overwrite", conv.overwrite, "Replace the output file if it exists");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -68,6 +71,6 @@ int main(int argc, char** argv) {
         return kExitOk;
     }
     if (info_cmd->parsed()) return bridger::cli::run_info(info_input);
-    if (convert_cmd->parsed()) return not_implemented("convert", "Phase 4");
+    if (convert_cmd->parsed()) return bridger::cli::run_convert(conv);
     return kExitError;
 }
