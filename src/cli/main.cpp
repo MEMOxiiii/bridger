@@ -63,6 +63,20 @@ int main(int argc, char** argv) {
     convert_cmd->add_flag("--overwrite", conv.overwrite, "Replace the output file if it exists");
     convert_cmd->add_option("--threads", conv.threads, "Worker threads for whole worlds (default: all cores)")->check(CLI::Range(0, 1024));
 
+    bridger::cli::RenderArgs rend;
+    auto* render_cmd = app.add_subcommand("render", "Render a structure file to a PNG with your Minecraft textures");
+    render_cmd->add_option("input", rend.input, "Structure file or world")->required();
+    render_cmd->add_option("output", rend.output, "PNG file")->required();
+    render_cmd->add_option("--size", rend.size, "Image size WxH")->capture_default_str();
+    render_cmd->add_option("--yaw", rend.yaw, "Camera yaw in degrees")->capture_default_str();
+    render_cmd->add_option("--pitch", rend.pitch, "Camera pitch in degrees")->capture_default_str();
+    render_cmd->add_option("--zoom", rend.zoom, "Camera zoom (> 1 is closer)")->capture_default_str();
+    render_cmd->add_flag("--map", rend.map, "Top-down map view");
+    render_cmd->add_option("--radius", rend.radius, "Worlds: chunks to load around the spawn")->capture_default_str();
+    render_cmd->add_option("--slice", rend.slice, "Hide blocks at and above this y");
+    render_cmd->add_option("--pack", rend.packs, "Resource pack (zip or folder); repeatable, last wins");
+    render_cmd->add_option("--client-jar", rend.client_jar, "Minecraft client jar (default: from the launcher)");
+
     CLI11_PARSE(app, argc, argv);
 
     if (verbose) bridger::log::set_level(bridger::log::Level::Debug);
@@ -73,5 +87,6 @@ int main(int argc, char** argv) {
     }
     if (info_cmd->parsed()) return bridger::cli::run_info(info_input);
     if (convert_cmd->parsed()) return bridger::cli::run_convert(conv);
+    if (render_cmd->parsed()) return bridger::cli::run_render(rend);
     return kExitError;
 }

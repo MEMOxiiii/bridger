@@ -3,6 +3,7 @@
 // CLI subcommands. Each returns a process exit code.
 
 #include <string>
+#include <vector>
 
 namespace bridger::cli {
 
@@ -30,5 +31,21 @@ struct ConvertArgs {
 };
 
 int run_convert(const ConvertArgs& args);
+
+struct RenderArgs {
+    std::string input;
+    std::string output;               // .png
+    std::string size = "1600x900";
+    float yaw = -35.0f;
+    float pitch = -28.0f;
+    float zoom = 1.0f;                // > 1 moves the camera closer
+    int radius = 8;                   // worlds: chunks around the spawn
+    bool map = false;                 // top-down orthographic
+    std::string slice;                // hide blocks at and above this y
+    std::vector<std::string> packs;   // extra resource packs (highest priority last)
+    std::string client_jar;           // default: the launcher's jar for the pinned version
+};
+
+int run_render(const RenderArgs& args);
 
 } // namespace bridger::cli

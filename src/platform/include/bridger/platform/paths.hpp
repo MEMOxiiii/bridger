@@ -9,6 +9,7 @@
 #include <bridger/core/result.hpp>
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -28,5 +29,9 @@ namespace bridger::platform {
 // so a later rename never crosses volumes. Does not touch the file system.
 [[nodiscard]] Result<std::filesystem::path> sibling_temp_path(const std::filesystem::path& path,
                                                               std::string_view suffix);
+
+// The user's roaming application-data folder (%APPDATA% on Windows), where the Minecraft
+// launcher keeps ".minecraft". nullopt if the OS does not report one.
+[[nodiscard]] std::optional<std::filesystem::path> roaming_app_data_dir();
 
 } // namespace bridger::platform

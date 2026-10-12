@@ -1,6 +1,7 @@
 #include <bridger/platform/paths.hpp>
 
 #include <Windows.h>
+#include <ShlObj.h>
 
 #include <limits>
 
@@ -59,6 +60,17 @@ Result<std::filesystem::path> to_long_path(const std::filesystem::path& path) {
         return std::filesystem::path(LR"(\\?\UNC\)" + a.substr(2));
     }
     return std::filesystem::path(LR"(\\?\)" + a);
+}
+
+std::optional<std::filesystem::path> roaming_app_data_dir() {
+    PWSTR raw = nullptr;
+    if (FAILED(::SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &raw))) {
+        ::CoTaskMemFree(raw);
+        return std::nullopt;
+    }
+    std::filesystem::path p(raw);
+    ::CoTaskMemFree(raw);
+    return p;
 }
 
 } // namespace bridger::platform

@@ -4,9 +4,14 @@ bridger_add_module(render
     PRIVATE_LIBS volk::volk vk-bootstrap::vk-bootstrap GPUOpen::VulkanMemoryAllocator nlohmann_json::nlohmann_json)
 
 target_include_directories(bridger_render SYSTEM PRIVATE ${Stb_INCLUDE_DIR})
+# Vulkan structs are initialised as `VkFoo info{VK_STRUCTURE_TYPE_FOO}` (the rest zeroed on purpose);
+# clang's -Wmissing-field-initializers flags every one of them.
+target_compile_options(bridger_render PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-missing-field-initializers>)
 # GLM: Vulkan depth range (0..1).
 target_compile_definitions(bridger_render PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 bridger_compile_shaders(bridger_render
     shaders/chunk.vert
-    shaders/chunk.frag)
+    shaders/chunk.frag
+    shaders/line.vert
+    shaders/line.frag)
