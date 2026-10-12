@@ -1,3 +1,6 @@
 [submodule "third_party/leveldb-mcpe"]
 	path = third_party/leveldb-mcpe
 	url = https://github.com/Amulet-Team/leveldb-mcpe.git
+[submodule "tools/mapgen/sources/geyser-mappings"]
+	path = tools/mapgen/sources/geyser-mappings
+	url = https://github.com/GeyserMC/mappings.git

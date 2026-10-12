@@ -1,0 +1,9 @@
+{
+  "_doc": [
+    "Bridger's own Java -> Bedrock block mapping fixes, applied after the third-party source.",
+    "Each entry: java (canonical Java state, properties sorted), bedrock {name, states},",
+    "comment (why, with a source), optional lossy (true if Bedrock cannot represent it exactly).",
+    "Every override needs a unit test in tests/unit/translate/."
+  ],
+  "overrides": []
+}

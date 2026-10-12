@@ -27,3 +27,6 @@ oom-*
 
 # Profiling
 *.tracy
+
+# mapgen inputs fetched by tools/mapgen/fetch_sources.py (Mojang jar, generated reports)
+/tools/mapgen/sources/cache/
