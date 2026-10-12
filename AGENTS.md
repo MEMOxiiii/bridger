@@ -8,8 +8,9 @@ Bridger is a Windows desktop tool, written in C++20, that converts Minecraft str
 formats (`.schem`, `.schematic`, `.litematic`, structure `.nbt`, Anvil worlds) and Bedrock formats
 (`.mcstructure`, `.mcworld`), and renders them in 3D. Speed is a core feature, and every speed claim needs a
 benchmark behind it. A conversion must never corrupt or silently lose user data.
-**Current phase: 2 done (NBT, safe output writing, IR, `.schem` reader).** Nothing converts yet; see `README.md` →
-"Format support". Phase 0.5 (Bedrock world spike) is pending: it needs a manual in-game check.
+**Current phase: 4 implemented (`.schem` → new `.mcworld`).** All automated and independent checks pass; the
+in-game checklist (`docs/testing.md`) is the remaining gate for release 0.1.0. Phase 0.5's questions are folded
+into that checklist (`docs/formats/bedrock-world.md`, "Open questions").
 
 ## Commands
 
@@ -52,7 +53,8 @@ and/or a writer (IR → format), so adding a format never means writing N×N con
 | `app` → `bridger-gui.exe` | Desktop app (SDL3 + Dear ImGui) |
 
 **Dependency rule:**
-`core` ← `platform` ← `io` ← `formats` ← `convert` (also uses `translate`, which depends only on `core`) ← `cli`;
+`core` ← `platform` ← `io` ← `formats` ← `convert` (also uses `translate`, which depends on `core` and `io`;
+ADR 0008) ← `cli`;
 `render` depends on `core` and `formats`; `app` depends on everything. Lower layers never depend on higher ones.
 `core`, `platform`, `io`, `formats`, `translate` and `convert` have **no UI or GPU dependencies**, and only
 `platform` may include OS headers. `cmake/BridgerModule.cmake` enforces this (`BRIDGER_ALLOWED_DEPS_<module>`):
@@ -87,7 +89,14 @@ additions to it are recorded here as required:
   names). The OS calls live behind `platform::FileOps` in `win32/`.
 - `src/cli/commands/commands.hpp`: declarations shared by `main.cpp` and the command files.
 - `tests/unit/test_util.hpp`: shared test helpers. `tests/data/generate_test_data.py`: generates all committed
-  test data and the golden files with nbtlib (see `docs/testing.md`).
+  test data, the golden files and the in-game test structures (`tests/data/ingame/`) with nbtlib.
+- `tests/integration/validate_mcworld.py`: independent validation of written worlds (see `docs/testing.md`).
+- `tools/mapgen/fetch_sources.py`, `tools/mapgen/overrides/blocks.json`, `tools/mapgen/sources/geyser-mappings`
+  (submodule), `tools/mapgen/sources/cache/` (gitignored).
+- `src/translate/data/*.brmap`: the generated, committed mapping blob. `docs/mappings/`: generated coverage reports.
+- `cmake/bin2cpp.cpp`: build-time helper that embeds binary files (`EmbedResource.cmake`).
+- `src/io/zip_archive.cpp`, `src/convert/placement.cpp`, `src/cli/commands/convert.cpp` as listed in the module
+  tables of the original specification.
 - `src/platform/win32/paths_win32.cpp`: Windows implementation files carry a `_win32` suffix so their object
   files never clash with a future `posix/` twin.
 
@@ -174,12 +183,16 @@ time (Phase 9).
 
 ## How to update mapping data for a new Minecraft version
 
-(Mapgen arrives in Phase 3; this is the procedure it must support.)
 1. Add the version to `docs/versions.md` with its release date and data version / protocol numbers.
-2. Update the mapping source submodules in `tools/mapgen/sources/`, after checking that their licenses are
-   unchanged (`THIRD_PARTY.md`).
-3. Run mapgen and commit the new `.brmap` and the coverage report (mapped / unmapped / lossy / needs context
-   rule).
+2. Update the mapping source submodules in `tools/mapgen/sources/` (GeyserMC/mappings branch for the version
+   pair), after checking that their licenses are unchanged (`THIRD_PARTY.md`). Update the pinned URLs and hashes in
+   `tools/mapgen/fetch_sources.py` (Mojang server jar from the launcher manifest; Bedrock palette from Geyser).
+3. `python tools/mapgen/fetch_sources.py`, then build `bridger_mapgen` and run it:
+   `bridger_mapgen --java-blocks tools/mapgen/sources/cache/java-<v>-generated/reports/blocks.json
+   --geyser tools/mapgen/sources/geyser-mappings --bedrock-palette tools/mapgen/sources/cache/block_palette.<bv>.nbt
+   --overrides tools/mapgen/overrides --out src/translate/data/<name>.brmap --report docs/mappings/coverage-<name>.md`.
+   Commit the new `.brmap` and the coverage report. Update the version constants in
+   `src/formats/bedrock/mcworld/` and `level_dat.hpp` from the sources listed in `docs/formats/bedrock-world.md`.
 4. Review the new and changed states. Add overrides in `tools/mapgen/overrides/`, each with a comment and a test.
 5. Check the reverse direction (Bedrock → Java) separately.
 6. Run the full test suite plus the in-game checklist for that version.

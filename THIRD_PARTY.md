@@ -41,11 +41,25 @@ distributed. Release zips include the license texts of all shipped components (`
 |---|---|---|---|---|
 | [leveldb-mcpe (Amulet-Team fork)](https://github.com/Amulet-Team/leveldb-mcpe) | `4846fc7` (2024-11-22) | BSD-3-Clause (Google LevelDB authors; Mojang modifications) | yes | Reading/writing Bedrock world databases. Mojang's original `Mojang/leveldb-mcpe` repository is no longer available (HTTP 404, checked 2026-10-11); see `docs/adr/0004-leveldb-mcpe-fork.md` |
 
+## Mapping data (compiled into `src/translate/data/*.brmap`, shipped)
+
+| Component | Version | License | Used for |
+|---|---|---|---|
+| [GeyserMC/mappings](https://github.com/GeyserMC/mappings) (git submodule `tools/mapgen/sources/geyser-mappings`) | `feature/26.3`, commit `01ec65e3` | MIT | Java → Bedrock block, item and biome mappings. GeyserMC notes it "does not relicense Minecraft, its data, or any other material owned by Mojang or Microsoft" |
+| [GeyserMC/Geyser](https://github.com/GeyserMC/Geyser) `block_palette.26_50.nbt` (fetched, SHA-256 pinned) | commit `50a464d7` | MIT (repository) | Bedrock block palette: names, typed states, block version |
+| Minecraft Java 26.3 data generator output (`blocks.json`, `version.json`) | 26.3 | Mojang; generated locally from the official server jar, never committed or shipped | Java block state list and ids |
+
+The `.brmap` blob contains block, item and biome **names and state values** (facts about the game, as GeyserMC
+publishes them). It contains no Mojang code, textures, models or sounds.
+
 ## Tools (not shipped, not linked)
 
 | Component | Version | License | Used for |
 |---|---|---|---|
 | [nbtlib](https://github.com/vberlier/nbtlib) | 2.0.4 | MIT | `tests/data/generate_test_data.py` writes the committed test files with it, so the NBT reader is tested against an independent implementation |
+| [amulet-leveldb](https://pypi.org/project/amulet-leveldb/) | 1.0.7 | Amulet's license | **Test oracle only** in `tests/integration/validate_mcworld.py` (independent reading of written worlds). No code copied, not committed |
+| [HiveGamesOSS/Chunker](https://github.com/HiveGamesOSS/Chunker) | commit `50aaf6d8` | MIT | **Consulted only** for Bedrock format behavior (`docs/formats/bedrock-world.md` cites the files). No code copied |
+| [minizip-ng](https://github.com/zlib-ng/minizip-ng) | (see above) | Zlib | also used to write `.mcworld` zips |
 
 ## Data
 

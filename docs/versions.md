@@ -16,10 +16,15 @@ These identifiers are part of the formats Bridger reads and writes. Fill them in
 
 | Value | Needed in | Source to use | Value |
 |---|---|---|---|
-| Java `DataVersion` for 26.3 | Phase 2 (`.schem` `DataVersion`), Phase 3 | `version.json` inside the official 26.3 client/server jar (read locally, never committed) | _TBD_ |
-| Bedrock world `StorageVersion` / `lastOpenedWithVersion` | Phase 0.5 | A world created by Bedrock 26.52 itself (`level.dat`) | _TBD_ |
-| Bedrock block-state `version` integer (palette NBT) | Phase 0.5 | Same world: sub-chunk palette entries | _TBD_ |
-| Bedrock chunk `Version` key byte | Phase 0.5 | Same world: LevelDB key tag `0x2C` (verify) | _TBD_ |
+| Java `DataVersion` for 26.3 | `.schem`, mapping data | `version.json` (`world_version`) inside the official 26.3 server jar | **5023** |
+| Java block state count | mapping data | Mojang data generator `--reports` (`blocks.json`) | **35,723** (1,286 blocks) |
+| Bedrock block-state `version` (palette NBT) | world writer | Bedrock 26.50 block palette (GeyserMC, `docs/adr/0007`) | **18168865** |
+| Bedrock `StorageVersion` / level.dat header | world writer | minecraft.wiki; Chunker | **10** |
+| Bedrock `NetworkVersion` | level.dat | Chunker `BedrockDataVersion.V1_26_50` | **2192** |
+| `lastOpenedWithVersion` / `MinimumCompatibleClientVersion` | level.dat | Chunker | **[1, 26, 50, 0, 0]** |
+| Bedrock chunk `Version` key (`0x2C`) | world writer | Chunker writer chain for 26.50 | **42** |
+
+Values marked ⚠ in `docs/formats/bedrock-world.md` are confirmed by the in-game checklist.
 
 ## Watch list
 

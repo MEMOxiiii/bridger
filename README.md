@@ -9,9 +9,9 @@ is a native Windows tool written in C++20. It aims to be faster and more reliabl
 tests, benchmarks and in-game checks. It never modifies your input files, and it reports anything it could not
 convert exactly.
 
-> **Status: early development (Phase 2).** Bridger can read Sponge `.schem` files (`bridger info`), but it
-> cannot convert anything yet. The first public release, **0.1.0**, will convert `.schem` → new `.mcworld` from
-> the command line.
+> **Status: early development (Phase 4).** `bridger convert` turns a Sponge `.schem` into a new Bedrock world
+> (`.mcworld`). Everything passes the automated and independent checks; the in-game check that gates the first
+> release (**0.1.0**) is pending.
 
 ## Format support
 
@@ -23,7 +23,7 @@ convert exactly.
 | Structure `.nbt` | Java | planned (0.2.0) | planned (0.3.0) |
 | Java world (Anvil, 1.18+ layout) | Java | planned (0.2.0) | planned (0.3.0) |
 | `.mcstructure` | Bedrock | planned (0.3.0) | planned (0.2.0) |
-| `.mcworld` (new world) | Bedrock | planned (0.3.0) | planned (**0.1.0**) |
+| `.mcworld` (new world) | Bedrock | planned (0.3.0) | in progress (**0.1.0**, pending in-game check) |
 | `.mcworld` (place into existing world → new output) | Bedrock | — | planned (0.2.0) |
 
 "Supported" will mean: golden tests, a fuzz target, a benchmark, and a recorded in-game check all pass. Run
@@ -68,11 +68,21 @@ The first configure builds all dependencies with vcpkg, which takes a while. Pre
 bridger --version
 bridger formats                                   # list formats and their support status
 bridger info <file>                               # describe a .schem file (other formats later)
-bridger convert <input> <output> [options]        # (Phase 4)
+bridger convert <input> <output> [options]        # .schem -> new .mcworld
     --target-version X   --fallback air|marker   --report report.json   --format <name>
     --into-world <existing.mcworld>   --place-at x,y,z   --air keep|replace
     --clear-entities   --clip | --shift-to-fit
 ```
+
+Example:
+
+```text
+bridger convert castle.schem castle.mcworld --report castle-report.json
+```
+
+The structure is placed on a superflat world, centered on x = 0, z = 0, and the world opens in creative mode. The
+conversion report lists everything that was not converted exactly. In 0.1.0 that means entities (not written yet),
+item enchantments and names, and text formatting on signs.
 
 The output format is inferred from the file extension. Defaults are chosen for safety: air in the structure
 keeps existing blocks, and a structure that exceeds the world's build height is an error unless you pass
@@ -89,12 +99,17 @@ Bridger publishes only **measured** results, with machine specs and reproduction
 |---|---|
 | NBT validation (zero-copy) | 1.37 GiB/s |
 | Reading a gzip `.schem` into the IR (256 × 128 × 256) | 155 M blocks/s (54.7 ms) |
+| Translating Java → Bedrock (8.4 M blocks) | 34.4 ms |
+| A real 405 × 140 × 405 WorldEdit schematic → `.mcworld` (incl. validation) | 2.7 s |
 
 These measure Bridger alone. No comparison with other tools has been measured yet.
 
 ## Known limitations
 
-- Nothing converts yet. Only `.schem` files can be read (Phase 2).
+- One conversion path so far: `.schem` → new `.mcworld`.
+- Entities (armor stands, item frames, mobs) are not written yet; they are listed in the report.
+- Item components (enchantments, custom names, durability) and text formatting are dropped and reported.
+- Single-threaded for now.
 - Windows x64 only for now. The code keeps OS-specific parts in one module so other platforms can be added
   later.
 - One Java and one Bedrock version at a time (see above).

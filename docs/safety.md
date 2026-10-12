@@ -1,14 +1,16 @@
 # Data-safety guarantees
 
-> **Status (Phase 2):** a guarantee marked **implemented** below has code and tests behind it. Anything else is
+> **Status (Phase 4):** a guarantee marked **implemented** below has code and tests behind it. Anything else is
 > a design commitment, not a fact about the shipped binary.
 
 | Guarantee | Status |
 |---|---|
-| Inputs are never modified | **implemented** for readers (inputs are memory-mapped read-only); applies to writers from Phase 4 |
+| Inputs are never modified | **implemented**: inputs are memory-mapped read-only; a test checks the input bytes are unchanged after conversion. "Into an existing world" (0.2.0) will write a new world, never edit the original |
 | Same-directory temp file → flush → validate → atomic move | **implemented**: `platform::AtomicFileWriter` (`src/platform/atomic_replace.cpp`) |
 | Recovery procedure on replace failure | **implemented and failure-tested**: `tests/unit/platform/file_test.cpp` injects a failure at every step (create, write, flush, close, rename, each `ReplaceFileW` error code, failed restore, destination failing validation) |
-| No silent data loss (conversion report) | partial: readers report every non-fatal problem as a warning; the `ConversionReport` is populated from Phase 3 |
+| No silent data loss (conversion report) | **implemented** for `.schem` → `.mcworld`: unmapped blocks (with fallback), lossy data, unsupported block entities, entities (not written yet), biomes, clipped blocks; shown by `bridger convert` and written by `--report` |
+| Output validated before it replaces anything | **implemented**: the written `.mcworld` is unzipped, its LevelDB opened, every subchunk decoded and the counts compared with what was written, before the atomic move |
+| Existing output is replaced only on request | **implemented**: `--overwrite` is required; without it the conversion stops before writing |
 | Untrusted-input limits | **implemented** for decompression, NBT and `.schem` (see `docs/formats/nbt.md`, `sponge-schem.md`); fuzzed |
 
 ## 1. Inputs are never modified

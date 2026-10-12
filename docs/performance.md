@@ -17,9 +17,9 @@
 | NBT | `bridger_bench_nbt` | parse / walk / materialize / write MB/s, gzip decompress | **baseline recorded** |
 | Sponge `.schem` | `bridger_bench_schem` | end-to-end read, blocks/s | **baseline recorded** |
 | Region | `bridger_bench_region` | chunks/s | Phase 5 |
-| Translation | `bridger_bench_translate` | sections/s | Phase 3 |
+| Translation | `bridger_bench_translate` | sections/s | **baseline recorded** |
 | Meshing | `bridger_bench_mesher` | sections/s | Phase 7 |
-| End-to-end | `bridger_bench_e2e` | reference conversions, wall time | Phase 4 |
+| End-to-end | `bridger_bench_e2e` | `.schem` → `.mcworld` on disk, incl. validation | **baseline recorded** |
 | Viewer | (in-app) | time to first frame, FPS | Phase 7 |
 
 ## Baselines
@@ -60,3 +60,13 @@ a 64-entry palette. Medians of 3 repetitions.
 
 Observations, not yet acted on: materializing is ~7× slower than validating (one heap allocation per tag);
 readers should keep using views. Gzip accounts for ~30% of `.schem` read time.
+
+### Phase 3–4 baselines (2026-10-12, Machine A, `msvc-release`)
+
+| Benchmark | What it measures | Result |
+|---|---|---|
+| `BM_TranslateStructure` | Java → Bedrock translation of 256 × 128 × 256 (8.4 M blocks, 24 states, some waterlogged) | 34.4 ms = 60.7 k sections/s |
+| `BM_SchemToMcworld` | 128 × 64 × 128 `.schem` file → `.mcworld` file: read, translate, LevelDB, zip, validation re-read, atomic move | 353 ms (1 M blocks) |
+
+Real file (not a benchmark, one run): `AraluenBW1.21Solo.schem`, 405 × 140 × 405, converted in 2.7 s wall time.
+Single-threaded everywhere so far; the pipeline has not been parallelized (performance plan §4).
