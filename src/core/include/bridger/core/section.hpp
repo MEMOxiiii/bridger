@@ -92,7 +92,10 @@ public:
     [[nodiscard]] StateId block(i32 x, i32 y, i32 z) const noexcept { return blocks_.get(section_index(x, y, z)); }
     void set_block(i32 x, i32 y, i32 z, StateId id) { blocks_.set(section_index(x, y, z), id); }
 
-    // Secondary layer reads as air where it was never set.
+    // Secondary layer reads as kAirStateId where it was never set. That value is only
+    // meaningful in the Java id domain: callers working with other domains (Bedrock
+    // palette indices) must check has_secondary() and allocate the layer with their own
+    // empty value via ensure_secondary(fill).
     [[nodiscard]] StateId secondary(i32 x, i32 y, i32 z) const noexcept {
         return secondary_ ? secondary_->get(section_index(x, y, z)) : kAirStateId;
     }
@@ -111,7 +114,7 @@ public:
     [[nodiscard]] const PaletteLayer& blocks() const noexcept { return blocks_; }
     [[nodiscard]] PaletteLayer* secondary_layer() noexcept { return secondary_.get(); }
     [[nodiscard]] const PaletteLayer* secondary_layer() const noexcept { return secondary_.get(); }
-    [[nodiscard]] PaletteLayer& ensure_secondary();
+    [[nodiscard]] PaletteLayer& ensure_secondary(u32 fill = kAirStateId);
     [[nodiscard]] PaletteLayer* biome_layer() noexcept { return biomes_.get(); }
     [[nodiscard]] const PaletteLayer* biome_layer() const noexcept { return biomes_.get(); }
     [[nodiscard]] PaletteLayer& ensure_biomes(BiomeId fill);

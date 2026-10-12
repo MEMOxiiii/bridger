@@ -165,8 +165,8 @@ Section& Section::operator=(const Section& other) {
     return *this;
 }
 
-PaletteLayer& Section::ensure_secondary() {
-    if (!secondary_) secondary_ = std::make_unique<PaletteLayer>(kAirStateId);
+PaletteLayer& Section::ensure_secondary(u32 fill) {
+    if (!secondary_) secondary_ = std::make_unique<PaletteLayer>(fill);
     return *secondary_;
 }
 

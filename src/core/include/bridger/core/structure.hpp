@@ -56,6 +56,8 @@ public:
 
     [[nodiscard]] StateId block(BlockPos p) const noexcept;
     [[nodiscard]] StateId secondary(BlockPos p) const noexcept;
+    // False where the position's section has no secondary layer (nothing stored there).
+    [[nodiscard]] bool has_secondary(BlockPos p) const noexcept;
     [[nodiscard]] std::optional<BiomeId> biome(BlockPos p) const noexcept;
     // Return false (and change nothing) outside the structure.
     bool set_block(BlockPos p, StateId id);

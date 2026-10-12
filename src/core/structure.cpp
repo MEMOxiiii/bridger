@@ -42,6 +42,11 @@ StateId Structure::secondary(BlockPos p) const noexcept {
         .secondary(p.x & 15, p.y & 15, p.z & 15);
 }
 
+bool Structure::has_secondary(BlockPos p) const noexcept {
+    if (!contains(p)) return false;
+    return section(static_cast<u32>(p.x >> 4), static_cast<u32>(p.y >> 4), static_cast<u32>(p.z >> 4)).has_secondary();
+}
+
 std::optional<BiomeId> Structure::biome(BlockPos p) const noexcept {
     if (!contains(p)) return std::nullopt;
     return section(static_cast<u32>(p.x >> 4), static_cast<u32>(p.y >> 4), static_cast<u32>(p.z >> 4))

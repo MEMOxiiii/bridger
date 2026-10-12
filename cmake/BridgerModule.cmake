@@ -13,7 +13,7 @@ set(BRIDGER_ALLOWED_DEPS_core      "")
 set(BRIDGER_ALLOWED_DEPS_platform  "core")
 set(BRIDGER_ALLOWED_DEPS_io        "core;platform")
 set(BRIDGER_ALLOWED_DEPS_formats   "core;platform;io")
-set(BRIDGER_ALLOWED_DEPS_translate "core")
+set(BRIDGER_ALLOWED_DEPS_translate "core;platform;io") # io: NBT for block entities (ADR 0008)
 set(BRIDGER_ALLOWED_DEPS_convert   "core;platform;io;formats;translate")
 set(BRIDGER_ALLOWED_DEPS_render    "core;platform;io;formats")
 
