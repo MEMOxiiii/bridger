@@ -12,18 +12,18 @@ using enum Support;
 // Keep in sync with the README "Format support" matrix.
 constexpr std::array kFormats{
     FormatInfo{FormatId::LegacySchematic, Edition::Java, "schematic", ".schematic",
-               "MCEdit legacy schematic (numeric ids)", InProgress, Planned},
-    FormatInfo{FormatId::SpongeSchem, Edition::Java, "schem", ".schem", "Sponge schematic v1-v3", InProgress,
-               InProgress},
-    FormatInfo{FormatId::Litematic, Edition::Java, "litematic", ".litematic", "Litematica schematic", InProgress,
-               InProgress},
-    FormatInfo{FormatId::StructureNbt, Edition::Java, "nbt", ".nbt", "Java structure block file", InProgress,
-               InProgress},
-    FormatInfo{FormatId::JavaWorld, Edition::Java, "java-world", "", "Java world (Anvil)", InProgress, InProgress},
+               "MCEdit legacy schematic (numeric ids)", Supported, Planned},
+    FormatInfo{FormatId::SpongeSchem, Edition::Java, "schem", ".schem", "Sponge schematic v1-v3", Supported,
+               Supported},
+    FormatInfo{FormatId::Litematic, Edition::Java, "litematic", ".litematic", "Litematica schematic", Supported,
+               Supported},
+    FormatInfo{FormatId::StructureNbt, Edition::Java, "nbt", ".nbt", "Java structure block file", Supported,
+               Supported},
+    FormatInfo{FormatId::JavaWorld, Edition::Java, "java-world", "", "Java world (Anvil)", Supported, Supported},
     FormatInfo{FormatId::McStructure, Edition::Bedrock, "mcstructure", ".mcstructure",
-               "Bedrock structure file", InProgress, InProgress},
+               "Bedrock structure file", Supported, Supported},
     FormatInfo{FormatId::McWorld, Edition::Bedrock, "mcworld", ".mcworld", "Bedrock world (zipped LevelDB)",
-               InProgress, InProgress},
+               Supported, Supported},
 };
 
 constexpr char ascii_lower(char c) noexcept { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c; }

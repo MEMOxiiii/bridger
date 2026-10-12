@@ -42,7 +42,7 @@ Volume ≤ `max_volume`; layer lengths must equal the volume; indices must be in
 
 ## Open questions
 
-- In-game check of written files in Bedrock 26.52 (load with a structure block): pending.
+- In-game check of written files in Bedrock 26.52 (load with a structure block): **passed** (2026-10-12).
 
 ## Sources
 

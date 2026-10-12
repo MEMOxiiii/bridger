@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     info_cmd->add_option("input", info_input, "Input file")->required();
 
     bridger::cli::ConvertArgs conv;
-    auto* convert_cmd = app.add_subcommand("convert", "Convert between formats (0.1.0: .schem -> new .mcworld)");
+    auto* convert_cmd = app.add_subcommand("convert", "Convert between Java and Bedrock formats (see `bridger formats`)");
     convert_cmd->add_option("input", conv.input, "Input file")->required();
     convert_cmd->add_option("output", conv.output, "Output file, or a Java world folder (no extension)")->required();
     convert_cmd->add_option("--format", conv.format, "Output format name (overrides the extension)");

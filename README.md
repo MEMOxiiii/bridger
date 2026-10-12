@@ -9,26 +9,26 @@ is a native Windows tool written in C++20. It aims to be faster and more reliabl
 tests, benchmarks and in-game checks. It never modifies your input files, and it reports anything it could not
 convert exactly.
 
-> **Status: early development (Phase 6).** `bridger convert` works in both directions: Java schematics
-> (`.schem`, `.litematic`, structure `.nbt`, legacy `.schematic`) and whole Java worlds become Bedrock worlds
-> (`.mcworld`) or `.mcstructure` files, a structure can be placed into a copy of an existing Bedrock world, and
-> `.mcstructure` files and Bedrock worlds become Java schematics and Java worlds. Everything passes the automated
-> and independent checks; the in-game checks that gate the releases (**0.1.0**–**0.3.0**) are pending.
+> **Status: 0.3.0.** `bridger convert` works in both directions: Java schematics (`.schem`, `.litematic`,
+> structure `.nbt`, legacy `.schematic`) and whole Java worlds become Bedrock worlds (`.mcworld`) or `.mcstructure`
+> files, a structure can be placed into a copy of an existing Bedrock world, and `.mcstructure` files and Bedrock
+> worlds become Java schematics and Java worlds. Every format passed the automated tests, fuzzing, the independent
+> checks and the in-game checklist in Java 26.3 and Bedrock 26.52. The 3D viewer and desktop app come next (0.4.0).
 
 ## Format support
 
 | Format | Edition | Read | Write |
 |---|---|---|---|
-| `.schem` (Sponge v1–v3; writes v3) | Java | in progress (0.1.0) | in progress (0.3.0) |
-| `.schematic` (MCEdit legacy) | Java | in progress (0.2.0) | — |
-| `.litematic` | Java | in progress (0.2.0) | in progress (0.3.0) |
-| Structure `.nbt` | Java | in progress (0.2.0) | in progress (0.3.0) |
-| Java world (Anvil, 1.18+ layout, Overworld) | Java | in progress (0.2.0) | in progress (0.3.0) |
-| `.mcstructure` | Bedrock | in progress (0.3.0) | in progress (0.2.0) |
-| `.mcworld` (new world; reading: Overworld) | Bedrock | in progress (0.3.0) | in progress (**0.1.0**, pending in-game check) |
-| `.mcworld` (place into existing world → new output) | Bedrock | — | in progress (0.2.0) |
+| `.schem` (Sponge v1–v3; writes v3) | Java | supported | supported |
+| `.schematic` (MCEdit legacy) | Java | supported | — |
+| `.litematic` | Java | supported | supported |
+| Structure `.nbt` | Java | supported | supported |
+| Java world (Anvil, 1.18+ layout, Overworld) | Java | supported | supported |
+| `.mcstructure` | Bedrock | supported | supported |
+| `.mcworld` (new world; reading: Overworld) | Bedrock | supported | supported |
+| `.mcworld` (place into existing world → new output) | Bedrock | — | supported |
 
-"Supported" will mean: golden tests, a fuzz target, a benchmark, and a recorded in-game check all pass. Run
+"Supported" means: golden tests, a fuzz target, a benchmark, and a recorded in-game check all pass. Run
 `bridger formats` to see what your build supports.
 
 **Game versions:** v1 targets exactly **Java Edition 26.3** and **Bedrock Edition 26.52**
@@ -40,7 +40,8 @@ _Coming with the 3D viewer (0.4.0)._
 
 ## Installation
 
-There are no binary releases yet. 0.1.0 will ship as a portable zip.
+Download `bridger-<version>-windows-x64.zip` from the [releases page](https://github.com/MEMOxiiii/bridger/releases),
+unzip it anywhere and run `bridger.exe` from a terminal. No installer; the Visual C++ runtime DLLs are included.
 
 ### Building from source (Windows x64)
 

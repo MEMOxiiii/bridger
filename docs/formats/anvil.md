@@ -133,11 +133,11 @@ Code: `src/formats/java/anvil/anvil_writer.cpp`, pipeline `convert_bedrock_world
 
 ## Open questions
 
-- Written worlds open in Java 26.3 with correct blocks, light and heightmaps: pending (in-game checklist).
-- `world_gen_settings.dat` without `dimensions`: does 26.3 keep the seed? Pending.
+- Written worlds open in Java 26.3 with correct blocks, light and chests: **passed** in the 2026-10-12 in-game run
+  (`docs/testing.md`), including the seed check of the checklist.
 - Java 26.3 world with real terrain: not yet tested (needs a world saved by the game; the Mojang server
   can generate one but running it requires accepting the EULA, which is the user's decision).
-- In-game check of a converted world in Bedrock 26.52: pending (in-game checklist).
+- In-game check of a converted world in Bedrock 26.52: **passed** (2026-10-12).
 
 ## Sources
 

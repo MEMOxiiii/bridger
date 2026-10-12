@@ -150,4 +150,4 @@ Files in `build/ingame-test/phase56/`, made with the build under test (commands 
 
 | Date | Bridger commit | Game + version | Structures | Result | Notes |
 |---|---|---|---|---|---|
-| — | — | — | — | — | Pending: first run by the maintainer (0.1.0 release gate) |
+| 2026-10-12 | `72d121a` | Bedrock 26.52, Java 26.3 | the five Phase 4 worlds (`build/ingame-test/`) and every Phase 5–6 file (`build/ingame-test/phase56/`) | **passed** | Run by the maintainer, who reported every item as working (release 0.3.0 gate). This answers the open questions in `docs/formats/bedrock-world.md` and `anvil.md` for these files |

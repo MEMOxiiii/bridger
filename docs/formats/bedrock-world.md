@@ -173,6 +173,10 @@ copy of `db/` is opened.
 
 Results are recorded in `docs/testing.md` and folded back into this document.
 
+**2026-10-12 (release 0.3.0):** the in-game run passed in Bedrock 26.52 with the values described above (relative
+heightmap, `FinalizedState` 2, `pairlead` on the right half): the test worlds open, flat edges meet game-generated
+chunks without seams, and double chests open as one.
+
 ## Sources
 
 1. minecraft.wiki, "Bedrock Edition level format": https://minecraft.wiki/w/Bedrock_Edition_level_format (checked 2026-10-11)

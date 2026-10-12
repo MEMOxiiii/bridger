@@ -3,6 +3,8 @@
 // Reported as chunks per second; a 2000 x 2000 block world is ~15 600 chunks.
 
 #include <bridger/formats/bedrock/mcworld/bedrock_world.hpp>
+#include <bridger/formats/bedrock/mcworld/bedrock_world_reader.hpp>
+#include <bridger/io/zip_archive.hpp>
 #include <bridger/formats/java/anvil/anvil_writer.hpp>
 #include <bridger/formats/java/anvil/chunk_codec.hpp>
 #include <bridger/io/nbt/nbt_writer.hpp>
@@ -15,6 +17,8 @@
 #include <array>
 #include <bit>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <string>
@@ -171,5 +175,78 @@ void BM_ChunkDecodeTranslateWrite(benchmark::State& state) {
     std::filesystem::remove_all(dir, ec);
 }
 BENCHMARK(BM_ChunkDecodeTranslateWrite)->Unit(benchmark::kMillisecond);
+
+// Bedrock world reading (Bedrock world -> Java world): unzip a 256-column world written by the
+// world builder, then read every column (subchunks, biomes, block entities).
+void BM_BedrockWorldRead(benchmark::State& state) {
+    namespace fs = std::filesystem;
+    const translate::MappingData& m = *translate::MappingData::embedded().value();
+    const u32 air = *m.find_bedrock("minecraft:air", {});
+    const auto root = fs::temp_directory_path() / ("bridger-bench-bedrockread-" + std::to_string(std::random_device{}()));
+    std::vector<std::vector<u8>> cache(m.bedrock_state_count());
+    const formats::bedrock::StateNbtFn state_nbt = [&](u32 s) -> Result<std::span<const u8>> {
+        if (cache[s].empty()) {
+            NbtWriter w(Endian::Little);
+            w.begin_root_compound("");
+            w.write_string("name", m.bedrock(s).name);
+            w.begin_compound("states");
+            for (const auto& p : m.bedrock(s).properties) {
+                if (p.type == translate::NbtValueType::Byte) w.write_byte(p.key, static_cast<i8>(p.int_value));
+                else if (p.type == translate::NbtValueType::Int) w.write_int(p.key, p.int_value);
+                else w.write_string(p.key, p.str_value);
+            }
+            w.end_compound();
+            w.write_int("version", static_cast<i32>(m.bedrock_block_version()));
+            w.end_compound();
+            cache[s] = std::move(w).finish().value();
+        }
+        return std::span<const u8>(cache[s]);
+    };
+    std::vector<u8> mcworld;
+    {
+        auto builder = formats::bedrock::WorldBuilder::create(root / "world").value();
+        const auto chunk = make_chunk();
+        auto c = formats::java::decode_chunk(chunk, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>()).value();
+        translate::ConversionReport report;
+        const Structure b = translate::translate_to_bedrock(c.column, m, {}, report).value();
+        for (i32 i = 0; i < 256; ++i)
+            if (!builder.write_column({i % 16, i / 16}, c.min_y, b, air, translate::kDefaultBedrockBiome, state_nbt))
+                state.SkipWithError("world build failed");
+        if (!builder.finish({}) || !io::write_zip_file_from_directory(root / "world", root / "w.mcworld"))
+            state.SkipWithError("world build failed");
+        std::ifstream in(root / "w.mcworld", std::ios::binary);
+        mcworld.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto lookup = [&m](io::nbt::NbtCompoundView e) -> std::optional<u32> {
+        std::vector<translate::BedrockProperty> props;
+        for (const auto& st : e.find("states").entries()) {
+            translate::BedrockProperty p;
+            p.key = st.name;
+            if (const auto bb = st.value.as_byte()) { p.type = translate::NbtValueType::Byte; p.int_value = *bb; }
+            else if (const auto i = st.value.as_int()) { p.type = translate::NbtValueType::Int; p.int_value = *i; }
+            else { p.type = translate::NbtValueType::String; p.str_value = st.value.as_string().value_or(""); }
+            props.push_back(p);
+        }
+        return m.find_bedrock(e.find("name").as_string().value_or(""), props);
+    };
+    usize n = 0;
+    for (auto _ : state) {
+        const auto dir = root / ("read" + std::to_string(n++));
+        auto reader = formats::bedrock::BedrockWorldReader::open(mcworld, dir);
+        if (!reader) {
+            state.SkipWithError("open failed");
+            break;
+        }
+        for (const ChunkPos c : reader->overworld_chunks()) {
+            auto col = reader->read_column(c, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(),
+                                           m.bedrock_block_version(), lookup, air, translate::kDefaultBedrockBiome);
+            benchmark::DoNotOptimize(col);
+        }
+    }
+    state.counters["chunks/s"] = benchmark::Counter(static_cast<double>(state.iterations()) * 256, benchmark::Counter::kIsRate);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+BENCHMARK(BM_BedrockWorldRead)->Unit(benchmark::kMillisecond);
 
 } // namespace

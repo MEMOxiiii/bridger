@@ -1,0 +1,140 @@
+name: Release
+
+# Builds the portable zip for a version tag (docs/release.md, steps 8-9) and publishes the
+# GitHub release with the matching CHANGELOG.md section.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  VCPKG_TAG: "2026.07.29"
+  BRIDGER_VCPKG_DIR: ${{ github.workspace }}/vcpkg
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-binary-cache
+  VCPKG_DOWNLOADS: ${{ github.workspace }}/vcpkg-downloads
+  VCPKG_DISABLE_METRICS: "1"
+  # Pinned in tools/mapgen/fetch_sources.py; their data is compiled into the mapping blob.
+  GEYSER_COMMIT: "50a464d7db132ca5943b608a2110c158bf09702a"
+  MCDATA_COMMIT: "dd01127457231e7da629d645b3c6738068018eb0"
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-msvc-release
+          restore-keys: |
+            vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-
+            vcpkg-${{ env.VCPKG_TAG }}-
+
+      - name: Restore vcpkg tool downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DOWNLOADS }}
+          key: vcpkg-downloads-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-downloads-${{ env.VCPKG_TAG }}-
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE, $env:VCPKG_DOWNLOADS | Out-Null
+          git -c advice.detachedHead=false clone --depth 1 --branch $env:VCPKG_TAG https://github.com/microsoft/vcpkg.git $env:BRIDGER_VCPKG_DIR
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:BRIDGER_VCPKG_DIR\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_ROOT=$env:BRIDGER_VCPKG_DIR" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Check the tag matches the project version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $cm = Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)' | Select-Object -First 1
+          $version = $cm.Matches[0].Groups[1].Value
+          $vcpkg = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'version-semver'
+          "tag $tag, CMakeLists $version, vcpkg.json $vcpkg"
+          if ($tag -ne $version -or $tag -ne $vcpkg) { throw "version mismatch" }
+
+      - name: Configure, build, test
+        shell: pwsh
+        run: |
+          cmake --preset msvc-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset msvc-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --preset msvc-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package the portable zip
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $name = "bridger-$version-windows-x64"
+          $dir = "dist/$name"
+          New-Item -ItemType Directory -Force "$dir/licenses" | Out-Null
+          Copy-Item build/msvc-release/bin/bridger.exe $dir
+          # MSVC runtime, deployed next to the exe (app-local deployment of the Visual C++
+          # redistributable files); the Universal CRT is part of Windows 10 and later.
+          $crt = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          foreach ($dll in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") { Copy-Item (Join-Path $crt.FullName $dll) $dir }
+          Copy-Item README.md, CHANGELOG.md, THIRD_PARTY.md $dir
+          Copy-Item LICENSE "$dir/licenses/bridger-MPL-2.0.txt"
+          # Shipped libraries (THIRD_PARTY.md, "Shipped: yes"): their vcpkg copyright files.
+          $share = "build/vcpkg_installed/x64-windows-static-md/share"
+          foreach ($port in "libdeflate", "minizip-ng", "zlib", "tbb", "tl-expected", "xxhash", "spdlog", "fmt", "cli11") {
+            $src = Join-Path $share "$port/copyright"
+            if (-not (Test-Path $src)) { throw "missing license for $port" }
+            Copy-Item $src "$dir/licenses/$port.txt"
+          }
+          Copy-Item third_party/leveldb-mcpe/LICENSE "$dir/licenses/leveldb-mcpe.txt"
+          Copy-Item tools/mapgen/sources/geyser-mappings/LICENSE "$dir/licenses/geysermc-mappings.txt"
+          Invoke-WebRequest "https://raw.githubusercontent.com/GeyserMC/Geyser/$env:GEYSER_COMMIT/LICENSE" -OutFile "$dir/licenses/geysermc-geyser.txt"
+          # minecraft-data has no LICENSE file; its README states the license. Ship that section verbatim.
+          $readme = (Invoke-WebRequest "https://raw.githubusercontent.com/PrismarineJS/minecraft-data/$env:MCDATA_COMMIT/README.md").Content -split "`n"
+          $at = [array]::FindIndex($readme, [Predicate[string]] { param($l) $l.Trim() -eq "## License" })
+          if ($at -lt 0) { throw "minecraft-data README has no License section" }
+          $notice = @("PrismarineJS/minecraft-data, commit $env:MCDATA_COMMIT (data/pc/common/legacy.json)",
+                      "https://github.com/PrismarineJS/minecraft-data", "License section of its README:", "") + $readme[$at..($at + 6)]
+          Set-Content -Encoding utf8 "$dir/licenses/minecraft-data.txt" $notice
+          # Docs step 8: never ship the Vulkan loader.
+          if (Get-ChildItem $dir -Recurse -Filter "vulkan-1.dll") { throw "vulkan-1.dll must not be shipped" }
+          & "$dir/bridger.exe" --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path $dir -DestinationPath "dist/$name.zip"
+          "ZIP=dist/$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $lines = Get-Content -Encoding utf8 CHANGELOG.md
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]").LineNumber
+          if (-not $start) { throw "CHANGELOG.md has no section for $version" }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^## \[' | Select-Object -First 1).LineNumber
+          $section = if ($end) { $rest[0..($end - 2)] } else { $rest }
+          Set-Content -Encoding utf8 dist/notes.md $section
+
+      - name: Publish the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" $env:ZIP --title "Bridger ${{ github.ref_name }}" --notes-file dist/notes.md --verify-tag
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -18,9 +18,10 @@ TEST_CASE("Nothing claims support before it has passed acceptance", "[formats]")
     // a benchmark and (for writers) the in-game checklist.
     for (const auto& f : all_formats()) {
         CAPTURE(f.name);
-        // Phase 6: every format is read and written except legacy .schematic (read only).
-        CHECK(f.read == Support::InProgress);
-        CHECK(f.write == (f.id == FormatId::LegacySchematic ? Support::Planned : Support::InProgress));
+        // Release 0.3.0: every format passed golden tests, fuzzing, a benchmark and the in-game
+        // checklist. Legacy .schematic is read only.
+        CHECK(f.read == Support::Supported);
+        CHECK(f.write == (f.id == FormatId::LegacySchematic ? Support::Planned : Support::Supported));
         CHECK(&info(f.id) == &f);
     }
 }

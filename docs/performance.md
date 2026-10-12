@@ -116,6 +116,18 @@ over five runs. The machine ran at its 2.4 GHz base clock with other programs ac
 multi-threaded figure varies widely; it needs a quiet re-measurement. Reading the world's chunk list alone
 (`bridger info`) takes 1.0 s.
 
+`bridger_bench_structures` (128 × 64 × 128 = 1 M blocks, 24 states, 64 chests; medians of 3) and the Bedrock
+world reader:
+
+| Benchmark | Result |
+|---|---|
+| `BM_SchemWrite` | 41.6 ms = 27.5 M blocks/s |
+| `BM_StructureNbtWrite` / `Read` | 985 ms / 564 ms (one compound per block: the format itself is verbose) |
+| `BM_LitematicWrite` / `Read` | 129 ms / 50.1 ms |
+| `BM_McStructureWrite` / `Read` | 142 ms / 67.4 ms |
+| `BM_LegacySchematicRead` | 72.2 ms = 16.0 M blocks/s |
+| `BM_BedrockWorldRead` (`bench_anvil`; unzip + read 256 full columns) | 586 ms = 512 chunks/s |
+
 Note: `BM_ChunkDecodeTranslateWrite` doubled between the Phase 5 and Phase 6 runs. The code path gained the
 `EncodedColumn` copy and the 64 MB write buffer, but the same noisy conditions applied; it is recorded here as
 measured and will be re-checked on a quiet machine before any claim is made.
