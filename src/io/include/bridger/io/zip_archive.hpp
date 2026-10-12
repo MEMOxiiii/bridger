@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace bridger::io {
@@ -39,5 +40,28 @@ struct ZipListing {
 };
 // Lists a zip file's entries without extracting them.
 [[nodiscard]] Result<std::vector<ZipListing>> list_zip_file(const std::filesystem::path& zip_path, const ZipLimits& limits = {});
+
+// Random access to the entries of a zip file on disk (e.g. a Minecraft client jar or a
+// resource pack) without extracting the whole archive. The central directory is indexed once at
+// open, so a read is a hash lookup plus one entry's decompression (a client jar has ~20 k
+// entries; minizip's own lookup is a linear scan). Not thread-safe: one reader per thread.
+class ZipReader {
+public:
+    [[nodiscard]] static Result<ZipReader> open(const std::filesystem::path& zip_path, const ZipLimits& limits = {});
+    ZipReader(ZipReader&&) noexcept;
+    ZipReader& operator=(ZipReader&&) noexcept;
+    ~ZipReader();
+
+    // Entry bytes by exact '/'-separated name; nullopt if absent.
+    [[nodiscard]] Result<std::optional<std::vector<u8>>> read(std::string_view name);
+    // Every entry name (files only).
+    [[nodiscard]] Result<std::vector<std::string>> names();
+
+private:
+    ZipReader();
+    void* handle_ = nullptr;
+    ZipLimits limits_;
+    std::unordered_map<std::string, i64> index_; // entry name -> central directory position
+};
 
 } // namespace bridger::io

@@ -25,9 +25,9 @@ struct ZipWriter {
     void* h = mz_zip_writer_create();
     ~ZipWriter() { mz_zip_writer_delete(&h); }
 };
-struct ZipReader {
+struct ReaderHandle {
     void* h = mz_zip_reader_create();
-    ~ZipReader() { mz_zip_reader_delete(&h); }
+    ~ReaderHandle() { mz_zip_reader_delete(&h); }
 };
 
 bool safe_entry_name(std::string_view name) {
@@ -123,7 +123,7 @@ Status write_zip_file_from_directory(const std::filesystem::path& dir, const std
 
 Result<std::vector<ZipListing>> list_zip_file(const std::filesystem::path& zip_path, const ZipLimits& limits) {
     BRIDGER_TRY(const std::string zip_utf8, platform::path_to_utf8(zip_path));
-    ZipReader zip;
+    ReaderHandle zip;
     if (!zip.h) return make_error(ErrorCode::IoError, "zip: out of memory");
     if (mz_zip_reader_open_file(zip.h, zip_utf8.c_str()) != MZ_OK) return make_error(ErrorCode::Malformed, "zip: not a zip archive");
     std::vector<ZipListing> out;
@@ -141,7 +141,7 @@ Result<std::vector<ZipListing>> list_zip_file(const std::filesystem::path& zip_p
 Result<std::vector<ZipEntry>> read_zip(std::span<const u8> archive, const ZipLimits& limits) {
     if (archive.size() > static_cast<usize>(std::numeric_limits<i32>::max()))
         return make_error(ErrorCode::LimitExceeded, "zip: archive too large");
-    ZipReader zip;
+    ReaderHandle zip;
     if (!zip.h) return make_error(ErrorCode::IoError, "zip: out of memory");
     if (mz_zip_reader_open_buffer(zip.h, const_cast<u8*>(archive.data()), static_cast<i32>(archive.size()), 0) != MZ_OK)
         return make_error(ErrorCode::Malformed, "zip: not a zip archive");
@@ -168,6 +168,83 @@ Result<std::vector<ZipEntry>> read_zip(std::span<const u8> archive, const ZipLim
         out.push_back(std::move(e));
     }
     mz_zip_reader_close(zip.h);
+    return out;
+}
+
+ZipReader::ZipReader() = default;
+ZipReader::ZipReader(ZipReader&& o) noexcept : handle_(o.handle_), limits_(o.limits_), index_(std::move(o.index_)) { o.handle_ = nullptr; }
+ZipReader& ZipReader::operator=(ZipReader&& o) noexcept {
+    if (this != &o) {
+        if (handle_ != nullptr) {
+            mz_zip_reader_close(handle_);
+            mz_zip_reader_delete(&handle_);
+        }
+        handle_ = o.handle_;
+        limits_ = o.limits_;
+        index_ = std::move(o.index_);
+        o.handle_ = nullptr;
+    }
+    return *this;
+}
+ZipReader::~ZipReader() {
+    if (handle_ != nullptr) {
+        mz_zip_reader_close(handle_);
+        mz_zip_reader_delete(&handle_);
+    }
+}
+
+Result<ZipReader> ZipReader::open(const std::filesystem::path& zip_path, const ZipLimits& limits) {
+    BRIDGER_TRY(const std::string utf8, platform::path_to_utf8(zip_path));
+    ZipReader r;
+    r.limits_ = limits;
+    r.handle_ = mz_zip_reader_create();
+    if (r.handle_ == nullptr) return make_error(ErrorCode::IoError, "zip: out of memory");
+    if (mz_zip_reader_open_file(r.handle_, utf8.c_str()) != MZ_OK) return make_error(ErrorCode::Malformed, "zip: cannot open " + utf8);
+    void* zip = nullptr;
+    if (mz_zip_reader_get_zip_handle(r.handle_, &zip) != MZ_OK || zip == nullptr) return make_error(ErrorCode::Malformed, "zip: cannot open " + utf8);
+    for (i32 e = mz_zip_reader_goto_first_entry(r.handle_); e == MZ_OK; e = mz_zip_reader_goto_next_entry(r.handle_)) {
+        mz_zip_file* info = nullptr;
+        if (mz_zip_reader_entry_get_info(r.handle_, &info) != MZ_OK || info == nullptr || info->filename == nullptr)
+            return make_error(ErrorCode::Malformed, "zip: unreadable entry in " + utf8);
+        std::string name(info->filename);
+        if (name.empty() || name.back() == '/') continue;
+        r.index_.emplace(std::move(name), mz_zip_get_entry(zip)); // the first of duplicate names wins, as before
+        if (r.index_.size() > limits.max_entries) return make_error(ErrorCode::LimitExceeded, "zip: too many entries in " + utf8);
+    }
+    return r;
+}
+
+Result<std::optional<std::vector<u8>>> ZipReader::read(std::string_view name) {
+    if (!safe_entry_name(name)) return make_error(ErrorCode::InvalidArgument, "zip: unsafe entry name");
+    const std::string n(name);
+    const auto it = index_.find(n);
+    if (it == index_.end()) return std::optional<std::vector<u8>>{};
+    void* zip = nullptr;
+    if (mz_zip_reader_get_zip_handle(handle_, &zip) != MZ_OK || zip == nullptr || mz_zip_goto_entry(zip, it->second) != MZ_OK)
+        return make_error(ErrorCode::Malformed, "zip: unreadable entry " + n);
+    mz_zip_file* info = nullptr;
+    if (mz_zip_entry_get_info(zip, &info) != MZ_OK || info == nullptr) return make_error(ErrorCode::Malformed, "zip: unreadable entry " + n);
+    if (info->uncompressed_size < 0 || static_cast<u64>(info->uncompressed_size) > limits_.max_total_bytes ||
+        info->uncompressed_size > std::numeric_limits<i32>::max())
+        return make_error(ErrorCode::LimitExceeded, "zip: entry too large " + n);
+    std::vector<u8> out(static_cast<usize>(info->uncompressed_size));
+    if (mz_zip_entry_read_open(zip, 0, nullptr) != MZ_OK) return make_error(ErrorCode::Malformed, "zip: corrupt entry " + n);
+    usize done = 0;
+    while (done < out.size()) {
+        const i32 got = mz_zip_entry_read(zip, out.data() + done, static_cast<i32>(out.size() - done));
+        if (got <= 0) break;
+        done += static_cast<usize>(got);
+    }
+    // Closing checks the CRC once the whole entry was read.
+    if (mz_zip_entry_close(zip) != MZ_OK || done != out.size()) return make_error(ErrorCode::Malformed, "zip: corrupt entry " + n);
+    return std::optional<std::vector<u8>>{std::move(out)};
+}
+
+Result<std::vector<std::string>> ZipReader::names() {
+    std::vector<std::string> out;
+    out.reserve(index_.size());
+    for (const auto& [name, pos] : index_) out.push_back(name);
+    std::sort(out.begin(), out.end());
     return out;
 }
 
