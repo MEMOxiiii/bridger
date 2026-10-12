@@ -994,6 +994,10 @@ kbd {
   left: calc((100% - 456px + 364px) / 2);
 }
 
+.app.drawer-open .toasts {
+  left: calc((100% - 456px + 364px) / 2);
+}
+
 .app.drawer-open .dock-label {
   display: none;
 }
