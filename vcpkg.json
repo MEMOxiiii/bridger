@@ -8,12 +8,19 @@
     {
       "name": "libdeflate",
       "default-features": false,
-      "features": ["compression", "decompression", "gzip", "zlib"]
+      "features": [
+        "compression",
+        "decompression",
+        "gzip",
+        "zlib"
+      ]
     },
     {
       "name": "minizip-ng",
       "default-features": false,
-      "features": ["zlib"]
+      "features": [
+        "zlib"
+      ]
     },
     "zlib",
     "tbb",
@@ -22,7 +29,13 @@
     "spdlog",
     "cli11"
   ],
-  "default-features": ["render", "app", "tests", "benchmarks", "tracy"],
+  "default-features": [
+    "render",
+    "app",
+    "tests",
+    "benchmarks",
+    "tracy"
+  ],
   "features": {
     "render": {
       "description": "Vulkan renderer (bridger_render)",
@@ -30,30 +43,48 @@
         "volk",
         "vk-bootstrap",
         "vulkan-memory-allocator",
-        { "name": "glslang", "features": ["tools"] },
+        {
+          "name": "glslang",
+          "features": [
+            "tools"
+          ]
+        },
         "glm",
         "stb",
         "nlohmann-json"
       ]
     },
     "app": {
-      "description": "Desktop app (bridger-gui.exe)",
+      "description": "Desktop app (bridger-gui.exe): SDL3 window, WebView2 user interface over the Vulkan viewer",
       "dependencies": [
-        "sdl3",
-        { "name": "imgui", "features": ["docking-experimental", "sdl3-binding", "vulkan-binding"] }
+        {
+          "name": "sdl3",
+          "features": [
+            "vulkan"
+          ]
+        },
+        "webview2",
+        "wil"
       ]
     },
     "tests": {
       "description": "Unit tests",
-      "dependencies": ["catch2", "nlohmann-json"]
+      "dependencies": [
+        "catch2",
+        "nlohmann-json"
+      ]
     },
     "benchmarks": {
       "description": "Benchmarks",
-      "dependencies": ["benchmark"]
+      "dependencies": [
+        "benchmark"
+      ]
     },
     "tracy": {
       "description": "Tracy profiler client (used with BRIDGER_ENABLE_TRACY=ON)",
-      "dependencies": ["tracy"]
+      "dependencies": [
+        "tracy"
+      ]
     }
   }
 }

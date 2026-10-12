@@ -1,6 +1,8 @@
 # 0005. Rendering and UI: Vulkan 1.3, SDL3, Dear ImGui
 
-- Status: accepted (implementation in Phases 7–8)
+- Status: accepted for rendering (Phase 7). The UI part (Dear ImGui) is superseded by ADR 0009 (Phase 8):
+  the app's interface is React in WebView2, composited over the Vulkan viewer. The imgui loader conflict below
+  no longer applies: imgui is not a dependency any more.
 - Date: 2026-10-11
 
 ## Context

@@ -78,7 +78,8 @@ endif()
 
 if(BRIDGER_BUILD_APP)
     find_package(SDL3 CONFIG REQUIRED)
-    find_package(imgui CONFIG REQUIRED)
+    find_package(unofficial-webview2 CONFIG REQUIRED)
+    find_package(wil CONFIG REQUIRED)
 endif()
 
 # leveldb-mcpe (git submodule, built by our own CMake file — see third_party/CMakeLists.txt)

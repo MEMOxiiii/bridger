@@ -8,6 +8,7 @@ include(Catch)
 file(GLOB_RECURSE unit_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/unit/*_test.cpp")
 if(NOT BRIDGER_BUILD_RENDER)
     list(FILTER unit_sources EXCLUDE REGEX "/unit/render/")
+    list(FILTER unit_sources EXCLUDE REGEX "/unit/app/")
 endif()
 
 add_executable(bridger_unit_tests ${unit_sources})
@@ -17,6 +18,9 @@ target_link_libraries(bridger_unit_tests PRIVATE
     Catch2::Catch2WithMain nlohmann_json::nlohmann_json)
 if(BRIDGER_BUILD_RENDER)
     target_link_libraries(bridger_unit_tests PRIVATE bridger::render)
+    # The desktop app's camera controller is OS-free: tested directly from its source.
+    target_sources(bridger_unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/app/viewer.cpp")
+    target_include_directories(bridger_unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/app")
 endif()
 target_compile_definitions(bridger_unit_tests PRIVATE
     BRIDGER_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"

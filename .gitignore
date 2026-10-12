@@ -36,3 +36,6 @@ slow-unit-*
 timeout-*
 oom-*
 leak-*
+src/app/ui/node_modules/
+src/app/ui/dist/
+src/app/ui/*.tsbuildinfo

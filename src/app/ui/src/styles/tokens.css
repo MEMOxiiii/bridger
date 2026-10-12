@@ -1,0 +1,89 @@
+/* Design tokens (ui-ux skill: warm charcoal dark theme, OKLCH, 4px grid, defined z-scale).
+   The app is dark-only: it sits over a 3D scene. Java = amber, Bedrock = teal; the brand
+   gradient runs from one edition to the other. */
+:root {
+  color-scheme: dark;
+
+  /* Neutrals: warm charcoal, never pure black/white. --bg matches kCharcoal in app.cpp. */
+  --bg: #1c1917;
+  --bg-raised: oklch(24.5% 0.008 60);
+  --surface: oklch(22% 0.007 60 / 0.93); /* backdrop-filter cannot blur the native 3D layer, so panels stay mostly opaque */
+  --surface-strong: oklch(24% 0.008 60 / 0.97);
+  --surface-hover: oklch(100% 0 0 / 0.06);
+  --surface-active: oklch(100% 0 0 / 0.1);
+  --border: oklch(100% 0 0 / 0.08);
+  --border-strong: oklch(100% 0 0 / 0.14);
+  --text: #f3f0eb;
+  --text-muted: oklch(80% 0.01 75);
+  --text-subtle: oklch(66% 0.012 70);
+
+  /* Editions + brand. */
+  --java: oklch(80% 0.14 70);
+  --java-soft: oklch(80% 0.14 70 / 0.14);
+  --bedrock: oklch(78% 0.11 182);
+  --bedrock-soft: oklch(78% 0.11 182 / 0.14);
+  --brand-gradient: linear-gradient(120deg, var(--java) 0%, oklch(79% 0.12 120) 50%, var(--bedrock) 100%);
+  --on-brand: #1c1917;
+
+  /* Status: solid + soft. */
+  --success: oklch(76% 0.14 155);
+  --success-soft: oklch(76% 0.14 155 / 0.14);
+  --warning: oklch(83% 0.14 85);
+  --warning-soft: oklch(83% 0.14 85 / 0.14);
+  --danger: oklch(70% 0.17 25);
+  --danger-soft: oklch(70% 0.17 25 / 0.14);
+  --info: oklch(76% 0.1 240);
+  --info-soft: oklch(76% 0.1 240 / 0.14);
+
+  /* Type: two families. */
+  --font-sans: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: clamp(28px, 2.2vw + 12px, 40px);
+
+  /* 4px grid. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* Elevation: lighter surface + soft shadow. */
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 4px 16px oklch(0% 0 0 / 0.22);
+  --shadow-2: 0 2px 6px oklch(0% 0 0 / 0.3), 0 16px 48px oklch(0% 0 0 / 0.38);
+  --blur: blur(18px) saturate(1.3);
+
+  /* Motion: ease-out in, faster ease-in out; never linear. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --dur-fast: 150ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+
+  /* Z scale. */
+  --z-viewport: 0;
+  --z-hud: 10;
+  --z-panel: 20;
+  --z-drawer: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px oklch(85% 0.1 120);
+}
