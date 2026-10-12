@@ -19,7 +19,7 @@ TEST_CASE("Nothing claims support before it has passed acceptance", "[formats]")
     for (const auto& f : all_formats()) {
         CAPTURE(f.name);
         CHECK(f.read == (f.id == FormatId::SpongeSchem ? Support::InProgress : Support::Planned));
-        CHECK(f.write == Support::Planned);
+        CHECK(f.write == (f.id == FormatId::McWorld ? Support::InProgress : Support::Planned));
         CHECK(&info(f.id) == &f);
     }
 }

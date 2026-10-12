@@ -23,7 +23,7 @@ constexpr std::array kFormats{
     FormatInfo{FormatId::McStructure, Edition::Bedrock, "mcstructure", ".mcstructure",
                "Bedrock structure file", Planned, Planned},
     FormatInfo{FormatId::McWorld, Edition::Bedrock, "mcworld", ".mcworld", "Bedrock world (zipped LevelDB)",
-               Planned, Planned},
+               Planned, InProgress},
 };
 
 constexpr char ascii_lower(char c) noexcept { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c; }
