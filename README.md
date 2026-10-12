@@ -40,8 +40,10 @@ _Coming with the 3D viewer (0.4.0)._
 
 ## Installation
 
-Download `bridger-<version>-windows-x64.zip` from the [releases page](https://github.com/MEMOxiiii/bridger/releases),
-unzip it anywhere and run `bridger.exe` from a terminal. No installer; the Visual C++ runtime DLLs are included.
+Download `bridger-<version>-windows-x64.zip` from the [releases page](https://github.com/MEMOxiiii/bridger/releases)
+and unzip it anywhere. Double-click `bridger-gui.exe` for the desktop app, or run `bridger.exe` from a terminal.
+No installer; the Visual C++ runtime DLLs are included. The app needs a GPU with Vulkan 1.3 and the Microsoft
+Edge WebView2 Runtime (part of Windows 11 and current Windows 10).
 
 ### Building from source (Windows x64)
 
@@ -50,6 +52,7 @@ Requirements:
   for Windows" is needed for the clang-cl presets.
 - CMake ≥ 3.28 and Ninja (both ship with Visual Studio).
 - [vcpkg](https://github.com/microsoft/vcpkg), checked out at tag `2026.07.29`, with `VCPKG_ROOT` set.
+- [Node.js](https://nodejs.org) 22 or newer (npm builds the desktop app's interface).
 
 ```bat
 git clone --recursive https://github.com/MEMOxiiii/bridger.git
@@ -67,11 +70,30 @@ The first configure builds all dependencies with vcpkg, which takes a while. Pre
 
 ## Usage
 
+### Desktop app
+
+`bridger-gui.exe` opens a file or world you drop on its window (or pass on the command line) in a 3D view drawn
+with your own Minecraft Java textures, shows what is in it and what would not convert exactly, and converts it:
+
+- **View:** orbit, pan and zoom; **fly** through it like a player (double-click or F, then WASD, Space/Shift,
+  Ctrl to sprint, Esc to stop); a top-down **map** (M); a **slice** to look inside; worlds stream around the
+  camera.
+- **Convert:** choose the format (Bedrock or Java), a name, where to put it (a new world, or a copy of one of
+  your worlds at a position), and where to save it. Progress can be cancelled; nothing is written then.
+- **Report:** everything that was not converted exactly, grouped and counted. Clicking an entry outlines those
+  blocks in the 3D view and flies the camera there.
+
+The textures come from `%APPDATA%/.minecraft/versions/26.3/26.3.jar` (install that version once with the
+launcher) or a client jar you choose in Settings, plus any resource packs you add. Converting works without them.
+
+### Command line
+
 ```text
 bridger --version
 bridger formats                                   # list formats and their support status
 bridger info <file or world folder>               # describe any supported structure file or world
 bridger convert <input> <output> [options]        # any supported pair; see "bridger formats"
+bridger render <file or world> out.png [--size WxH --map --slice Y --pack p.zip]   # screenshot of the 3D view
     --target-version X   --fallback air|marker   --report report.json   --format <name>
     --into-world <existing.mcworld>   --place-at x,y,z   --air keep|replace
     --clear-entities   --clip | --shift-to-fit   --threads N   --overwrite
@@ -98,8 +120,6 @@ The output format is inferred from the file extension. Defaults are chosen for s
 keeps existing blocks, and a structure that exceeds the world's build height is an error unless you pass
 `--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
 
-The desktop app (`bridger-gui.exe`: drag and drop, 3D preview, convert, report) is planned for 0.4.0.
-
 ## Performance
 
 Bridger publishes only **measured** results, with machine specs and reproduction steps. The full table is in
@@ -112,6 +132,7 @@ Bridger publishes only **measured** results, with machine specs and reproduction
 | Translating Java → Bedrock (8.4 M blocks) | 34.4 ms |
 | A real 405 × 140 × 405 WorldEdit schematic → `.mcworld` (incl. validation) | 2.7 s |
 | A synthetic 4096-chunk Java world → `.mcworld` (16 threads, incl. validation) | 9.2 s |
+| 3D viewer: a real Java world streamed in at render distance 20 (1257 chunks, 7.6 M quads; RTX 4060 Laptop) | 2.3–3.0 s, then 60 fps (vsync) |
 
 These measure Bridger alone. No comparison with other tools has been measured yet.
 

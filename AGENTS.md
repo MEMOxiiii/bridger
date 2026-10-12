@@ -8,9 +8,9 @@ Bridger is a Windows desktop tool, written in C++20, that converts Minecraft str
 formats (`.schem`, `.schematic`, `.litematic`, structure `.nbt`, Anvil worlds) and Bedrock formats
 (`.mcstructure`, `.mcworld`), and renders them in 3D. Speed is a core feature, and every speed claim needs a
 benchmark behind it. A conversion must never corrupt or silently lose user data.
-**Released: 0.3.0. Current phase: 6 implemented (both directions: Java structures and worlds ⇄ `.mcstructure`/`.mcworld`, Java
-writers, placement into existing worlds).** All automated and independent checks pass; the in-game checklists
-(`docs/testing.md`) are the remaining gates for releases 0.1.0–0.3.0. Phase 0.5's questions are folded
+**Released: 0.3.0. Current phase: 7 + 8 implemented (Vulkan viewer with resource packs and world streaming;
+desktop app `bridger-gui.exe` with a React/WebView2 interface composited over the viewer, ADR 0009).** All
+automated checks pass; the in-game and app checklists (`docs/testing.md`) gate release 0.4.0. Phase 0.5's questions are folded
 into that checklist (`docs/formats/bedrock-world.md`, "Open questions").
 
 ## Commands
@@ -19,7 +19,9 @@ Run these from a **VS 2022 x64 developer shell** ("x64 Native Tools Command Prom
 with `VCPKG_ROOT` pointing at a standalone vcpkg checkout of tag `2026.07.29`. **Set `VCPKG_ROOT` after the
 developer shell has started:** the shell overwrites it with the vcpkg bundled with Visual Studio, which is too
 old for this baseline. For example: `set VCPKG_ROOT=%USERPROFILE%\vcpkg`. The first configure builds every
-dependency (about 7 minutes on a 16-thread laptop); later runs use vcpkg's binary cache.
+dependency (about 7 minutes on a 16-thread laptop); later runs use vcpkg's binary cache. Building the app also
+needs **Node.js 22+** on `PATH`: CMake runs `npm ci` (only when `package-lock.json` changed) and `npm run build`
+in `src/app/ui`.
 
 | Task | Command |
 |---|---|
@@ -33,6 +35,8 @@ dependency (about 7 minutes on a 16-thread laptop); later runs use vcpkg's binar
 | Format | `clang-format -i <files>` (config in `.clang-format`) |
 | Lint | `clang-tidy -p build\msvc-debug <file.cpp>` |
 | Profile | configure with `-DBRIDGER_ENABLE_TRACY=ON`, then connect the Tracy GUI |
+| UI in a browser | `cd src/app/ui && npm run dev` (mock bridge; `#convert`, `#done`, `#report`, ... show states) |
+| Screenshot | `build\msvc-release\bin\bridger.exe render <file or world> out.png` (needs the 26.3 client jar) |
 
 clang-cl presets need the VS component "C++ Clang Compiler for Windows" (Microsoft.VisualStudio.Component.VC.Llvm.Clang).
 
@@ -51,14 +55,15 @@ and/or a writer (IR → format), so adding a format never means writing N×N con
 | `convert` (`bridger_convert`) | Pipeline read → translate → write → validate; placement policy |
 | `render` (`bridger_render`) | Vulkan 1.3 renderer, meshers, resource-pack assets |
 | `cli` → `bridger.exe` | Command-line interface |
-| `app` → `bridger-gui.exe` | Desktop app (SDL3 + Dear ImGui) |
+| `app` → `bridger-gui.exe` | Desktop app: SDL3 window, Vulkan viewer, WebView2 + React UI over it (ADR 0009) |
 
 **Dependency rule:**
 `core` ← `platform` ← `io` ← `formats` ← `convert` (also uses `translate`, which depends on `core` and `io`;
 ADR 0008) ← `cli`;
 `render` depends on `core` and `formats`; `app` depends on everything. Lower layers never depend on higher ones.
 `core`, `platform`, `io`, `formats`, `translate` and `convert` have **no UI or GPU dependencies**, and only
-`platform` may include OS headers. `cmake/BridgerModule.cmake` enforces this (`BRIDGER_ALLOWED_DEPS_<module>`):
+`platform` may include OS headers, plus the two presentation folders `src/render/win32/` (Vulkan/D3D11 texture
+import) and `src/app/win32/` (WebView2, DirectComposition), which cannot be portable (ADR 0009). `cmake/BridgerModule.cmake` enforces this (`BRIDGER_ALLOWED_DEPS_<module>`):
 a disallowed `DEPS` entry fails at configure time.
 
 ### Layout
@@ -72,7 +77,7 @@ third_party/    leveldb-mcpe (git submodule) + CMakeLists.txt
 src/<module>/   include/bridger/<module>/*.hpp, *.cpp, CMakeLists.txt   (platform: win32/, posix/ later)
 src/render/shaders/   GLSL, compiled to SPIR-V and embedded at build time
 src/cli/        bridger.exe — main.cpp, commands/{info,convert,render}.cpp
-src/app/        bridger-gui.exe — main.cpp, app.{hpp,cpp}, ui/*.cpp
+src/app/        bridger-gui.exe — main.cpp, app.{hpp,cpp}, viewer, settings, ui_bundle, win32/, ui/ (React, npm)
 tools/spike/    Phase 0.5 Bedrock world experiment      tools/mapgen/  mapping data -> .brmap
 tests/          unit/<module>/*_test.cpp, golden/, roundtrip/, integration/ (env-var paths), data/
 fuzz/           fuzz_<target>.cpp (libFuzzer)           bench/  bench_<area>.cpp (Google Benchmark)
@@ -110,6 +115,15 @@ additions to it are recorded here as required:
   `fuzz/fuzz_anvil_chunk.cpp`; `bench/bench_anvil.cpp` (chunks, Bedrock world reading), `bench/bench_structures.cpp`
   (structure formats). `.github/workflows/release.yml`: builds the portable zip and the GitHub release for a `v*` tag.
 - `CHANGELOG.md` at the root.
+- Phase 7 (`render`): `assets.hpp` (resource packs), `block_models.hpp` (baking), `mesher.hpp`, `renderer.hpp`,
+  `scene.hpp` (structure meshing + framing), `streaming.hpp` (world streaming), `image_io.hpp` (PNG); internal
+  `entity_models.*`, `external_image.hpp` + `win32/external_image_win32.cpp` (+ `posix/` stub), `vma_impl.cpp`,
+  `stb_impl.cpp`; shaders `chunk.*`, `line.*`. `convert/view_world.hpp`: worlds opened for viewing.
+  `src/cli/commands/render.cpp`: `bridger render`. `docs/formats/assets.md`. `bench/bench_render.cpp`.
+- Phase 8 (`app`): `viewer.*` (camera controller, OS-free, unit-tested from `tests/unit/app/`), `settings.*`,
+  `ui_bundle.*` (the embedded UI zip), `win32/compositor.*`, `win32/webview_host.*`, `win32/shell*`; the UI
+  in `src/app/ui/` (`package.json`, `package-lock.json`, `vite.config.ts`, `src/**`); `cmake/NpmInstall.cmake`;
+  `docs/app/bridge.md` (message protocol); `docs/adr/0009-hybrid-desktop-ui.md`.
 - `tests/data/javaworld/`: generated Java worlds (`generate_test_data.py`, `generate_java_world`).
 - `formats/java/java_writers.hpp` (+ `.cpp`): the `.schem`/`.nbt`/`.litematic` writers share palette and block
   entity code, so they live in one file instead of one per reader. `formats/java/anvil/anvil_writer.hpp`: chunk,

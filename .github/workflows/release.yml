@@ -29,6 +29,14 @@ jobs:
         with:
           submodules: recursive
 
+      # The desktop app's interface is built with npm (src/app/ui, docs/adr/0009).
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/app/ui/package-lock.json
+
       - name: Set up MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -88,7 +96,7 @@ jobs:
           $name = "bridger-$version-windows-x64"
           $dir = "dist/$name"
           New-Item -ItemType Directory -Force "$dir/licenses" | Out-Null
-          Copy-Item build/msvc-release/bin/bridger.exe $dir
+          Copy-Item build/msvc-release/bin/bridger.exe, build/msvc-release/bin/bridger-gui.exe $dir
           # MSVC runtime, deployed next to the exe (app-local deployment of the Visual C++
           # redistributable files); the Universal CRT is part of Windows 10 and later.
           $crt = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
@@ -97,12 +105,25 @@ jobs:
           Copy-Item LICENSE "$dir/licenses/bridger-MPL-2.0.txt"
           # Shipped libraries (THIRD_PARTY.md, "Shipped: yes"): their vcpkg copyright files.
           $share = "build/vcpkg_installed/x64-windows-static-md/share"
-          foreach ($port in "libdeflate", "minizip-ng", "zlib", "tbb", "tl-expected", "xxhash", "spdlog", "fmt", "cli11") {
+          foreach ($port in "libdeflate", "minizip-ng", "zlib", "tbb", "tl-expected", "xxhash", "spdlog", "fmt", "cli11",
+                            "glm", "volk", "vk-bootstrap", "vulkan-memory-allocator", "stb", "nlohmann-json", "sdl3", "webview2", "wil") {
             $src = Join-Path $share "$port/copyright"
             if (-not (Test-Path $src)) { throw "missing license for $port" }
             Copy-Item $src "$dir/licenses/$port.txt"
           }
           Copy-Item third_party/leveldb-mcpe/LICENSE "$dir/licenses/leveldb-mcpe.txt"
+          # The app's embedded web interface (THIRD_PARTY.md, "Web user interface").
+          $npm = "src/app/ui/node_modules"
+          foreach ($pkg in "react", "react-dom", "scheduler", "lenis", "@fontsource-variable/inter", "@fontsource/jetbrains-mono") {
+            $src = Join-Path $npm "$pkg/LICENSE"
+            if (-not (Test-Path $src)) { throw "missing license for $pkg" }
+            Copy-Item $src ("$dir/licenses/npm-" + ($pkg -replace "[@/]", "-").Trim("-") + ".txt")
+          }
+          # GSAP ships no license file; its license is the Standard "no charge" license, published online.
+          Set-Content -Encoding utf8 "$dir/licenses/npm-gsap.txt" @(
+            "GSAP $((Get-Content $npm/gsap/package.json -Raw | ConvertFrom-Json).version) and @gsap/react $((Get-Content $npm/@gsap/react/package.json -Raw | ConvertFrom-Json).version)",
+            "Copyright (c) 2008-2026, GreenSock / Webflow. All rights reserved.",
+            "Used under the GSAP Standard 'no charge' license: https://gsap.com/standard-license")
           Copy-Item tools/mapgen/sources/geyser-mappings/LICENSE "$dir/licenses/geysermc-mappings.txt"
           Invoke-WebRequest "https://raw.githubusercontent.com/GeyserMC/Geyser/$env:GEYSER_COMMIT/LICENSE" -OutFile "$dir/licenses/geysermc-geyser.txt"
           # minecraft-data has no LICENSE file; its README states the license. Ship that section verbatim.
@@ -116,6 +137,8 @@ jobs:
           if (Get-ChildItem $dir -Recurse -Filter "vulkan-1.dll") { throw "vulkan-1.dll must not be shipped" }
           & "$dir/bridger.exe" --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $gui = Start-Process -FilePath "$dir/bridger-gui.exe" -ArgumentList "--version" -Wait -PassThru
+          if ($gui.ExitCode -ne 0) { throw "bridger-gui.exe --version failed" }
           Compress-Archive -Path $dir -DestinationPath "dist/$name.zip"
           "ZIP=dist/$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 

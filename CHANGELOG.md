@@ -3,6 +3,30 @@
 All notable changes to Bridger. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow the release plan in `docs/release.md`.
 
+## [Unreleased] - 0.4.0
+
+### Added
+
+- **Desktop app `bridger-gui.exe`.** Drop or open a structure file or world to see it in 3D and convert it
+  without the command line:
+  - a convert drawer with every supported target format, a world name, placement (a new flat world, or a copy of
+    one of your worlds at x, y, z), advanced placement options, a Save dialog, progress and Cancel;
+  - the report of everything not converted exactly, grouped and counted; clicking an entry outlines those blocks
+    in the 3D view and flies the camera there;
+  - orbit, pan and zoom; Minecraft-style fly mode (WASD, Space/Shift, Ctrl, mouse look, any keyboard layout);
+    a top-down map; a slice to look inside; worlds stream around the camera;
+  - settings for the textures' client jar and resource packs; recent files.
+  The interface is React + GSAP + Lenis in WebView2, composited with real transparency over the native Vulkan
+  viewer (`docs/adr/0009-hybrid-desktop-ui.md`); it follows the system's reduced-motion setting.
+- **3D viewer** (Vulkan 1.3): block models from your own Minecraft Java installation and resource packs
+  (blockstate variants and multipart, parent models, rotations, UV lock, tints), chests and shulker boxes built
+  from their entity textures, water and lava, smooth lighting, translucent sorting, fog, frustum culling, and
+  world streaming around the camera (`docs/formats/assets.md`).
+- `bridger render <file or world> out.png` for screenshots (`--size`, `--yaw`, `--pitch`, `--zoom`, `--map`,
+  `--slice`, `--radius`, `--pack`, `--client-jar`).
+- Conversions report progress and can be cancelled (library API: `ConvertOptions::progress`, `cancel`); a
+  cancelled conversion leaves no output behind.
+
 ## [0.3.0] - 2026-10-12
 
 First public release. The 0.1.0 (`.schem` → `.mcworld`) and 0.2.0 (more Java formats, placement) milestones were

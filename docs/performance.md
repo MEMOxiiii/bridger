@@ -18,9 +18,9 @@
 | Sponge `.schem` | `bridger_bench_schem` | end-to-end read, blocks/s | **baseline recorded** |
 | Java chunks | `bridger_bench_anvil` | chunk decode, decode + translate + encode + store (chunks/s) | **baseline recorded** |
 | Translation | `bridger_bench_translate` | sections/s, both directions | **baseline recorded** |
-| Meshing | `bridger_bench_mesher` | sections/s | Phase 7 |
+| Viewer meshing + GPU frame | `bridger_bench_render` | bake + mesh blocks/s, dense-section worst case, offscreen frame time | **baseline recorded** |
 | End-to-end | `bridger_bench_e2e` | `.schem` → `.mcworld` on disk, incl. validation | **baseline recorded** |
-| Viewer | (in-app) | time to first frame, FPS | Phase 7 |
+| Viewer | `bridger-gui.exe` log (`time to first frame`, `render distance loaded`) and HUD (FPS) | time to first frame, world streaming, FPS | **baseline recorded** |
 
 ## Baselines
 
@@ -131,3 +131,38 @@ world reader:
 Note: `BM_ChunkDecodeTranslateWrite` doubled between the Phase 5 and Phase 6 runs. The code path gained the
 `EncodedColumn` copy and the 64 MB write buffer, but the same noisy conditions applied; it is recorded here as
 measured and will be re-checked on a quiet machine before any claim is made.
+
+### Phase 7–8 baselines (2026-10-13, Machine A, `msvc-release`, GPU NVIDIA GeForce RTX 4060 Laptop)
+
+`bridger_bench_render --benchmark_repetitions=3 --benchmark_report_aggregates_only=true` (medians). Synthetic
+128 × 64 × 128 terrain (≈ 512 K solid blocks with caves, grass surface, some glass) and a synthetic resource
+pack; 274.5 k quads after face culling.
+
+| Benchmark | Result |
+|---|---|
+| `BM_MeshStructure/0` (bake + mesh, all 16 threads) | 11.8 ms = 88.7 M blocks/s |
+| `BM_MeshStructure/1` (one thread) | 82.4 ms = 12.7 M blocks/s |
+| `BM_MeshSectionDense` (one 16³ section, random solid/air: 6.6 k quads, the worst case) | 1.55 ms |
+| `BM_RenderFrame` (1920 × 1080 offscreen, 274.5 k quads, steady state) | 0.81 ms per frame (≈ 1230 frames/s) |
+
+**Desktop app** (`bridger-gui.exe`, window 1440 × 900 physical pixels, vsync on a 60 Hz display; times from the
+app's log, two runs each):
+
+| Scenario | Result |
+|---|---|
+| Time to first frame, `tests/data/ingame/orientations.schem` (open → first frame showing it) | 19 ms |
+| Time to first frame, `signs_beds.schem` (first open after start, textures read from the jar) | 392 ms |
+| Real Java world "New World" (26.1.2, 7649 chunks), render distance 20: first frame | 15–21 ms |
+| Same world: every chunk within 20 chunks streamed in | 2.3–3.0 s (1257 chunks, 7.6 M quads) |
+| Frame rate with those 7.6 M quads loaded, orbiting | 60 fps (vsync-bound) |
+| Bedrock world `AraluenBW1.21(4v4).mcworld` (36 chunks, translated to Java states on load) | first frame 44 ms; all chunks 152 ms |
+
+What made the difference: reading files from the client jar. minizip's `locate_entry` scans the central
+directory linearly; the jar has ~20 k entries and every model, blockstate and texture is a lookup. Indexing
+the entry names once at open (`io::ZipReader`) cut baking for that world from 6.5 s to 84 ms (CLI
+`bridger render ... --radius 12`: 441 chunks in 7.7 s before, 1.36 s after). Streaming also stopped retrying
+chunks the world lists but cannot provide (partly generated), and centres on the orbit target instead of the
+camera, which in orbit mode is far from what is shown.
+
+An idle window renders nothing (the app redraws only when the camera, streaming or an animation changes), so
+it uses no GPU time while you read the report.

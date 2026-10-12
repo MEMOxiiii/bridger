@@ -45,6 +45,14 @@ jobs:
         with:
           submodules: recursive
 
+      # The desktop app's interface is built with npm (src/app/ui, docs/adr/0009).
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/app/ui/package-lock.json
+
       - name: Set up MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
         with:

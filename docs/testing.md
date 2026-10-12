@@ -139,6 +139,26 @@ Files in `build/ingame-test/phase56/`, made with the build under test (commands 
 | `containers.nbt`, `orientations.nbt` | Java 26.3 | Copy to `<world>/generated/minecraft/structure/` and load with a structure block: blocks, stairs (including corners), chest contents |
 | `Bridger containers` (folder) | Java 26.3 | Copy to `saves/`: the world opens; the structure and its flat ground are there; light is correct (no black areas); chests open with their items; chunks around it generate; note whether the seed in `/seed` matches the Bedrock world's |
 
+### Phase 7–8: viewer and desktop app checklist
+
+Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3 installed (the textures).
+
+| # | Check |
+|---|---|
+| 1 | The window opens on the empty screen (dark, animated); "Open a file" and drag-and-drop both open `tests/data/ingame/*.schem`. |
+| 2 | Each in-game test structure renders like the game: block models and rotations (`orientations`), glass and stained glass, water and lava levels (`waterlogged`), chests (single and double), beds, signs, shulker boxes. |
+| 3 | Orbit (drag), pan (right-drag), zoom (wheel) feel smooth and stop exactly; "Frame" returns to the whole build. |
+| 4 | Fly: double-click or F, WASD + Space/Shift + Ctrl, mouse look; Esc returns to the UI; with an Arabic or other non-Latin keyboard layout too. |
+| 5 | Map (M) shows the build from above; Slice hides the top and the slider moves the cut. |
+| 6 | A Java world (`%APPDATA%/.minecraft/saves/...`) and a Bedrock `.mcworld` stream in around the camera; flying away loads new chunks and drops old ones; frame rate stays smooth. |
+| 7 | Convert a `.schem` to `.mcworld` without touching the CLI: choose the format, Browse, Convert; progress shows; "Show in folder" selects the file; the world opens in Bedrock with the build. |
+| 8 | Start a large conversion and Cancel: the drawer returns to the options, and no output file (or temp file) is left. |
+| 9 | Place into a copy of an existing world (x, y, z): the original world file is unchanged (compare its hash). |
+| 10 | The report lists the issues of a file that has some (e.g. a `.mcstructure` with Bedrock-only blocks); clicking one outlines those blocks and flies there; clicking again clears it. |
+| 11 | Settings: rename the client jar folder → the app reports the textures missing but still converts; choose the jar → textures return. Add a resource pack → its textures show. |
+| 12 | Windows "Animation effects" off (reduced motion): no slide or float animations, everything still works. |
+| 13 | Resize, maximise and move the window between monitors with different scaling: the UI and the 3D view stay sharp and aligned. |
+
 ### Procedure
 
 1. Convert each test structure with the build under test.
