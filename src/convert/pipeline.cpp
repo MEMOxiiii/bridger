@@ -60,6 +60,13 @@ private:
     fs::path path_;
 };
 
+// Progress report + cancellation point.
+Status step(const ConvertOptions& o, float fraction, std::string_view what) {
+    if (o.cancel != nullptr && o.cancel->load(std::memory_order_relaxed)) return make_error(ErrorCode::Cancelled, "the conversion was cancelled");
+    if (o.progress) o.progress(std::clamp(fraction, 0.0f, 1.0f), what);
+    return {};
+}
+
 std::string json_escape(std::string_view s) {
     std::string out;
     for (const char c : s) {
@@ -197,7 +204,9 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     };
     constexpr usize kBatch = 128; // chunk slots in flight: bounds memory to ~kBatch encoded columns
     std::vector<ChunkResult> results(kBatch);
+    usize regions_done = 0;
     for (const fs::path& region_path : world.overworld_regions) {
+        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(regions_done++) / static_cast<float>(world.overworld_regions.size()), "Converting chunks"));
         auto region = formats::java::RegionFile::open(region_path);
         if (!region) {
             ++failures[region.error().describe()];
@@ -205,6 +214,9 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
             continue;
         }
         for (usize batch = 0; batch < 1024; batch += kBatch) {
+            BRIDGER_TRY_STATUS(step(o, 0.85f * (static_cast<float>(regions_done - 1) + static_cast<float>(batch) / 1024.0f) /
+                                           static_cast<float>(world.overworld_regions.size()),
+                                    "Converting chunks"));
             parallel_for(kBatch, o.threads, [&](usize i) {
                 ChunkResult& r = results[i];
                 r = ChunkResult{};
@@ -279,6 +291,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     level.last_played =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     phase("chunks converted");
+    BRIDGER_TRY_STATUS(step(o, 0.86f, "Compacting the world database"));
     BRIDGER_TRY_STATUS(builder.finish(level));
     phase("database compacted");
     const formats::bedrock::WorldWriteStats written = builder.stats();
@@ -288,12 +301,14 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
 
     // Validate the database before zipping, then the zip itself before the move.
     formats::bedrock::WorldWriteStats reread;
+    BRIDGER_TRY_STATUS(step(o, 0.9f, "Validating"));
     BRIDGER_TRY_STATUS(formats::bedrock::validate_world_directory(dir, &reread));
     if (reread.subchunks != written.subchunks || reread.block_entities != written.block_entities ||
         reread.chunks != written.chunks)
         return make_error(ErrorCode::ValidationFailed, "re-read world differs from what was written");
     phase("world validated");
     BRIDGER_TRY(const fs::path temp, platform::AtomicFileWriter::temp_path_for(o.output));
+    BRIDGER_TRY_STATUS(step(o, 0.94f, "Packing the .mcworld"));
     platform::AtomicFileWriter writer = platform::AtomicFileWriter::adopt(temp, o.output);
     BRIDGER_TRY_STATUS(io::write_zip_file_from_directory(dir, temp));
     phase("zipped");
@@ -535,7 +550,9 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     usize chunks = 0, block_entities = 0;
     std::map<std::string, usize> failures;
     std::string first_failure;
+    usize regions_done = 0;
     for (const auto& [rpos, cols] : regions) {
+        BRIDGER_TRY_STATUS(step(o, 0.9f * static_cast<float>(regions_done++) / static_cast<float>(regions.size()), "Converting chunks"));
         formats::java::RegionWriter region(rpos.first, rpos.second);
         std::vector<ColumnResult> results(cols.size());
         parallel_for(cols.size(), o.threads, [&](usize i) {
@@ -676,6 +693,39 @@ formats::bedrock::StateLookupFn bedrock_state_lookup(const translate::MappingDat
     };
 }
 
+Result<ViewStructure> load_view_structure(const fs::path& input) {
+    BRIDGER_TRY(const std::string name, platform::path_to_utf8(input));
+    BRIDGER_TRY(const platform::MappedFile file, platform::MappedFile::open(input));
+    ViewStructure v;
+    BRIDGER_TRY(v.format, formats::detect_format(input, file.data().first(std::min<usize>(file.size(), 16))));
+    BRIDGER_TRY(const translate::MappingData* m, translate::MappingData::embedded());
+    if (v.format == FormatId::McStructure) {
+        const auto air = m->find_bedrock("minecraft:air", {});
+        auto f = formats::bedrock::read_mcstructure(file.data(), std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(),
+                                                    m->bedrock_block_version(), bedrock_state_lookup(*m), air.value_or(0));
+        if (!f) return tl::unexpected(std::move(f).error().with_file(name));
+        v.warnings = f->warnings;
+        BRIDGER_TRY(v.java, translate::translate_to_java(f->structure, *m, {}, v.report));
+        return v;
+    }
+    if (!is_java_structure(v.format))
+        return make_error(ErrorCode::NotImplemented, std::string(formats::info(v.format).name) + " cannot be opened as a structure");
+    const formats::java::LegacyTables legacy{
+        [m](u16 id, u8 data) -> std::optional<std::string> {
+            if (const auto st = m->legacy_block(id, data)) return m->java_state_string(*st);
+            return std::nullopt;
+        },
+        [m](u16 id, u16 damage) -> std::optional<std::string> {
+            if (const auto i = m->legacy_item(id, damage)) return std::string(*i);
+            return std::nullopt;
+        }};
+    auto f = formats::read_java_structure(file.data(), v.format, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), &legacy);
+    if (!f) return tl::unexpected(std::move(f).error().with_file(name));
+    v.warnings = f->warnings;
+    v.java = std::move(f->structure);
+    return v;
+}
+
 Result<ConvertSummary> convert(const ConvertOptions& o) {
     ConvertSummary summary;
     BRIDGER_TRY(summary.output_format, output_format_of(o));
@@ -716,6 +766,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
                           "--into-world needs --place-at x,y,z (there is no safe default position in an existing world)");
 
     // 1. Read.
+    BRIDGER_TRY_STATUS(step(o, 0.02f, "Reading"));
     Structure source;
     if (src_bedrock) {
         auto file = formats::bedrock::read_mcstructure(input.data(), std::make_shared<BlockStateRegistry>(),
@@ -750,6 +801,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
     }
 
     // 2. Place (world outputs; before translation, in the source's id domain).
+    BRIDGER_TRY_STATUS(step(o, 0.2f, "Placing"));
     if (summary.output_format == FormatId::McWorld) {
         const WorldBounds bounds{formats::bedrock::kOverworldMinY, formats::bedrock::kOverworldMaxY,
                                  formats::bedrock::kDefaultFlatSurfaceY};
@@ -758,6 +810,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
     }
 
     // 3. Translate when the editions differ.
+    BRIDGER_TRY_STATUS(step(o, 0.3f, "Translating blocks"));
     translate::TranslateOptions topt;
     topt.fallback = o.fallback;
     Structure target;
@@ -770,6 +823,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
     }
 
     // 4. Write, 5. validate + atomic move.
+    BRIDGER_TRY_STATUS(step(o, 0.55f, "Writing and validating"));
     if (out_java) {
         const i32 data_version = target.source().data_version != 0 && !src_bedrock
                                      ? static_cast<i32>(target.source().data_version)

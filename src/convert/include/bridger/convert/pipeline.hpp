@@ -11,7 +11,9 @@
 #include <bridger/translate/conversion_report.hpp>
 #include <bridger/translate/translator.hpp>
 
+#include <atomic>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -29,6 +31,11 @@ struct ConvertOptions {
     std::string level_name; // new worlds; default: the input file name
     bool overwrite = false; // an existing output is replaced only when asked
     usize threads = 0;      // worker threads for whole worlds (0 = all hardware threads)
+    // Called on the converting thread with the overall fraction done (0..1) and the current step.
+    std::function<void(float fraction, std::string_view step)> progress;
+    // Checked between steps and chunk batches; when set, convert() stops with ErrorCode::Cancelled
+    // before anything is moved into place (no partial output is left behind).
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 struct ConvertSummary {
@@ -46,6 +53,16 @@ struct ConvertSummary {
 };
 
 [[nodiscard]] Result<ConvertSummary> convert(const ConvertOptions& options);
+
+// Any structure file (.schem, .nbt, .litematic, .schematic, .mcstructure) as a Java structure,
+// for viewing: Bedrock files are translated to Java; what cannot be shown exactly is in `report`.
+struct ViewStructure {
+    formats::FormatId format = formats::FormatId::SpongeSchem;
+    Structure java;
+    std::vector<std::string> warnings;
+    translate::ConversionReport report;
+};
+[[nodiscard]] Result<ViewStructure> load_view_structure(const std::filesystem::path& input);
 
 // Resolves a Bedrock palette entry {name, states} to its index in the pinned palette (for
 // readers of Bedrock files; also used by `bridger info`).
