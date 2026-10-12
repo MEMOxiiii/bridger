@@ -7,6 +7,7 @@
 #include <bridger/core/result.hpp>
 #include <bridger/core/types.hpp>
 
+#include <filesystem>
 #include <span>
 #include <string>
 #include <vector>
@@ -27,5 +28,16 @@ struct ZipLimits {
 };
 
 [[nodiscard]] Result<std::vector<ZipEntry>> read_zip(std::span<const u8> archive, const ZipLimits& limits = {});
+
+// Streams every file under `dir` into a new zip file at `zip_path` (one file in memory at a
+// time; names relative to `dir`, '/'-separated, sorted; fixed timestamps). For large worlds.
+[[nodiscard]] Status write_zip_file_from_directory(const std::filesystem::path& dir, const std::filesystem::path& zip_path);
+
+struct ZipListing {
+    std::string name;
+    u64 size = 0;
+};
+// Lists a zip file's entries without extracting them.
+[[nodiscard]] Result<std::vector<ZipListing>> list_zip_file(const std::filesystem::path& zip_path, const ZipLimits& limits = {});
 
 } // namespace bridger::io

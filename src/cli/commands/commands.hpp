@@ -26,6 +26,7 @@ struct ConvertArgs {
     bool shift_to_fit = false;
     bool clear_entities = false;
     bool overwrite = false;
+    std::size_t threads = 0;
 };
 
 int run_convert(const ConvertArgs& args);

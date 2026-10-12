@@ -37,6 +37,9 @@ struct StructureMetadata {
 
 class Structure {
 public:
+    // An empty 0x0x0 structure without registries; use create() for a real one.
+    Structure() = default;
+
     // Fails if the size needs more sections than `max_sections` (memory guard).
     [[nodiscard]] static Result<Structure> create(std::shared_ptr<BlockStateRegistry> blocks,
                                                   std::shared_ptr<BiomeRegistry> biomes, Extent size,
@@ -80,9 +83,10 @@ public:
     std::vector<Entity> entities;
 
     [[nodiscard]] usize memory_bytes() const noexcept;
+    // True if any section carries biome data.
+    [[nodiscard]] bool has_biome_data() const noexcept;
 
 private:
-    Structure() = default;
     [[nodiscard]] usize section_slot(u32 x, u32 y, u32 z) const noexcept {
         return (static_cast<usize>(y) * sz_ + z) * sx_ + x;
     }

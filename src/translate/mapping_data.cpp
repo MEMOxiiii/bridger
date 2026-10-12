@@ -84,6 +84,11 @@ struct MappingData::Index {
     std::unordered_map<std::string, u32> bedrock_by_key;
     std::unordered_map<std::string_view, ItemMapping, StringHash, std::equal_to<>> items;
     std::unordered_map<std::string_view, i32, StringHash, std::equal_to<>> biomes;
+    std::unordered_map<u32, JavaStateId> legacy_blocks;      // id << 8 | data
+    std::unordered_map<u32, std::string_view> legacy_items;  // id << 16 | damage
+    std::vector<u32> java_of_bedrock;
+    std::unordered_map<std::string, std::string_view> reverse_items; // "<bedrock>|<damage>"
+    std::unordered_map<i32, std::string_view> reverse_biomes;
 };
 
 namespace {
@@ -204,6 +209,38 @@ Result<MappingData> MappingData::load(std::span<const u8> blob) {
         const std::string_view java = str(r.u32_());
         ix.biomes.emplace(java, static_cast<i32>(r.u32_()));
     }
+    const u32 legacy_block_count = r.u32_();
+    for (u32 i = 0; i < legacy_block_count && r.ok(); ++i) {
+        const u16 id = r.u16_();
+        const u8 data = r.u8_();
+        const u32 state = r.u32_();
+        if (state < java_count) ix.legacy_blocks.emplace((u32{id} << 8) | data, state);
+    }
+    const u32 legacy_item_count = r.u32_();
+    for (u32 i = 0; i < legacy_item_count && r.ok(); ++i) {
+        const u16 id = r.u16_();
+        const u16 damage = r.u16_();
+        ix.legacy_items.emplace((u32{id} << 16) | damage, str(r.u32_()));
+    }
+    const u32 reverse_count = r.u32_();
+    if (r.ok() && reverse_count != bedrock_count) return bad("reverse table size");
+    ix.java_of_bedrock.assign(bedrock_count, UINT32_MAX);
+    for (u32 i = 0; i < reverse_count && r.ok(); ++i) {
+        const u32 j = r.u32_();
+        if (j != UINT32_MAX && j >= java_count) return bad("reverse target out of range");
+        ix.java_of_bedrock[i] = j;
+    }
+    const u32 reverse_item_count = r.u32_();
+    for (u32 i = 0; i < reverse_item_count && r.ok(); ++i) {
+        const std::string_view bedrock = str(r.u32_());
+        const auto damage = static_cast<i16>(r.u16_());
+        ix.reverse_items.emplace(std::string(bedrock) + "|" + std::to_string(damage), str(r.u32_()));
+    }
+    const u32 reverse_biome_count = r.u32_();
+    for (u32 i = 0; i < reverse_biome_count && r.ok(); ++i) {
+        const auto id = static_cast<i32>(r.u32_());
+        ix.reverse_biomes.emplace(id, str(r.u32_()));
+    }
     if (!r.ok()) return bad("truncated");
     return m;
 }
@@ -269,6 +306,66 @@ std::optional<ItemMapping> MappingData::find_item(std::string_view java_item) co
     const auto it = index_->items.find(java_item);
     if (it == index_->items.end()) return std::nullopt;
     return it->second;
+}
+
+std::optional<JavaStateId> MappingData::legacy_block(u16 id, u8 data) const {
+    if (const auto it = index_->legacy_blocks.find((u32{id} << 8) | data); it != index_->legacy_blocks.end()) return it->second;
+    return std::nullopt;
+}
+
+std::optional<std::string_view> MappingData::legacy_item(u16 id, u16 damage) const {
+    if (const auto it = index_->legacy_items.find((u32{id} << 16) | damage); it != index_->legacy_items.end())
+        return it->second;
+    return std::nullopt;
+}
+
+std::optional<JavaStateId> MappingData::java_of_bedrock(BedrockStateIndex b) const noexcept {
+    if (b >= index_->java_of_bedrock.size() || index_->java_of_bedrock[b] == UINT32_MAX) return std::nullopt;
+    return index_->java_of_bedrock[b];
+}
+
+std::optional<std::string_view> MappingData::java_item_of_bedrock(std::string_view bedrock_item, i16 damage) const {
+    if (const auto it = index_->reverse_items.find(std::string(bedrock_item) + "|" + std::to_string(damage));
+        it != index_->reverse_items.end())
+        return it->second;
+    if (damage != 0) return java_item_of_bedrock(bedrock_item, 0); // on tools Damage is durability
+    return std::nullopt;
+}
+
+std::optional<std::string_view> MappingData::java_biome_of_bedrock(i32 bedrock_biome) const {
+    if (const auto it = index_->reverse_biomes.find(bedrock_biome); it != index_->reverse_biomes.end()) return it->second;
+    return std::nullopt;
+}
+
+std::string_view MappingData::java_block_name(JavaStateId id) const {
+    if (id >= index_->owner.size()) return {};
+    return index_->blocks[index_->owner[id]].name;
+}
+
+std::optional<std::string_view> MappingData::property(JavaStateId id, std::string_view key) const {
+    if (id >= index_->owner.size()) return std::nullopt;
+    const Index::JavaBlock& b = index_->blocks[index_->owner[id]];
+    const usize n = b.prop_names.size();
+    for (usize p = 0; p < n; ++p)
+        if (b.prop_names[p] == key) return b.prop_values[p][b.state_values[(id - b.first_state) * n + p]];
+    return std::nullopt;
+}
+
+std::optional<JavaStateId> MappingData::with_property(JavaStateId id, std::string_view key, std::string_view value) const {
+    if (id >= index_->owner.size()) return std::nullopt;
+    const Index::JavaBlock& b = index_->blocks[index_->owner[id]];
+    const usize n = b.prop_names.size();
+    std::vector<u8> values(b.state_values.begin() + static_cast<std::ptrdiff_t>((id - b.first_state) * n),
+                           b.state_values.begin() + static_cast<std::ptrdiff_t>((id - b.first_state + 1) * n));
+    const auto pit = std::find(b.prop_names.begin(), b.prop_names.end(), key);
+    if (pit == b.prop_names.end()) return std::nullopt;
+    const usize pi = static_cast<usize>(pit - b.prop_names.begin());
+    const auto vit = std::find(b.prop_values[pi].begin(), b.prop_values[pi].end(), value);
+    if (vit == b.prop_values[pi].end()) return std::nullopt;
+    values[pi] = static_cast<u8>(vit - b.prop_values[pi].begin());
+    const auto tit = b.by_tuple.find(pack_tuple(b, values));
+    if (tit == b.by_tuple.end()) return std::nullopt;
+    return b.first_state + tit->second;
 }
 
 std::optional<i32> MappingData::find_biome(std::string_view java_biome) const {

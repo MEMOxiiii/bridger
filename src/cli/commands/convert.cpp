@@ -1,5 +1,5 @@
-// `bridger convert <input> <output> [options]`.
-// v0.1 supports .schem -> new .mcworld; other combinations report "not implemented".
+// `bridger convert <input> <output> [options]`. The pipeline decides which format
+// combinations are supported (see `bridger formats`).
 
 #include "commands.hpp"
 
@@ -7,7 +7,6 @@
 #include <bridger/core/log.hpp>
 #include <bridger/formats/detect.hpp>
 #include <bridger/platform/atomic_replace.hpp>
-#include <bridger/platform/mapped_file.hpp>
 #include <bridger/platform/paths.hpp>
 
 #include <cstdio>
@@ -18,10 +17,12 @@ namespace {
 
 void print_report(const convert::ConvertSummary& s) {
     using translate::IssueKind;
-    std::puts(std::format("Placed at {}, {}, {} (spawn {}, {}, {})", s.placement.origin.x, s.placement.origin.y,
-                          s.placement.origin.z, s.placement.spawn.x, s.placement.spawn.y, s.placement.spawn.z)
-                  .c_str());
-    std::puts(std::format("Wrote {} blocks in {} chunks ({} subchunks), {} block entities", s.blocks, s.chunks,
+    if (s.placement)
+        std::puts(std::format("Placed at {}, {}, {} (spawn {}, {}, {})", s.placement->origin.x, s.placement->origin.y,
+                              s.placement->origin.z, s.placement->spawn.x, s.placement->spawn.y, s.placement->spawn.z)
+                      .c_str());
+    std::puts(std::format("{} -> {}: {} blocks, {} chunks ({} subchunks), {} block entities",
+                          formats::info(s.input_format).name, formats::info(s.output_format).name, s.blocks, s.chunks,
                           s.subchunks, s.block_entities)
                   .c_str());
     for (const auto& w : s.warnings) log::warn("{}", w);
@@ -31,7 +32,8 @@ void print_report(const convert::ConvertSummary& s) {
     }
     std::puts("Conversion report (not converted exactly):");
     for (const IssueKind kind : {IssueKind::UnmappedBlock, IssueKind::LossyBlock, IssueKind::UnmappedBlockEntity,
-                                 IssueKind::UnmappedEntity, IssueKind::UnmappedBiome, IssueKind::ClippedBlock}) {
+                                 IssueKind::UnmappedEntity, IssueKind::UnmappedBiome, IssueKind::DroppedSecondaryLayer,
+                                 IssueKind::RemovedBlockEntity, IssueKind::RemovedEntity, IssueKind::ClippedBlock}) {
         const auto* subjects = s.report.issues(kind);
         if (subjects == nullptr) continue;
         std::puts(std::format("  {}: {}", translate::to_string(kind), s.report.total(kind)).c_str());
@@ -60,6 +62,7 @@ int run_convert(const ConvertArgs& a) {
     o.input = *in;
     o.output = *out;
     o.overwrite = a.overwrite;
+    o.threads = a.threads;
     o.level_name = a.level_name;
     o.fallback = a.fallback == "marker" ? translate::Fallback::Marker : translate::Fallback::Air;
     if (a.fallback != "air" && a.fallback != "marker") {
@@ -87,39 +90,26 @@ int run_convert(const ConvertArgs& a) {
         o.placement.place_at = *pos;
     }
     if (!a.into_world.empty()) {
-        log::error("--into-world (placing into an existing world) is planned for 0.2.0");
-        return kExitNotImplemented;
+        auto world = platform::path_from_utf8(a.into_world);
+        if (!world) {
+            log::error("invalid --into-world path");
+            return kExitError;
+        }
+        o.into_world = *world;
+    }
+    o.placement.clear_entities = a.clear_entities;
+    if (!a.format.empty()) {
+        o.output_format = formats::format_from_name(a.format);
+        if (!o.output_format) {
+            log::error("unknown --format '{}' (see `bridger formats`)", a.format);
+            return kExitError;
+        }
     }
 
-    // Formats: inferred from extensions (or --format), confirmed by the input's bytes.
-    auto mapped = platform::MappedFile::open(o.input);
-    if (!mapped) {
-        log::error("{}", mapped.error().describe());
-        return kExitError;
-    }
-    const auto head = mapped->data().first(std::min<usize>(mapped->size(), 16));
-    auto in_format = formats::detect_format(o.input, head);
-    if (!in_format) {
-        log::error("{}", in_format.error().with_file(a.input).describe());
-        return kExitError;
-    }
-    std::optional<formats::FormatId> out_format = a.format.empty()
-                                                      ? formats::format_from_extension(platform::path_to_utf8(o.output.extension()).value_or(""))
-                                                      : formats::format_from_name(a.format);
-    if (!out_format) {
-        log::error("cannot tell the output format; use a known extension or --format");
-        return kExitError;
-    }
-    if (*in_format != formats::FormatId::SpongeSchem || *out_format != formats::FormatId::McWorld) {
-        log::error("converting {} to {} is not supported yet (0.1.0 supports .schem -> .mcworld)",
-                   formats::info(*in_format).name, formats::info(*out_format).name);
-        return kExitNotImplemented;
-    }
-
-    auto summary = convert::convert_schem_to_new_mcworld(o);
+    auto summary = convert::convert(o);
     if (!summary) {
         log::error("{}", summary.error().describe());
-        return kExitError;
+        return summary.error().code() == ErrorCode::NotImplemented ? kExitNotImplemented : kExitError;
     }
     print_report(*summary);
 

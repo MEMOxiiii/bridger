@@ -16,7 +16,7 @@
 | I/O primitives | `bridger_bench_io` | varint decode (items/s, MB/s), BE loads (MB/s) | harness only (Phase 0) |
 | NBT | `bridger_bench_nbt` | parse / walk / materialize / write MB/s, gzip decompress | **baseline recorded** |
 | Sponge `.schem` | `bridger_bench_schem` | end-to-end read, blocks/s | **baseline recorded** |
-| Region | `bridger_bench_region` | chunks/s | Phase 5 |
+| Java chunks | `bridger_bench_anvil` | chunk decode, decode + translate + encode + store (chunks/s) | **baseline recorded** |
 | Translation | `bridger_bench_translate` | sections/s | **baseline recorded** |
 | Meshing | `bridger_bench_mesher` | sections/s | Phase 7 |
 | End-to-end | `bridger_bench_e2e` | `.schem` → `.mcworld` on disk, incl. validation | **baseline recorded** |
@@ -70,3 +70,29 @@ readers should keep using views. Gzip accounts for ~30% of `.schem` read time.
 
 Real file (not a benchmark, one run): `AraluenBW1.21Solo.schem`, 405 × 140 × 405, converted in 2.7 s wall time.
 Single-threaded everywhere so far; the pipeline has not been parallelized (performance plan §4).
+
+### Phase 5 baselines (2026-10-12, Machine A, `msvc-release`)
+
+`bridger_bench_anvil` uses a synthetic 1.18+ chunk: 24 sections, 12 real block states, two biomes (one run):
+
+| Benchmark | What it measures | Result |
+|---|---|---|
+| `BM_ChunkDecode` | chunk NBT → IR column | 0.98 ms = 1.06 k chunks/s |
+| `BM_ChunkDecodeTranslateWrite` | decode + translate + encode + LevelDB put, one thread | 2.54 ms = 407 chunks/s |
+
+**Whole world, end to end** (CLI, one run each): a synthetic Java world of 4 regions × 1024 full chunks
+(16 MB of region files) → `.mcworld` (6.9 MB), including validation, zip and the atomic move:
+`bridger -v convert <world> out.mcworld [--threads N]`. The `-v` log prints the time of each phase.
+
+| Step (time since start) | `--threads 1` | all 16 threads |
+|---|---|---|
+| chunks read, decoded, translated, encoded and stored | 20.7 s | 1.6 s |
+| database flushed | 23.4 s | 6.6 s |
+| world validated (every subchunk decoded) | 25.2 s | 8.4 s |
+| zipped and moved into place | 26.0 s | 9.2 s |
+
+What changed to get there (same world, all threads): one LevelDB write batch per column and a 64 MB write
+buffer for new worlds took the chunk phase from 9.9 s to 1.7 s; flushing the memtable instead of a full
+`CompactRange` took the database step from 11.4 s to 4.9 s. What remains is single-threaded deflate inside
+LevelDB: with deflate level 1 instead of the default the total was 6.0 s, but the world grew from 6.9 MB to
+10.1 MB, so the default level was kept.

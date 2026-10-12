@@ -39,7 +39,7 @@ std::vector<u8> encode_level_dat(const LevelDatOptions& o) {
     str("FlatWorldLayers", o.flat_world_layers);
     b("ForceGameType", false);
     i("GameType", o.game_type);
-    i("Generator", 2); // flat
+    i("Generator", o.generator);
     str("InventoryVersion", std::to_string(o.version[0]) + "." + std::to_string(o.version[1]) + "." +
                                 std::to_string(o.version[2]));
     b("LANBroadcast", true);

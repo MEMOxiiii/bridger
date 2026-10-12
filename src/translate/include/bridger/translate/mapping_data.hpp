@@ -21,6 +21,12 @@
 //       u32 name, u8 prop_count, prop_count * { u32 key, u8 nbt_type (1/3/8), i32 value or u32 string }
 //   u32 item_count, item_count * { u32 java_name, u32 bedrock_name, i16 damage, u32 java_block_state or 0xFFFFFFFF }
 //   u32 biome_count, biome_count * { u32 java_name, i32 bedrock_id }
+// Format 2 adds:
+//   u32 n, n * { u16 legacy_id, u8 legacy_data, u32 java_state }        (pre-1.13 blocks)
+//   u32 n, n * { u16 legacy_id, u16 damage, u32 java_item_name }         (pre-1.13 items)
+//   u32 bedrock_state_count, bedrock_state_count * u32 java_state        (reverse, 0xFFFFFFFF = none)
+//   u32 n, n * { u32 bedrock_item, u16 damage, u32 java_item }           (reverse items)
+//   u32 n, n * { i32 bedrock_biome_id, u32 java_biome }                  (reverse biomes)
 
 #include <bridger/core/block_state.hpp>
 #include <bridger/core/result.hpp>
@@ -38,7 +44,7 @@ namespace bridger::translate {
 using JavaStateId = u32;        // Java block state id of the pinned Java version
 using BedrockStateIndex = u32;  // index into the pinned Bedrock block palette
 
-inline constexpr u16 kBrmapFormatVersion = 1;
+inline constexpr u16 kBrmapFormatVersion = 2;
 
 // Per-Java-state flags stored in the blob.
 enum MappingFlags : u8 {
@@ -102,6 +108,21 @@ public:
 
     [[nodiscard]] std::optional<ItemMapping> find_item(std::string_view java_item) const;
     [[nodiscard]] std::optional<i32> find_biome(std::string_view java_biome) const;
+
+    // Pre-1.13 numeric ids (legacy .schematic): block id + data value, item id + damage.
+    [[nodiscard]] std::optional<JavaStateId> legacy_block(u16 id, u8 data) const;
+    [[nodiscard]] std::optional<std::string_view> legacy_item(u16 id, u16 damage) const;
+
+    // Reverse direction (Bedrock -> Java): the most natural Java state for a Bedrock state
+    // (never waterlogged: layer 2 decides that), items and biomes.
+    [[nodiscard]] std::optional<JavaStateId> java_of_bedrock(BedrockStateIndex b) const noexcept;
+    [[nodiscard]] std::optional<std::string_view> java_item_of_bedrock(std::string_view bedrock_item, i16 damage) const;
+    [[nodiscard]] std::optional<std::string_view> java_biome_of_bedrock(i32 bedrock_biome) const;
+    // The same Java block with one property changed (e.g. waterlogged=true); nullopt if the
+    // block has no such property or value.
+    [[nodiscard]] std::optional<JavaStateId> with_property(JavaStateId id, std::string_view key, std::string_view value) const;
+    [[nodiscard]] std::optional<std::string_view> property(JavaStateId id, std::string_view key) const;
+    [[nodiscard]] std::string_view java_block_name(JavaStateId id) const;
 
     struct Index; // lookup tables built at load time (defined in mapping_data.cpp)
 

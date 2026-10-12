@@ -7,6 +7,7 @@ Inputs (docs/adr/0007-mapping-data-sources.md):
      The jar and its reports are never committed.
   2. Bedrock block palette (names, typed states, block version) for 26.50, from the
      GeyserMC/Geyser repository (MIT) at a pinned commit.
+  3. Legacy (pre-1.13) block ids, from PrismarineJS/minecraft-data (MIT) at a pinned commit.
 GeyserMC/mappings (Java <-> Bedrock mapping) is the git submodule sources/geyser-mappings.
 
     python tools/mapgen/fetch_sources.py        # writes tools/mapgen/sources/cache/ (gitignored)
@@ -30,6 +31,11 @@ PALETTE_URL = (f"https://raw.githubusercontent.com/GeyserMC/Geyser/{GEYSER_COMMI
                "/core/src/main/resources/bedrock/block_palette.26_50.nbt")
 PALETTE_SHA256 = "54c9bed0bef30aadc316b21c6e82b5ac407c5c6e351b9d9690aa4e9a49fec912"
 
+# Pre-1.13 numeric block ids (id:data) -> 1.13 block states, PrismarineJS/minecraft-data (MIT).
+MCDATA_COMMIT = "dd01127457231e7da629d645b3c6738068018eb0"
+LEGACY_URL = f"https://raw.githubusercontent.com/PrismarineJS/minecraft-data/{MCDATA_COMMIT}/data/pc/common/legacy.json"
+LEGACY_SHA256 = "0d7aec9a3107a62e322f8839ea2b96d24e2945c461c7aa29c6a77f854609a2e9"
+
 
 def download(url, dest, algo, expected):
     if dest.exists() and hashlib.new(algo, dest.read_bytes()).hexdigest() == expected:
@@ -47,6 +53,7 @@ def download(url, dest, algo, expected):
 def main():
     CACHE.mkdir(parents=True, exist_ok=True)
     download(PALETTE_URL, CACHE / "block_palette.26_50.nbt", "sha256", PALETTE_SHA256)
+    download(LEGACY_URL, CACHE / "legacy.json", "sha256", LEGACY_SHA256)
 
     jar = CACHE / "server-26.3.jar"
     download(JAVA_SERVER_URL, jar, "sha1", JAVA_SERVER_SHA1)

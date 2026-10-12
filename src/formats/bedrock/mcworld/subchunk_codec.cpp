@@ -82,6 +82,47 @@ Result<std::vector<u8>> encode_subchunk(i8 y_index, std::span<const PaletteLayer
     return std::move(w).take();
 }
 
+Result<RawSubchunk> decode_subchunk_raw(std::span<const u8> data) {
+    io::BinaryReader r(data, Endian::Little);
+    RawSubchunk out;
+    BRIDGER_TRY(out.version, r.read<u8>());
+    if (out.version != 8 && out.version != 9)
+        return make_error(ErrorCode::UnsupportedVersion, "subchunk version " + std::to_string(out.version) +
+                                                             " (only 8 and 9 are supported)");
+    BRIDGER_TRY(const u8 layer_count, r.read<u8>());
+    if (out.version == 9) {
+        BRIDGER_TRY(out.y_index, r.read<i8>());
+    }
+    for (u8 l = 0; l < layer_count; ++l) {
+        BRIDGER_TRY(const u8 header, r.read<u8>());
+        if (header & 1) return make_error(ErrorCode::UnsupportedFormat, "runtime palette in a stored subchunk");
+        const u32 bits = header >> 1;
+        if (std::find(kAllowedBits.begin(), kAllowedBits.end(), bits) == kAllowedBits.end())
+            return make_error(ErrorCode::Malformed, "subchunk: invalid bits per index " + std::to_string(bits));
+        const u32 per_word = 32 / bits;
+        const usize words = (kSectionVolume + per_word - 1) / per_word;
+        RawSubchunkLayer layer;
+        for (usize wi = 0, i = 0; wi < words; ++wi) {
+            BRIDGER_TRY(const u32 word, r.read<u32>());
+            for (u32 k = 0; k < per_word && i < kSectionVolume; ++k, ++i)
+                layer.indices[bridger_index(i)] = static_cast<u16>((word >> (k * bits)) & ((1u << bits) - 1));
+        }
+        BRIDGER_TRY(const i32 count, r.read<i32>());
+        if (count < 0 || count > static_cast<i32>(kSectionVolume))
+            return make_error(ErrorCode::Malformed, "subchunk: invalid palette size");
+        for (i32 p = 0; p < count; ++p) {
+            const auto rest = data.subspan(r.position());
+            BRIDGER_TRY(const io::nbt::NbtDocument doc, io::nbt::NbtDocument::parse(rest, Endian::Little));
+            layer.palette.emplace_back(rest.begin(), rest.begin() + static_cast<std::ptrdiff_t>(doc.consumed_bytes()));
+            BRIDGER_TRY_STATUS(r.skip(doc.consumed_bytes()));
+        }
+        for (const u16 idx : layer.indices)
+            if (idx >= layer.palette.size()) return make_error(ErrorCode::Malformed, "subchunk: index outside the palette");
+        out.layers.push_back(std::move(layer));
+    }
+    return out;
+}
+
 Result<DecodedSubchunk> decode_subchunk(std::span<const u8> data) {
     io::BinaryReader r(data, Endian::Little);
     DecodedSubchunk out;

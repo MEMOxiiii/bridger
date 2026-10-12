@@ -113,6 +113,7 @@ def main():
     ap.add_argument("mcworld")
     ap.add_argument("--palette", required=True)
     ap.add_argument("--report")
+    ap.add_argument("--generator", type=int, default=2, help="expected Generator (2 flat, 1 infinite for converted worlds)")
     args = ap.parse_args()
 
     palette_keys, block_version = load_palette(args.palette)
@@ -131,8 +132,8 @@ def main():
         level = read_nbt_le(io.BytesIO(raw[8:]))
         if storage != 10 or int(level["StorageVersion"]) != 10:
             fail("StorageVersion")
-        if int(level["Generator"]) != 2:
-            fail("Generator is not flat")
+        if int(level["Generator"]) != args.generator:
+            fail(f"Generator is {int(level['Generator'])}, expected {args.generator}")
         json.loads(str(level["FlatWorldLayers"]))
 
         db = leveldb.LevelDB(str(Path(tmp, "db")), create_if_missing=False)

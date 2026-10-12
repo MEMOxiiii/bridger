@@ -38,4 +38,17 @@ struct DecodedSubchunk {
 // Decodes versions 8 and 9 with persistent (NBT) palettes; used for validation and tests.
 [[nodiscard]] Result<DecodedSubchunk> decode_subchunk(std::span<const u8> data);
 
+// Same, but palette entries are kept as their exact little-endian NBT bytes, so existing
+// world data can be re-encoded unchanged (placement into existing worlds).
+struct RawSubchunkLayer {
+    std::vector<std::vector<u8>> palette;    // raw NBT root per entry
+    std::array<u16, kSectionVolume> indices; // Bridger order
+};
+struct RawSubchunk {
+    u8 version = 0;
+    i8 y_index = 0;
+    std::vector<RawSubchunkLayer> layers;
+};
+[[nodiscard]] Result<RawSubchunk> decode_subchunk_raw(std::span<const u8> data);
+
 } // namespace bridger::formats::bedrock

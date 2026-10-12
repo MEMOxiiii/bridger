@@ -19,6 +19,7 @@ import gzip
 import io
 import json
 import struct
+import zlib
 from pathlib import Path
 
 from nbtlib import File
@@ -502,8 +503,285 @@ def generate_ingame():
         write_gzip(ROOT / "ingame" / f"{name}.schem", nbt_bytes(root, "", "big"))
 
 
+# --------------------------------------------------------------------------- other Java formats
+
+def generate_structure_nbt():
+    """Java structure files: the 26.3 palette spelling ({id, properties}, as in Mojang's own
+    files) and the older one ({Name, Properties}); expected content is identical."""
+    blocks_spec = [((0, 0, 0), 0), ((1, 0, 0), 0), ((2, 0, 0), 1), ((1, 1, 0), 2), ((2, 1, 1), 3)]
+    palette = [("minecraft:stone", {}),
+               ("minecraft:oak_stairs", {"facing": "east", "half": "bottom", "shape": "straight", "waterlogged": "false"}),
+               ("minecraft:chest", {"facing": "north", "type": "single", "waterlogged": "true"}),
+               ("minecraft:red_wool", {})]
+
+    def make(name_key, props_key):
+        pal = List[Compound]([Compound({name_key: String(n), **({props_key: Compound({k: String(v) for k, v in p.items()})} if p else {})})
+                              for n, p in palette])
+        blocks = []
+        for pos, state in blocks_spec:
+            b = Compound({"pos": List[Int](list(pos)), "state": Int(state)})
+            if state == 2:
+                b["nbt"] = Compound({"id": String("minecraft:chest"), "Items": items((0, "minecraft:diamond", 7))})
+            blocks.append(b)
+        ents = List[Compound]([Compound({"pos": List[Double]([1.5, 1.0, 1.5]), "blockPos": List[Int]([1, 1, 1]),
+                                         "nbt": Compound({"id": String("minecraft:armor_stand")})})])
+        return Compound({"DataVersion": Int(5023), "size": List[Int]([3, 2, 2]), "palette": pal,
+                         "blocks": List[Compound](blocks), "entities": ents})
+
+    write_gzip(ROOT / "structure" / "modern_keys.nbt", nbt_bytes(make("id", "properties"), "", "big"))
+    write_gzip(ROOT / "structure" / "legacy_keys.nbt", nbt_bytes(make("Name", "Properties"), "", "big"))
+    # Shipwreck-style: several palettes (the first one is used, with a warning).
+    root = make("id", "properties")
+    first = root["palette"]
+    del root["palette"]
+    root["palettes"] = List[List[Compound]]([first, first])
+    write_gzip(ROOT / "structure" / "multi_palette.nbt", nbt_bytes(root, "", "big"))
+
+
+def pack_litematic(indices, bits):
+    """Litematica packing: entries may span two longs, LSB first."""
+    total = len(indices) * bits
+    longs = [0] * ((total + 63) // 64)
+    for i, v in enumerate(indices):
+        start = i * bits
+        w, off = divmod(start, 64)
+        longs[w] |= (v << off) & 0xFFFFFFFFFFFFFFFF
+        if off + bits > 64:
+            longs[w + 1] |= v >> (64 - off)
+    return LongArray([l - (1 << 64) if l >= (1 << 63) else l for l in longs])
+
+
+def generate_litematic():
+    # Region A at (0,0,0) size (5,2,3); region B at Position (10,0,0) Size (-3,2,2): x 8..10.
+    pal_a = ["minecraft:air", "minecraft:stone", "minecraft:oak_planks", "minecraft:glass", "minecraft:bricks",
+             "minecraft:chest[facing=south,type=single,waterlogged=false]"]  # 6 entries -> 3 bits (spans longs)
+
+    def entry(state):
+        name, props = (state.split("[", 1) + [""])[:2]
+        props = dict(p.split("=") for p in props.rstrip("]").split(",")) if props else {}
+        c = Compound({"Name": String(name)})
+        if props:
+            c["Properties"] = Compound({k: String(v) for k, v in props.items()})
+        return c
+
+    sx, sy, sz = 5, 2, 3
+    idx_a = []
+    for y in range(sy):
+        for z in range(sz):
+            for x in range(sx):
+                idx_a.append(5 if (x, y, z) == (2, 1, 1) else (1 + (x + z) % 4 if y == 0 else 0))
+    region_a = Compound({
+        "Position": Compound({"x": Int(0), "y": Int(0), "z": Int(0)}),
+        "Size": Compound({"x": Int(sx), "y": Int(sy), "z": Int(sz)}),
+        "BlockStatePalette": List[Compound]([entry(p) for p in pal_a]),
+        "BlockStates": pack_litematic(idx_a, 3),
+        "TileEntities": List[Compound]([Compound({"x": Int(2), "y": Int(1), "z": Int(1), "id": String("minecraft:chest"),
+                                                  "Items": items((3, "minecraft:emerald", 9))})]),
+        "Entities": List[Compound]([]),
+    })
+    pal_b = ["minecraft:air", "minecraft:gold_block"]
+    region_b = Compound({
+        "Position": Compound({"x": Int(10), "y": Int(0), "z": Int(0)}),
+        "Size": Compound({"x": Int(-3), "y": Int(2), "z": Int(2)}),
+        "BlockStatePalette": List[Compound]([entry(p) for p in pal_b]),
+        "BlockStates": pack_litematic([1] * (3 * 2 * 2), 2),
+        "TileEntities": List[Compound]([]),
+        "Entities": List[Compound]([]),
+    })
+    root = Compound({
+        "MinecraftDataVersion": Int(5023), "Version": Int(7), "SubVersion": Int(1),
+        "Metadata": Compound({"Name": String("Two regions"), "Author": String("bridger"), "TimeCreated": Long(1760000000000)}),
+        "Regions": Compound({"A": region_a, "B": region_b}),
+    })
+    write_gzip(ROOT / "litematic" / "two_regions.litematic", nbt_bytes(root, "", "big"))
+
+
+def generate_legacy_schematic():
+    w, h, l = 4, 2, 3
+    ids = [0] * (w * h * l)
+    data = [0] * (w * h * l)
+
+    def put(x, y, z, block_id, d=0):
+        i = (y * l + z) * w + x
+        ids[i] = block_id
+        data[i] = d
+
+    for x in range(w):
+        for z in range(l):
+            put(x, 0, z, 1)          # stone
+    put(0, 1, 0, 53, 1)              # oak stairs facing west (legacy data 1)
+    put(1, 1, 0, 35, 14)             # red wool
+    put(2, 1, 0, 54, 3)              # chest facing south
+    put(3, 1, 0, 44, 0)              # legacy stone slab = smooth stone slab since 1.14
+    put(0, 1, 1, 31, 1)              # tall grass = short_grass since 1.20.3
+    put(1, 1, 1, 26, 0)              # bed foot (red by id; blue via block entity color)
+    put(3, 1, 2, 300, 0)             # id 300: needs AddBlocks; unknown -> reported
+    add = [0] * ((len(ids) + 1) // 2)
+    for i, v in enumerate(ids):
+        hi = v >> 8
+        if hi:
+            add[i >> 1] |= (hi << 4) if i % 2 == 0 else hi  # even index -> high nibble
+    root = Compound({
+        "Width": Short(w), "Height": Short(h), "Length": Short(l), "Materials": String("Alpha"),
+        "Blocks": byte_array([v & 0xFF for v in ids]), "Data": byte_array(data), "AddBlocks": byte_array(add),
+        "TileEntities": List[Compound]([
+            Compound({"id": String("Chest"), "x": Int(2), "y": Int(1), "z": Int(0),
+                      "Items": List[Compound]([Compound({"id": Short(264), "Count": Byte(5), "Damage": Short(0), "Slot": Byte(0)}),
+                                               Compound({"id": Short(35), "Count": Byte(3), "Damage": Short(11), "Slot": Byte(1)})])}),
+            Compound({"id": String("minecraft:bed"), "x": Int(1), "y": Int(1), "z": Int(1), "color": Int(11)}),
+        ]),
+        "Entities": List[Compound]([]),
+        "WEOffsetX": Int(0), "WEOffsetY": Int(-1), "WEOffsetZ": Int(0),
+    })
+    write_gzip(ROOT / "schematic" / "legacy_basic.schematic", nbt_bytes(root, "Schematic", "big"))
+
+
+def pack_anvil(indices, bits):
+    """Anvil 1.16+ packing: 64 // bits entries per long, never spanning, LSB first."""
+    per = 64 // bits
+    longs = [0] * ((len(indices) + per - 1) // per)
+    for i, v in enumerate(indices):
+        longs[i // per] |= v << ((i % per) * bits)
+    return LongArray([l - (1 << 64) if l >= (1 << 63) else l for l in longs])
+
+
+def anvil_state(state, spelling="Name"):
+    name, props = (state.split("[", 1) + [""])[:2]
+    props = dict(p.split("=") for p in props.rstrip("]").split(",")) if props else {}
+    keys = ("Name", "Properties") if spelling == "Name" else ("id", "properties")
+    c = Compound({keys[0]: String(name)})
+    if props:
+        c[keys[1]] = Compound({k: String(v) for k, v in props.items()})
+    return c
+
+
+def anvil_section(y, palette, indices=None, biomes=("minecraft:plains",), biome_indices=None, spelling="Name"):
+    states = Compound({"palette": List[Compound]([anvil_state(p, spelling) for p in palette])})
+    if len(palette) > 1:
+        states["data"] = pack_anvil(indices, max(4, (len(palette) - 1).bit_length()))
+    bio = Compound({"palette": List[String]([String(b) for b in biomes])})
+    if len(biomes) > 1:
+        bio["data"] = pack_anvil(biome_indices, (len(biomes) - 1).bit_length())
+    return Compound({"Y": Byte(y), "block_states": states, "biomes": bio})
+
+
+def anvil_chunk(cx, cz, sections, block_entities=(), status="minecraft:full"):
+    return Compound({
+        "DataVersion": Int(5023), "xPos": Int(cx), "zPos": Int(cz), "yPos": Int(-4), "Status": String(status),
+        "sections": List[Compound](sections), "block_entities": List[Compound](list(block_entities)),
+    })
+
+
+def write_region(path, chunks):
+    """chunks: {(local_x, local_z): (compression, nbt_bytes, external)}; external payloads go to c.X.Z.mcc."""
+    rx, rz = (int(v) for v in path.name.split(".")[1:3])
+    header = bytearray(8192)
+    body = bytearray()
+    for (lx, lz), (kind, raw, external) in sorted(chunks.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+        if kind == 1:
+            buf = io.BytesIO()
+            with gzip.GzipFile(filename="", mode="wb", fileobj=buf, mtime=0) as gz:
+                gz.write(raw)
+            data = buf.getvalue()
+        elif kind == 2:
+            data = zlib.compress(raw, 6)
+        else:
+            data = raw
+        if external:
+            write_raw(path.parent / f"c.{rx * 32 + lx}.{rz * 32 + lz}.mcc", data)
+            payload = struct.pack(">iB", 1, kind | 0x80)
+        else:
+            payload = struct.pack(">iB", len(data) + 1, kind) + data
+        payload += bytes((-len(payload)) % 4096)
+        offset = 2 + len(body) // 4096
+        sectors = len(payload) // 4096
+        struct.pack_into(">I", header, 4 * (lx + lz * 32), (offset << 8) | sectors)
+        struct.pack_into(">I", header, 4096 + 4 * (lx + lz * 32), 1760000000)
+        body += payload
+    write_raw(path, bytes(header) + bytes(body))
+
+
+def generate_java_world():
+    world = ROOT / "javaworld" / "basic"
+    level = Compound({"Data": Compound({
+        "LevelName": String("Bridger Test World"), "DataVersion": Int(5023),
+        "Version": Compound({"Name": String("26.3"), "Id": Int(5023)}),
+        "spawn": Compound({"dimension": String("minecraft:overworld"), "pos": IntArray([8, 70, 8])}),
+        "WorldGenSettings": Compound({"seed": Long(12345)}),
+    })})
+    write_gzip(world / "level.dat", nbt_bytes(level, "", "big"))
+
+    # Chunk (0,0), zlib: stone floor section Y=-4, a mixed section Y=4 (y 64..79) with a
+    # chest at (3,70,5) and two biomes (desert where x >= 8), an all-air section Y=19.
+    pal = ["minecraft:air", "minecraft:stone", "minecraft:oak_planks", "minecraft:glass",
+           "minecraft:chest[facing=north,type=single,waterlogged=false]"]
+    idx = [0] * 4096
+    for z in range(16):
+        for x in range(16):
+            idx[(0 << 8) | (z << 4) | x] = 2  # y 64: planks
+            idx[(1 << 8) | (z << 4) | x] = 3 if x == 0 else 0  # y 65: glass wall at x=0
+    idx[(6 << 8) | (5 << 4) | 3] = 4  # chest at (3,70,5)
+    bidx = [1 if (i % 4) >= 2 else 0 for i in range(64)]  # x quarter >= 2 -> desert
+    chest = Compound({"id": String("minecraft:chest"), "x": Int(3), "y": Int(70), "z": Int(5),
+                      "keepPacked": Byte(0), "Items": items((0, "minecraft:diamond", 3))})
+    c00 = anvil_chunk(0, 0, [
+        anvil_section(-4, ["minecraft:stone"]),
+        anvil_section(4, pal, idx, ("minecraft:plains", "minecraft:desert"), bidx),
+        anvil_section(19, ["minecraft:air"]),
+    ], [chest])
+
+    # Chunk (1,0), gzip, {id, properties} spelling: a waterlogged stair at (16+2, 0, 3).
+    pal2 = ["minecraft:air", "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=true]"]
+    idx2 = [0] * 4096
+    idx2[(0 << 8) | (3 << 4) | 2] = 1
+    c10 = anvil_chunk(1, 0, [anvil_section(0, pal2, idx2, spelling="id")])
+
+    # Chunk (2,0), uncompressed; chunk (0,1) stored externally; chunk (1,1) not fully generated.
+    c20 = anvil_chunk(2, 0, [anvil_section(0, ["minecraft:gold_block"])])
+    c01 = anvil_chunk(0, 1, [anvil_section(1, ["minecraft:diamond_block"])])
+    c11 = anvil_chunk(1, 1, [anvil_section(0, ["minecraft:stone"])], status="minecraft:features")
+    write_region(world / "region" / "r.0.0.mca", {
+        (0, 0): (2, nbt_bytes(c00, "", "big"), False),
+        (1, 0): (1, nbt_bytes(c10, "", "big"), False),
+        (2, 0): (3, nbt_bytes(c20, "", "big"), False),
+        (0, 1): (2, nbt_bytes(c01, "", "big"), True),
+        (1, 1): (2, nbt_bytes(c11, "", "big"), False),
+    })
+    # Negative coordinates: chunk (-1,0) is local (31,0) of region (-1,0).
+    cm1 = anvil_chunk(-1, 0, [anvil_section(-1, ["minecraft:emerald_block"])])
+    write_region(world / "region" / "r.-1.0.mca", {(31, 0): (2, nbt_bytes(cm1, "", "big"), False)})
+    # A Nether folder with an empty region file: detected and reported, not converted.
+    write_raw(world / "DIM-1" / "region" / "r.0.0.mca", b"")
+
+    # Java 26.1+ folder layout: dimensions/minecraft/overworld/region and the seed in
+    # data/minecraft/world_gen_settings.dat (saved-data wrapper {DataVersion, data}).
+    modern = ROOT / "javaworld" / "modern_layout"
+    write_gzip(modern / "level.dat", nbt_bytes(Compound({"Data": Compound({
+        "LevelName": String("Modern Layout"), "DataVersion": Int(5023),
+        "spawn": Compound({"dimension": String("minecraft:overworld"), "pos": IntArray([0, 64, 0])}),
+    })}), "", "big"))
+    write_gzip(modern / "data" / "minecraft" / "world_gen_settings.dat", nbt_bytes(Compound({
+        "DataVersion": Int(5023),
+        "data": Compound({"seed": Long(-987654321), "generate_structures": Byte(1), "bonus_chest": Byte(0)}),
+    }), "", "big"))
+    cm = anvil_chunk(3, -2, [anvil_section(0, ["minecraft:lapis_block"])])
+    write_region(modern / "dimensions" / "minecraft" / "overworld" / "region" / "r.0.-1.mca",
+                 {(3, 30): (2, nbt_bytes(cm, "", "big"), False)})
+    write_raw(modern / "dimensions" / "minecraft" / "the_end" / "region" / "r.0.0.mca", b"")
+
+    # Old (pre-1.18) chunk layout: rejected with a clear message.
+    old = Compound({"DataVersion": Int(2586), "Level": Compound({"xPos": Int(0), "zPos": Int(0)})})
+    write_region(ROOT / "javaworld" / "old_layout" / "region" / "r.0.0.mca", {(0, 0): (2, nbt_bytes(old, "", "big"), False)})
+    write_gzip(ROOT / "javaworld" / "old_layout" / "level.dat",
+               nbt_bytes(Compound({"Data": Compound({"LevelName": String("Old"), "DataVersion": Int(2586)})}), "", "big"))
+
+
 if __name__ == "__main__":
     generate_nbt()
     generate_schem()
     generate_ingame()
+    generate_structure_nbt()
+    generate_litematic()
+    generate_legacy_schematic()
+    generate_java_world()
     print("test data written")

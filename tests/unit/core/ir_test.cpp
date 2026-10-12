@@ -142,3 +142,13 @@ TEST_CASE("Structure maps local positions across section borders", "[core]") {
 
     CHECK_FALSE(Structure::create(blocks, biomes, {65535, 65535, 65535}, {}));
 }
+
+TEST_CASE("Structures with a zero dimension but huge others are refused", "[core][structure]") {
+    // Volume 0 passes every volume limit, yet loops over the other axes would run for hours
+    // (both found by fuzzing the .nbt and .mcstructure readers).
+    auto blocks = std::make_shared<BlockStateRegistry>();
+    auto biomes = std::make_shared<BiomeRegistry>();
+    CHECK_FALSE(Structure::create(blocks, biomes, Extent{0, 196608, 131074}, {}));
+    CHECK_FALSE(Structure::create(blocks, biomes, Extent{786436, 4096, 0}, {}));
+    CHECK(Structure::create(blocks, biomes, Extent{0, 0, 0}, {}));
+}

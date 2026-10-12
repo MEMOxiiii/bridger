@@ -30,3 +30,9 @@ oom-*
 
 # mapgen inputs fetched by tools/mapgen/fetch_sources.py (Mojang jar, generated reports)
 /tools/mapgen/sources/cache/
+__pycache__/
+crash-*
+slow-unit-*
+timeout-*
+oom-*
+leak-*

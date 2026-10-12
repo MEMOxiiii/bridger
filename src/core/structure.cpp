@@ -10,6 +10,11 @@ constexpr u32 sections_for(u32 blocks) noexcept { return (blocks + 15) / 16; }
 Result<Structure> Structure::create(std::shared_ptr<BlockStateRegistry> blocks, std::shared_ptr<BiomeRegistry> biomes,
                                     Extent size, SourceVersion source, u64 max_sections) {
     if (!blocks || !biomes) return make_error(ErrorCode::InvalidArgument, "structure needs registries");
+    // A zero axis with huge others has volume 0 and passes every volume limit, but loops over
+    // the other two axes would still run billions of times (found by fuzzing).
+    if (size.volume() == 0 && (size.x | size.y | size.z) != 0)
+        return make_error(ErrorCode::Malformed, "structure of " + std::to_string(size.x) + "x" + std::to_string(size.y) +
+                                                    "x" + std::to_string(size.z) + " blocks has a zero dimension");
     const u32 sx = sections_for(size.x);
     const u32 sy = sections_for(size.y);
     const u32 sz = sections_for(size.z);
@@ -72,6 +77,12 @@ bool Structure::set_biome(BlockPos p, BiomeId id) {
     section(static_cast<u32>(p.x >> 4), static_cast<u32>(p.y >> 4), static_cast<u32>(p.z >> 4))
         .set_biome(p.x & 15, p.y & 15, p.z & 15, id);
     return true;
+}
+
+bool Structure::has_biome_data() const noexcept {
+    for (const Section& s : sections_)
+        if (s.has_biomes()) return true;
+    return false;
 }
 
 usize Structure::memory_bytes() const noexcept {

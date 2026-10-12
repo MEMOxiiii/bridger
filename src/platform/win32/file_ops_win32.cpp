@@ -74,6 +74,16 @@ public:
         return {};
     }
 
+    Status flush_path(const std::filesystem::path& path) override {
+        BRIDGER_TRY(const std::wstring p, native(path));
+        HANDLE h = ::CreateFileW(p.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return last_error("cannot open file to flush", path);
+        const BOOL ok = ::FlushFileBuffers(h);
+        ::CloseHandle(h);
+        if (!ok) return last_error("flush failed", path);
+        return {};
+    }
+
     Status close(Handle handle) override {
         if (!::CloseHandle(static_cast<HANDLE>(handle))) return last_error("close failed", {});
         return {};

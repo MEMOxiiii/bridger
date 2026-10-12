@@ -49,8 +49,13 @@ public:
     using SubjectMap = std::unordered_map<std::string, IssueEntry>;
     [[nodiscard]] const SubjectMap* issues(IssueKind kind) const noexcept;
 
+    // Added to every example position from now on (world conversions translate one
+    // chunk column at a time in column-local coordinates).
+    void set_origin(BlockPos origin) noexcept { origin_ = origin; }
+
 private:
     std::unordered_map<IssueKind, SubjectMap> issues_;
+    BlockPos origin_{};
 };
 
 } // namespace bridger::translate

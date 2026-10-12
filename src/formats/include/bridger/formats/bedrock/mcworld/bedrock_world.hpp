@@ -11,6 +11,10 @@
 #include <bridger/formats/bedrock/mcworld/subchunk_codec.hpp>
 
 #include <filesystem>
+#include <memory>
+#include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace bridger::formats::bedrock {
@@ -46,6 +50,89 @@ struct WorldWriteStats {
 [[nodiscard]] Result<std::vector<u8>> write_new_world(const Structure& structure, const NewWorldOptions& options,
                                                       const StateNbtFn& state_nbt, const std::filesystem::path& work_dir,
                                                       WorldWriteStats* stats = nullptr);
+
+// --- Whole worlds, one chunk column at a time (Java world -> Bedrock) ---------------
+// Writes into `work_dir/db` as columns arrive; finish() closes the database and writes
+// level.dat. The caller zips the directory (io::write_zip_file_from_directory).
+// One chunk column's LevelDB entries, encoded and ready to store (in this order).
+struct EncodedColumn {
+    std::vector<std::pair<std::string, std::vector<u8>>> entries;
+    WorldWriteStats stats;
+    usize clipped_blocks = 0; // blocks outside the Overworld build height, dropped
+
+    void add(std::string key, std::span<const u8> value) { entries.emplace_back(std::move(key), std::vector<u8>(value.begin(), value.end())); }
+};
+
+class WorldBuilder {
+public:
+    [[nodiscard]] static Result<WorldBuilder> create(const std::filesystem::path& work_dir);
+    WorldBuilder(WorldBuilder&&) noexcept;
+    WorldBuilder& operator=(WorldBuilder&&) noexcept;
+    ~WorldBuilder();
+
+    // Thread-safe when `state_nbt` is: encodes a column without touching the database,
+    // so workers can encode in parallel while one thread stores columns with put() in a
+    // fixed order (identical output for any thread count).
+    [[nodiscard]] static Result<EncodedColumn> encode_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state,
+                                                             i32 default_biome, const StateNbtFn& state_nbt);
+    [[nodiscard]] Status put(const EncodedColumn& column);
+
+    // `column`: a Bedrock-domain 16 x h x 16 structure whose local (0,0,0) is world
+    // (pos.x*16, min_y, pos.z*16); block entities as for write_new_world. No flat layers
+    // are added. Blocks outside the Overworld build height are counted in clipped_blocks.
+    [[nodiscard]] Status write_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state, i32 default_biome,
+                                      const StateNbtFn& state_nbt, usize* clipped_blocks = nullptr);
+    [[nodiscard]] Status finish(const LevelDatOptions& level);
+    [[nodiscard]] const WorldWriteStats& stats() const noexcept;
+
+private:
+    WorldBuilder();
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// Checks a world directory produced by WorldBuilder (no zip step): opens the database,
+// decodes every subchunk and block entity list, parses level.dat.
+[[nodiscard]] Status validate_world_directory(const std::filesystem::path& dir, WorldWriteStats* stats = nullptr);
+
+// --- Placing into an existing world (docs/safety.md §5) ---------------------------
+// The existing world is never modified: it is unpacked into `work_dir`, changed there,
+// and returned as a new zipped world. Keys the structure does not touch are copied
+// byte-for-byte; in touched subchunks the existing palette entries are kept verbatim.
+
+struct PlaceOptions {
+    BlockPos origin;            // world position of the structure's local (0,0,0)
+    bool air_replaces = false;  // --air replace
+    bool clear_entities = false; // --clear-entities: remove entities inside the structure's box
+    u32 air_state = 0;
+    i32 default_biome = 1;
+};
+
+struct RemovedThing {
+    std::string id;
+    BlockPos pos; // world position
+};
+
+struct PlaceStats {
+    usize chunks_touched = 0;
+    usize chunks_created = 0; // columns that did not exist in the world (no terrain there)
+    usize subchunks_written = 0;
+    usize block_entities_written = 0;
+    std::vector<RemovedThing> removed_block_entities;
+    std::vector<RemovedThing> removed_entities;
+    std::vector<std::string> touched_keys; // every LevelDB key written or deleted
+    std::vector<std::string> warnings;
+};
+
+[[nodiscard]] Result<std::vector<u8>> place_into_world(std::span<const u8> existing_mcworld, const Structure& structure,
+                                                       const PlaceOptions& options, const StateNbtFn& state_nbt,
+                                                       const std::filesystem::path& work_dir, PlaceStats* stats = nullptr);
+
+// Validation for place_into_world: every key outside `touched_keys` must be byte-identical
+// to the source world, every touched subchunk must decode, and level.dat must be unchanged.
+[[nodiscard]] Status validate_placed_world(std::span<const u8> output, std::span<const u8> source,
+                                           const std::vector<std::string>& touched_keys,
+                                           const std::filesystem::path& work_dir);
 
 // Checks a .mcworld produced by write_new_world: unzips it, opens the LevelDB copy,
 // decodes every subchunk and parses level.dat and block entities. Used as the output

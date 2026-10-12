@@ -20,7 +20,7 @@ std::string_view to_string(IssueKind kind) noexcept {
 void ConversionReport::add(IssueKind kind, std::string_view subject, BlockPos where, u64 count) {
     IssueEntry& entry = issues_[kind][std::string(subject)];
     entry.count += count;
-    if (entry.examples.size() < kMaxExamples) entry.examples.push_back(where);
+    if (entry.examples.size() < kMaxExamples) entry.examples.push_back({where.x + origin_.x, where.y + origin_.y, where.z + origin_.z});
 }
 
 void ConversionReport::merge(const ConversionReport& other) {

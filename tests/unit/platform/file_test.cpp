@@ -42,6 +42,10 @@ public:
         if (fault_ == Fault::Flush) return make_error(ErrorCode::IoError, "injected flush failure");
         return real().flush(h);
     }
+    Status flush_path(const std::filesystem::path& p) override {
+        if (fault_ == Fault::Flush) return make_error(ErrorCode::IoError, "injected flush failure");
+        return real().flush_path(p);
+    }
     Status close(Handle h) override {
         auto s = real().close(h);
         if (fault_ == Fault::Close) return make_error(ErrorCode::IoError, "injected close failure");

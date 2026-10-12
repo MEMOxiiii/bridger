@@ -13,6 +13,8 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <memory>
+#include <optional>
 
 namespace bridger::formats::bedrock {
 namespace fs = std::filesystem;
@@ -84,6 +86,92 @@ Status write_file(const fs::path& p, std::span<const u8> bytes) {
     return {};
 }
 
+
+using BiomeStorages = std::array<std::array<u32, kSectionVolume>, kOverworldSubchunks>;
+
+// Per-column accumulation shared by write_new_world and WorldBuilder.
+struct ColumnAccumulator {
+    std::array<i32, 256> highest; // world y of the highest non-air block per (z<<4|x), or INT_MIN
+    std::unique_ptr<BiomeStorages> biomes = std::make_unique<BiomeStorages>();
+
+    explicit ColumnAccumulator(i32 default_biome) {
+        highest.fill(std::numeric_limits<i32>::min());
+        for (auto& b : *biomes) b.fill(static_cast<u32>(default_biome));
+    }
+    std::array<u32, kSectionVolume>& biome_storage(i32 sy) { return (*biomes)[static_cast<usize>(sy - kOverworldMinSubchunk)]; }
+
+    // Blocks/liquids in Bridger order (y*256+z*16+x). Skips empty subchunks.
+    Status add_subchunk(EncodedColumn& out, i32 cx, i32 cz, i32 sy, const std::array<u32, kSectionVolume>& blocks,
+                        const std::array<u32, kSectionVolume>* liquids, u32 air, const StateNbtFn& state_nbt) {
+        const i32 y0 = sy * 16;
+        bool any_block = false;
+        for (i32 y = 15; y >= 0; --y)
+            for (usize zx = 0; zx < 256; ++zx)
+                if (blocks[(static_cast<usize>(y) << 8) | zx] != air) {
+                    any_block = true;
+                    if (highest[zx] < y0 + y) highest[zx] = y0 + y;
+                }
+        if (!any_block && liquids == nullptr) return {};
+        PaletteLayer layer0;
+        layer0.assign(blocks);
+        PaletteLayer layer1;
+        std::vector<const PaletteLayer*> layers{&layer0};
+        if (liquids != nullptr) {
+            layer1.assign(*liquids);
+            layers.push_back(&layer1);
+        }
+        BRIDGER_TRY(const std::vector<u8> encoded, encode_subchunk(static_cast<i8>(sy), layers, state_nbt));
+        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::SubChunkPrefix, static_cast<i8>(sy)), encoded);
+        ++out.stats.subchunks;
+        return {};
+    }
+
+    // Data3D, block entities (with their world positions), Version, FinalizedState.
+    Status finish(EncodedColumn& out, i32 cx, i32 cz, std::span<const std::pair<const BlockEntity*, BlockPos>> entities,
+                  BlockPos origin) {
+        // Data3D: 256 i16 heights (z-major) relative to the world bottom, then 24 biome storages.
+        io::BinaryWriter d3(Endian::Little);
+        for (usize z = 0; z < 16; ++z)
+            for (usize x = 0; x < 16; ++x) {
+                const i32 h = highest[(z << 4) | x];
+                d3.write<i16>(static_cast<i16>(h == std::numeric_limits<i32>::min() ? 0 : h - kOverworldMinY + 1));
+            }
+        for (const auto& storage : *biomes) write_biome_storage(d3, storage);
+        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::Data3D), d3.view());
+
+        if (!entities.empty()) {
+            io::BinaryWriter bew(Endian::Little);
+            for (const auto& [be, world] : entities) {
+                BRIDGER_TRY_STATUS(append_block_entity(bew, *be, world, origin));
+                ++out.stats.block_entities;
+            }
+            out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::BlockEntity), bew.view());
+        }
+
+        const u8 version = kChunkVersion;
+        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::Version), std::span<const u8>(&version, 1));
+        std::array<u8, 4> finalized{};
+        io::store_le<i32>(finalized.data(), kFinalizedDone);
+        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::FinalizedState), finalized);
+        ++out.stats.chunks;
+        return {};
+    }
+};
+
+Status put_column(LevelDbStore& db, const EncodedColumn& column, WorldWriteStats& st) {
+    BRIDGER_TRY_STATUS(db.put_batch(column.entries));
+    st.chunks += column.stats.chunks;
+    st.subchunks += column.stats.subchunks;
+    st.block_entities += column.stats.block_entities;
+    return {};
+}
+
+Status write_level_files(const fs::path& dir, const LevelDatOptions& level) {
+    BRIDGER_TRY_STATUS(write_file(dir / "level.dat", encode_level_dat(level)));
+    const std::string& name = level.level_name;
+    return write_file(dir / "levelname.txt", std::span<const u8>(reinterpret_cast<const u8*>(name.data()), name.size()));
+}
+
 } // namespace
 
 Result<std::vector<u8>> write_new_world(const Structure& s, const NewWorldOptions& o, const StateNbtFn& state_nbt,
@@ -116,33 +204,29 @@ Result<std::vector<u8>> write_new_world(const Structure& s, const NewWorldOption
         BRIDGER_TRY(LevelDbStore db, LevelDbStore::open(work_dir / "db", /*create_new=*/true));
 
         // Block entities by chunk column (absolute positions).
-        std::map<std::pair<i32, i32>, std::vector<const BlockEntity*>> entities;
+        std::map<std::pair<i32, i32>, std::vector<std::pair<const BlockEntity*, BlockPos>>> entities;
         for (const BlockEntity& be : s.block_entities) {
             const BlockPos w{be.pos.x + origin.x, be.pos.y + origin.y, be.pos.z + origin.z};
-            entities[{floor_div16(w.x), floor_div16(w.z)}].push_back(&be);
+            entities[{floor_div16(w.x), floor_div16(w.z)}].push_back({&be, w});
         }
 
         if (size.volume() > 0) {
             const i32 cx0 = floor_div16(origin.x), cx1 = floor_div16(origin.x + static_cast<i32>(size.x) - 1);
             const i32 cz0 = floor_div16(origin.z), cz1 = floor_div16(origin.z + static_cast<i32>(size.z) - 1);
+            std::array<u32, kSectionVolume> blocks;  // Bridger order
+            std::array<u32, kSectionVolume> liquids; // Bridger order
             for (i32 cz = cz0; cz <= cz1; ++cz) {
                 for (i32 cx = cx0; cx <= cx1; ++cx) {
-                    std::array<i32, 256> highest; // world y of the highest non-air block per (x,z), or INT_MIN
-                    highest.fill(std::numeric_limits<i32>::min());
-                    std::array<std::array<u32, kSectionVolume>, kOverworldSubchunks> biome_storages;
-
+                    ColumnAccumulator column(o.default_biome);
+                    EncodedColumn encoded;
                     for (i32 sy = kOverworldMinSubchunk; sy < kOverworldMinSubchunk + kOverworldSubchunks; ++sy) {
                         const i32 y0 = sy * 16;
-                        auto& biomes = biome_storages[static_cast<usize>(sy - kOverworldMinSubchunk)];
-                        biomes.fill(static_cast<u32>(o.default_biome));
-
+                        auto& biomes = column.biome_storage(sy);
                         const bool has_flat = y0 <= flat_top;
                         const i32 ly0 = std::max(y0, origin.y), ly1 = std::min(y0 + 15, origin.y + static_cast<i32>(size.y) - 1);
                         const bool has_structure = ly0 <= ly1;
                         if (!has_flat && !has_structure) continue;
 
-                        std::array<u32, kSectionVolume> blocks;  // Bridger order
-                        std::array<u32, kSectionVolume> liquids; // Bridger order
                         blocks.fill(o.air_state);
                         liquids.fill(o.air_state);
                         bool any_liquid = false;
@@ -171,65 +255,21 @@ Result<std::vector<u8>> write_new_world(const Structure& s, const NewWorldOption
                                                                  static_cast<usize>(wz & 15))] = *b;
                                     }
                         }
-                        // Heights and emptiness.
-                        bool any_block = false;
-                        for (i32 y = 15; y >= 0; --y)
-                            for (usize zx = 0; zx < 256; ++zx)
-                                if (blocks[(static_cast<usize>(y) << 8) | zx] != o.air_state) {
-                                    any_block = true;
-                                    if (highest[zx] < y0 + y) highest[zx] = y0 + y;
-                                }
-                        if (!any_block && !any_liquid) continue;
-
-                        PaletteLayer layer0;
-                        layer0.assign(blocks);
-                        PaletteLayer layer1;
-                        std::vector<const PaletteLayer*> layers{&layer0};
-                        if (any_liquid) {
-                            layer1.assign(liquids);
-                            layers.push_back(&layer1);
-                        }
-                        BRIDGER_TRY(const std::vector<u8> encoded, encode_subchunk(static_cast<i8>(sy), layers, state_nbt));
-                        BRIDGER_TRY_STATUS(db.put(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::SubChunkPrefix, static_cast<i8>(sy)), encoded));
-                        ++st.subchunks;
+                        BRIDGER_TRY_STATUS(column.add_subchunk(encoded, cx, cz, sy, blocks, any_liquid ? &liquids : nullptr,
+                                                               o.air_state, state_nbt));
                     }
-
-                    // Data3D: 256 i16 heights (z-major) relative to the world bottom, then 24 biome storages.
-                    io::BinaryWriter d3(Endian::Little);
-                    for (usize z = 0; z < 16; ++z)
-                        for (usize x = 0; x < 16; ++x) {
-                            const i32 h = highest[(z << 4) | x];
-                            d3.write<i16>(static_cast<i16>(h == std::numeric_limits<i32>::min() ? 0 : h - kOverworldMinY + 1));
-                        }
-                    for (const auto& storage : biome_storages) write_biome_storage(d3, storage);
-                    BRIDGER_TRY_STATUS(db.put(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::Data3D), d3.view()));
-
-                    if (const auto it = entities.find({cx, cz}); it != entities.end()) {
-                        io::BinaryWriter bew(Endian::Little);
-                        for (const BlockEntity* be : it->second) {
-                            const BlockPos w{be->pos.x + origin.x, be->pos.y + origin.y, be->pos.z + origin.z};
-                            BRIDGER_TRY_STATUS(append_block_entity(bew, *be, w, origin));
-                            ++st.block_entities;
-                        }
-                        BRIDGER_TRY_STATUS(db.put(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::BlockEntity), bew.view()));
-                    }
-
-                    const u8 version = kChunkVersion;
-                    BRIDGER_TRY_STATUS(db.put(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::Version), std::span<const u8>(&version, 1)));
-                    std::array<u8, 4> finalized{};
-                    io::store_le<i32>(finalized.data(), kFinalizedDone);
-                    BRIDGER_TRY_STATUS(db.put(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::FinalizedState), finalized));
-                    ++st.chunks;
+                    const auto it = entities.find({cx, cz});
+                    std::span<const std::pair<const BlockEntity*, BlockPos>> bes;
+                    if (it != entities.end()) bes = it->second;
+                    BRIDGER_TRY_STATUS(column.finish(encoded, cx, cz, bes, origin));
+                    BRIDGER_TRY_STATUS(put_column(db, encoded, st));
                 }
             }
         }
         BRIDGER_TRY_STATUS(db.compact());
     } // database closed: the directory is complete
 
-    BRIDGER_TRY_STATUS(write_file(work_dir / "level.dat", encode_level_dat(o.level)));
-    const std::string name = o.level.level_name;
-    BRIDGER_TRY_STATUS(write_file(work_dir / "levelname.txt",
-                                  std::span<const u8>(reinterpret_cast<const u8*>(name.data()), name.size())));
+    BRIDGER_TRY_STATUS(write_level_files(work_dir, o.level));
 
     std::vector<io::ZipEntry> entries;
     for (const auto& e : fs::recursive_directory_iterator(work_dir)) {
@@ -243,6 +283,97 @@ Result<std::vector<u8>> write_new_world(const Structure& s, const NewWorldOption
     if (stats != nullptr) *stats = st;
     return io::write_zip(entries);
 }
+
+// --- WorldBuilder -------------------------------------------------------------------
+
+struct WorldBuilder::Impl {
+    fs::path dir;
+    std::optional<LevelDbStore> db;
+    WorldWriteStats stats;
+};
+
+WorldBuilder::WorldBuilder() = default;
+WorldBuilder::WorldBuilder(WorldBuilder&&) noexcept = default;
+WorldBuilder& WorldBuilder::operator=(WorldBuilder&&) noexcept = default;
+WorldBuilder::~WorldBuilder() = default;
+
+Result<WorldBuilder> WorldBuilder::create(const fs::path& work_dir) {
+    fs::create_directories(work_dir / "db");
+    BRIDGER_TRY(LevelDbStore db, LevelDbStore::open(work_dir / "db", /*create_new=*/true, /*bulk_load=*/true));
+    WorldBuilder b;
+    b.impl_ = std::make_unique<Impl>();
+    b.impl_->dir = work_dir;
+    b.impl_->db.emplace(std::move(db));
+    return b;
+}
+
+Result<EncodedColumn> WorldBuilder::encode_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state,
+                                                  i32 default_biome, const StateNbtFn& state_nbt) {
+    if (column.source().edition != Edition::Bedrock)
+        return make_error(ErrorCode::InvalidArgument, "encode_column needs a Bedrock column");
+    if (column.size().x != 16 || column.size().z != 16 || (min_y & 15) != 0)
+        return make_error(ErrorCode::InvalidArgument, "encode_column needs a 16-wide column starting on a section boundary");
+    EncodedColumn out;
+    ColumnAccumulator acc(default_biome);
+    auto blocks = std::make_unique<std::array<u32, kSectionVolume>>();
+    auto liquids = std::make_unique<std::array<u32, kSectionVolume>>();
+    auto biome_tmp = std::make_unique<std::array<u32, kSectionVolume>>();
+    const i32 first_sy = min_y >> 4;
+    const i32 sections = static_cast<i32>(column.sections_y());
+    for (i32 i = 0; i < sections; ++i) {
+        const i32 sy = first_sy + i;
+        const Section& sec = column.section(0, static_cast<u32>(i), 0);
+        sec.blocks().copy_to(*blocks);
+        if (sy < kOverworldMinSubchunk || sy >= kOverworldMinSubchunk + kOverworldSubchunks) {
+            out.clipped_blocks +=
+                static_cast<usize>(std::count_if(blocks->begin(), blocks->end(), [&](u32 v) { return v != air_state; }));
+            continue;
+        }
+        const std::array<u32, kSectionVolume>* layer2 = nullptr;
+        if (const PaletteLayer* l = sec.secondary_layer()) {
+            l->copy_to(*liquids);
+            if (std::any_of(liquids->begin(), liquids->end(), [&](u32 v) { return v != air_state; })) layer2 = liquids.get();
+        }
+        if (const PaletteLayer* b = sec.biome_layer()) {
+            b->copy_to(*biome_tmp);
+            auto& storage = acc.biome_storage(sy);
+            for (usize j = 0; j < kSectionVolume; ++j) storage[bedrock_order(j & 15, j >> 8, (j >> 4) & 15)] = (*biome_tmp)[j];
+        }
+        BRIDGER_TRY_STATUS(acc.add_subchunk(out, pos.x, pos.z, sy, *blocks, layer2, air_state, state_nbt));
+    }
+    const BlockPos origin{pos.x * 16, min_y, pos.z * 16};
+    std::vector<std::pair<const BlockEntity*, BlockPos>> bes;
+    for (const BlockEntity& be : column.block_entities) {
+        const BlockPos w{be.pos.x + origin.x, be.pos.y + origin.y, be.pos.z + origin.z};
+        if (w.y < kOverworldMinY || w.y > kOverworldMaxY) continue;
+        bes.push_back({&be, w});
+    }
+    BRIDGER_TRY_STATUS(acc.finish(out, pos.x, pos.z, bes, origin));
+    return out;
+}
+
+Status WorldBuilder::put(const EncodedColumn& column) {
+    Impl& m = *impl_;
+    if (!m.db) return make_error(ErrorCode::InvalidArgument, "WorldBuilder::put after finish");
+    return put_column(*m.db, column, m.stats);
+}
+
+Status WorldBuilder::write_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state, i32 default_biome,
+                                  const StateNbtFn& state_nbt, usize* clipped_blocks) {
+    BRIDGER_TRY(const EncodedColumn encoded, encode_column(pos, min_y, column, air_state, default_biome, state_nbt));
+    if (clipped_blocks != nullptr) *clipped_blocks = encoded.clipped_blocks;
+    return put(encoded);
+}
+
+Status WorldBuilder::finish(const LevelDatOptions& level) {
+    Impl& m = *impl_;
+    if (!m.db) return make_error(ErrorCode::InvalidArgument, "WorldBuilder::finish called twice");
+    BRIDGER_TRY_STATUS(m.db->flush());
+    m.db.reset(); // closed: the directory is complete
+    return write_level_files(m.dir, level);
+}
+
+const WorldWriteStats& WorldBuilder::stats() const noexcept { return impl_->stats; }
 
 Status validate_mcworld(std::span<const u8> mcworld, const fs::path& work_dir, WorldWriteStats* stats) {
     BRIDGER_TRY(const std::vector<io::ZipEntry> entries, io::read_zip(mcworld));
@@ -263,7 +394,18 @@ Status validate_mcworld(std::span<const u8> mcworld, const fs::path& work_dir, W
         if (e.name == "db/CURRENT") has_db = true;
     }
     if (!has_level || !has_db) return make_error(ErrorCode::ValidationFailed, "world is missing level.dat or db/");
+    return validate_world_directory(work_dir, stats);
+}
 
+Status validate_world_directory(const fs::path& work_dir, WorldWriteStats* stats) {
+    {
+        BRIDGER_TRY(const std::vector<u8> level, read_file(work_dir / "level.dat"));
+        if (level.size() < 8) return make_error(ErrorCode::ValidationFailed, "level.dat too short");
+        const i32 len = io::load_le<i32>(level.data() + 4);
+        if (len < 0 || static_cast<usize>(len) != level.size() - 8)
+            return make_error(ErrorCode::ValidationFailed, "level.dat length header mismatch");
+        BRIDGER_TRY_STATUS(io::nbt::NbtDocument::parse(std::span<const u8>(level).subspan(8), Endian::Little));
+    }
     BRIDGER_TRY(LevelDbStore db, LevelDbStore::open(work_dir / "db", /*create_new=*/false));
     WorldWriteStats st;
     Status failure;

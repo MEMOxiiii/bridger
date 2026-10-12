@@ -1,4 +1,5 @@
 #include <bridger/io/zip_archive.hpp>
+#include <bridger/platform/paths.hpp>
 
 #include <minizip-ng/mz.h>
 #include <minizip-ng/mz_strm.h>
@@ -6,7 +7,10 @@
 #include <minizip-ng/mz_zip.h>
 #include <minizip-ng/mz_zip_rw.h>
 
+#include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <limits>
 
 namespace bridger::io {
@@ -76,6 +80,62 @@ Result<std::vector<u8>> write_zip(std::span<const ZipEntry> entries) {
     if (buf == nullptr || len < 0) return make_error(ErrorCode::IoError, "zip: no output");
     const auto* p = static_cast<const u8*>(buf);
     return std::vector<u8>(p, p + len);
+}
+
+Status write_zip_file_from_directory(const std::filesystem::path& dir, const std::filesystem::path& zip_path) {
+    namespace fs = std::filesystem;
+    std::vector<std::pair<std::string, fs::path>> files;
+    for (const auto& e : fs::recursive_directory_iterator(dir)) {
+        if (!e.is_regular_file()) continue;
+        BRIDGER_TRY(std::string rel, platform::path_to_utf8(fs::relative(e.path(), dir)));
+        for (char& c : rel)
+            if (c == '\\') c = '/';
+        files.emplace_back(std::move(rel), e.path());
+    }
+    std::sort(files.begin(), files.end());
+
+    BRIDGER_TRY(const std::string zip_utf8, platform::path_to_utf8(zip_path));
+    ZipWriter zip;
+    if (!zip.h) return make_error(ErrorCode::IoError, "zip: out of memory");
+    if (mz_zip_writer_open_file(zip.h, zip_utf8.c_str(), 0, 0) != MZ_OK)
+        return make_error(ErrorCode::IoError, "zip: cannot create " + zip_utf8);
+    mz_zip_writer_set_compress_method(zip.h, MZ_COMPRESS_METHOD_DEFLATE);
+    mz_zip_writer_set_compress_level(zip.h, 6);
+    for (const auto& [name, path] : files) {
+        std::ifstream in(path, std::ios::binary);
+        const std::vector<u8> data{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        if (!in && !in.eof()) return make_error(ErrorCode::IoError, "zip: cannot read " + name);
+        if (data.size() > static_cast<usize>(std::numeric_limits<i32>::max()))
+            return make_error(ErrorCode::LimitExceeded, "zip: entry too large: " + name);
+        mz_zip_file info{};
+        info.filename = name.c_str();
+        info.modified_date = 315532800;
+        info.flag = MZ_ZIP_FLAG_UTF8;
+        info.compression_method = MZ_COMPRESS_METHOD_DEFLATE;
+        info.uncompressed_size = static_cast<i64>(data.size());
+        static const u8 kEmpty = 0;
+        if (mz_zip_writer_add_buffer(zip.h, data.empty() ? &kEmpty : data.data(), static_cast<i32>(data.size()), &info) != MZ_OK)
+            return make_error(ErrorCode::IoError, "zip: cannot add " + name);
+    }
+    if (mz_zip_writer_close(zip.h) != MZ_OK) return make_error(ErrorCode::IoError, "zip: cannot finish archive");
+    return {};
+}
+
+Result<std::vector<ZipListing>> list_zip_file(const std::filesystem::path& zip_path, const ZipLimits& limits) {
+    BRIDGER_TRY(const std::string zip_utf8, platform::path_to_utf8(zip_path));
+    ZipReader zip;
+    if (!zip.h) return make_error(ErrorCode::IoError, "zip: out of memory");
+    if (mz_zip_reader_open_file(zip.h, zip_utf8.c_str()) != MZ_OK) return make_error(ErrorCode::Malformed, "zip: not a zip archive");
+    std::vector<ZipListing> out;
+    for (i32 r = mz_zip_reader_goto_first_entry(zip.h); r == MZ_OK; r = mz_zip_reader_goto_next_entry(zip.h)) {
+        mz_zip_file* info = nullptr;
+        if (mz_zip_reader_entry_get_info(zip.h, &info) != MZ_OK || info == nullptr || info->filename == nullptr)
+            return make_error(ErrorCode::Malformed, "zip: unreadable entry");
+        if (out.size() >= limits.max_entries) return make_error(ErrorCode::LimitExceeded, "zip: too many entries");
+        out.push_back({info->filename, static_cast<u64>(std::max<i64>(0, info->uncompressed_size))});
+    }
+    mz_zip_reader_close(zip.h);
+    return out;
 }
 
 Result<std::vector<ZipEntry>> read_zip(std::span<const u8> archive, const ZipLimits& limits) {

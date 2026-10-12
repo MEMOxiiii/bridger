@@ -56,6 +56,14 @@ Result<AtomicFileWriter> AtomicFileWriter::create(const std::filesystem::path& d
     return make_error(ErrorCode::IoError, "could not create a unique temp file next to " + show(destination));
 }
 
+AtomicFileWriter AtomicFileWriter::adopt(std::filesystem::path temp, std::filesystem::path destination, FileOps& ops) {
+    return AtomicFileWriter(std::move(destination), std::move(temp), nullptr, ops);
+}
+
+Result<std::filesystem::path> AtomicFileWriter::temp_path_for(const std::filesystem::path& destination) {
+    return sibling_temp_path(destination, "bridger-tmp");
+}
+
 Status AtomicFileWriter::write(std::span<const u8> bytes) {
     if (handle_ == nullptr) return make_error(ErrorCode::InvalidArgument, "write after commit");
     return ops_->write(handle_, bytes);
@@ -65,14 +73,21 @@ Status AtomicFileWriter::commit(const FileValidator& validate) {
     if (committed_) return make_error(ErrorCode::InvalidArgument, "commit called twice");
     committed_ = true;
 
-    // 1. Make the temp file durable and close it.
-    if (auto s = ops_->flush(handle_); !s) {
+    // 1. Make the temp file durable and close it (adopted files are flushed by path).
+    if (handle_ == nullptr) {
+        if (auto s = ops_->flush_path(temp_); !s)
+            return make_error(ErrorCode::IoError, "flushing the output failed: " + s.error().message() +
+                                                      ". The destination was not touched. " +
+                                                      where_are_files(*ops_, destination_, temp_, nullptr));
+    } else if (auto s = ops_->flush(handle_); !s) {
         (void)ops_->close(std::exchange(handle_, nullptr));
         return make_error(ErrorCode::IoError, "flushing the output failed: " + s.error().message() +
                                                   ". The destination was not touched. " +
                                                   where_are_files(*ops_, destination_, temp_, nullptr));
     }
-    if (auto s = ops_->close(std::exchange(handle_, nullptr)); !s) {
+    if (handle_ == nullptr) {
+        // adopted: nothing to close
+    } else if (auto s = ops_->close(std::exchange(handle_, nullptr)); !s) {
         return make_error(ErrorCode::IoError, "closing the output failed: " + s.error().message() +
                                                   ". The destination was not touched. " +
                                                   where_are_files(*ops_, destination_, temp_, nullptr));

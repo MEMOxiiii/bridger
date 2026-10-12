@@ -4,6 +4,7 @@
 //
 // bridger_mapgen --java-blocks <reports/blocks.json> --geyser <geyser-mappings dir>
 //                --bedrock-palette <block_palette.nbt> --overrides <overrides dir>
+//                [--legacy <legacy.json> --java-registries <reports/registries.json>]
 //                --out <file.brmap> --report <coverage.md>
 
 #include <bridger/io/compression.hpp>
@@ -17,6 +18,7 @@
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <climits>
 #include <map>
 #include <optional>
 #include <string>
@@ -233,8 +235,27 @@ private:
 };
 
 struct Args {
-    fs::path java_blocks, geyser, palette, overrides, out, report;
+    fs::path java_blocks, geyser, palette, overrides, out, report, legacy, java_registries;
 };
+
+// "minecraft:oak_stairs[facing=east,half=bottom]" -> name + properties
+std::pair<std::string, std::map<std::string, std::string>> parse_state(const std::string& s) {
+    std::map<std::string, std::string> props;
+    const auto open = s.find('[');
+    if (open == std::string::npos) return {s, props};
+    const std::string inner = s.substr(open + 1, s.size() - open - 2);
+    usize start = 0;
+    while (start < inner.size()) {
+        usize comma = inner.find(',', start);
+        if (comma == std::string::npos) comma = inner.size();
+        const std::string pair = inner.substr(start, comma - start);
+        const auto eq = pair.find('=');
+        if (eq == std::string::npos) die("bad state string " + s);
+        props[pair.substr(0, eq)] = pair.substr(eq + 1);
+        start = comma + 1;
+    }
+    return {s.substr(0, open), props};
+}
 
 Args parse_args(int argc, char** argv) {
     Args a;
@@ -247,6 +268,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--overrides") a.overrides = v;
         else if (k == "--out") a.out = v;
         else if (k == "--report") a.report = v;
+        else if (k == "--legacy") a.legacy = v;
+        else if (k == "--java-registries") a.java_registries = v;
         else die("unknown argument " + k);
     }
     if (a.java_blocks.empty() || a.geyser.empty() || a.palette.empty() || a.out.empty() || a.report.empty())
@@ -323,6 +346,118 @@ int main(int argc, char** argv) {
     const json items = read_json(args.geyser / "items.json");
     const json biomes = read_json(args.geyser / "biomes.json");
 
+    // --- Java state lookup by name + properties; missing properties take the block's default.
+    std::unordered_map<std::string, u32> block_index;
+    for (u32 b = 0; b < java.blocks.size(); ++b) block_index.emplace(java.blocks[b].name, b);
+    auto find_java = [&](const std::string& name, const std::map<std::string, std::string>& given) -> std::optional<u32> {
+        const auto bit = block_index.find(name);
+        if (bit == block_index.end()) return std::nullopt;
+        const JavaBlock& b = java.blocks[bit->second];
+        std::vector<u8> values = b.states[b.default_state - b.first_state];
+        for (const auto& [k, v] : given) {
+            const auto pit = std::find(b.prop_names.begin(), b.prop_names.end(), k);
+            if (pit == b.prop_names.end()) return std::nullopt;
+            const usize pi = static_cast<usize>(pit - b.prop_names.begin());
+            const auto vit = std::find(b.prop_values[pi].begin(), b.prop_values[pi].end(), v);
+            if (vit == b.prop_values[pi].end()) return std::nullopt;
+            values[pi] = static_cast<u8>(vit - b.prop_values[pi].begin());
+        }
+        for (u32 k = 0; k < b.states.size(); ++k)
+            if (b.states[k] == values) return b.first_state + k;
+        return std::nullopt;
+    };
+
+    // --- Legacy (pre-1.13) ids: minecraft-data legacy.json + overrides/legacy_renames.json.
+    struct LegacyBlock { u16 id; u8 data; u32 state; };
+    struct LegacyItem { u16 id; u16 damage; std::string name; };
+    std::vector<LegacyBlock> legacy_blocks;
+    std::vector<LegacyItem> legacy_items;
+    if (!args.legacy.empty()) {
+        const json leg = read_json(args.legacy);
+        const json rules = read_json(args.overrides / "legacy_renames.json");
+        auto split_key = [](const std::string& k) {
+            const auto c = k.find(':');
+            return std::pair<u32, u32>{static_cast<u32>(std::stoul(k.substr(0, c))), static_cast<u32>(std::stoul(k.substr(c + 1)))};
+        };
+        std::vector<std::string> failures;
+        for (const auto& [key, target] : leg.at("blocks").items()) {
+            auto [name, props] = parse_state(target.get<std::string>());
+            for (const json& r : rules.at("block_renames"))
+                if (name == r.at("from").get<std::string>()) name = r.at("to").get<std::string>();
+            for (const json& f : rules.at("state_fixes")) {
+                const std::string prop = f.at("property");
+                if (name == f.at("block").get<std::string>() && props.count(prop) && props[prop] == f.at("value").get<std::string>()) {
+                    name = f.at("to_block").get<std::string>();
+                    if (f.value("drop_property", false)) props.erase(prop);
+                }
+            }
+            for (const json& v : rules.at("value_renames")) {
+                const std::string suffix = v.at("blocks_suffix").get<std::string>();
+                if (name.size() < suffix.size() || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0) continue;
+                for (const auto& prop_json : v.at("properties")) {
+                    const std::string prop = prop_json.get<std::string>();
+                    if (props.count(prop) && props[prop] == v.at("from").get<std::string>()) props[prop] = v.at("to").get<std::string>();
+                }
+            }
+            const auto state = find_java(name, props);
+            if (!state) { failures.push_back(key + " -> " + target.get<std::string>()); continue; }
+            const auto [id, data] = split_key(key);
+            legacy_blocks.push_back({static_cast<u16>(id), static_cast<u8>(data), *state});
+        }
+        std::unordered_map<std::string, bool> item_registry;
+        if (!args.java_registries.empty())
+            for (const auto& [k, v] : read_json(args.java_registries).at("minecraft:item").at("entries").items()) item_registry[k] = true;
+        for (const auto& [key, target] : leg.at("items").items()) {
+            std::string name = target.get<std::string>();
+            for (const json& r : rules.at("item_renames"))
+                if (name == r.at("from").get<std::string>()) name = r.at("to").get<std::string>();
+            if (!item_registry.empty() && !item_registry.count(name)) { failures.push_back("item " + key + " -> " + name); continue; }
+            const auto [id, damage] = split_key(key);
+            legacy_items.push_back({static_cast<u16>(id), static_cast<u16>(damage), name});
+        }
+        if (!failures.empty()) {
+            std::string all;
+            for (const auto& f : failures) all += "\n  " + f;
+            die("legacy targets invalid for the pinned Java version (add rules to legacy_renames.json):" + all);
+        }
+    }
+
+    // --- Reverse (Bedrock -> Java): the most natural Java state for each Bedrock state:
+    //     not waterlogged (layer 2 decides), same block name if possible, closest to the block default.
+    std::vector<u32> java_of_bedrock(palette.states.size(), UINT32_MAX);
+    {
+        std::vector<int> best(palette.states.size(), INT_MIN);
+        for (u32 j = 0; j < java_count; ++j) {
+            const u32 b = bedrock_of[j];
+            if (b == UINT32_MAX) continue;
+            const auto [bi, k] = java.state_owner[j];
+            const JavaBlock& jb = java.blocks[bi];
+            const auto& values = jb.states[k];
+            const auto& defaults = jb.states[jb.default_state - jb.first_state];
+            int score = 0;
+            if (java_property(java, j, "waterlogged") == "true") score -= 1000;
+            if (jb.name == palette.states[b].name) score += 100;
+            for (usize p = 0; p < values.size(); ++p) score += values[p] == defaults[p] ? 1 : 0;
+            if (score > best[b]) { best[b] = score; java_of_bedrock[b] = j; }
+        }
+    }
+    struct ReverseItem { std::string bedrock; i16 damage; std::string java; };
+    std::vector<ReverseItem> reverse_items;
+    {
+        std::map<std::pair<std::string, i16>, std::string> chosen;
+        for (const auto& [java_name, v] : items.items()) {
+            const std::pair<std::string, i16> key{v.at("bedrock_identifier"), static_cast<i16>(v.value("bedrock_data", 0))};
+            const auto it = chosen.find(key);
+            if (it == chosen.end() || (java_name == key.first && it->second != key.first)) chosen[key] = java_name;
+        }
+        for (const auto& [k, java_name] : chosen) reverse_items.push_back({k.first, k.second, java_name});
+    }
+    std::map<i32, std::string> reverse_biomes;
+    for (const auto& [java_name, v] : biomes.items()) {
+        const i32 id = v.at("bedrock_id");
+        if (!reverse_biomes.count(id)) reverse_biomes[id] = java_name;
+    }
+
     // --- Coverage
     usize mapped = 0, waterlogged = 0, lossy = 0;
     std::vector<std::string> unmapped;
@@ -363,10 +498,12 @@ int main(int argc, char** argv) {
         blob.intern(v.at("bedrock_identifier"));
     }
     for (const auto& [k, v] : biomes.items()) blob.intern(k);
+    for (const auto& li : legacy_items) blob.intern(li.name);
+    for (const auto& ri : reverse_items) { blob.intern(ri.bedrock); blob.intern(ri.java); }
 
     std::vector<u8>& out = blob.bytes();
     out.insert(out.end(), {'B', 'R', 'M', 'A', 'P', 0});
-    blob.u16_(1); // format version
+    blob.u16_(2); // format version
     // DataVersion and version id come from the server jar's version.json, which
     // fetch_sources.py extracts next to the generated reports.
     u32 data_version = 0;
@@ -437,6 +574,22 @@ int main(int argc, char** argv) {
         blob.u32_(static_cast<u32>(v.at("bedrock_id").get<i32>()));
     }
 
+    // Format 2 additions.
+    blob.u32_(static_cast<u32>(legacy_blocks.size()));
+    for (const auto& lb : legacy_blocks) { blob.u16_(lb.id); blob.u8_(lb.data); blob.u32_(lb.state); }
+    blob.u32_(static_cast<u32>(legacy_items.size()));
+    for (const auto& li : legacy_items) { blob.u16_(li.id); blob.u16_(li.damage); blob.u32_(blob.intern(li.name)); }
+    blob.u32_(static_cast<u32>(java_of_bedrock.size()));
+    for (const u32 j : java_of_bedrock) blob.u32_(j);
+    blob.u32_(static_cast<u32>(reverse_items.size()));
+    for (const auto& ri : reverse_items) {
+        blob.u32_(blob.intern(ri.bedrock));
+        blob.u16_(static_cast<u16>(ri.damage));
+        blob.u32_(blob.intern(ri.java));
+    }
+    blob.u32_(static_cast<u32>(reverse_biomes.size()));
+    for (const auto& [id, name] : reverse_biomes) { blob.u32_(static_cast<u32>(id)); blob.u32_(blob.intern(name)); }
+
     {
         std::ofstream f(args.out, std::ios::binary);
         f.write(reinterpret_cast<const char*>(out.data()), static_cast<std::streamsize>(out.size()));
@@ -455,8 +608,13 @@ int main(int argc, char** argv) {
     r << "| Waterlogged states (block + water in Bedrock layer 2, context stage) | " << waterlogged << " |\n";
     r << "| Mapped to a differently named Bedrock block | " << renamed << " |\n";
     r << "| Bedrock palette states reachable from Java (reverse check) | " << reachable << " of "
+      << palette.states.size() << " |\n";
+    r << "| Legacy (pre-1.13) block ids mapped to Java states | " << legacy_blocks.size() << " |\n";
+    r << "| Legacy item ids mapped to Java items | " << legacy_items.size() << " |\n";
+    r << "| Bedrock states with a Java equivalent (reverse direction) | "
+      << std::count_if(java_of_bedrock.begin(), java_of_bedrock.end(), [](u32 j) { return j != UINT32_MAX; }) << " of "
       << palette.states.size() << " |\n\n";
-    r << "Context-dependent states are decided by rules in `src/translate/context_rules.cpp` (double chests, bed "
+    r << "Context-dependent states are decided by the context stage in `src/translate/translator.cpp` and `src/translate/block_entity_translator.cpp` (double chests, bed "
          "colors, waterlogging), not by this table.\n\n";
     r << "## Unmapped Java states\n\n";
     if (unmapped.empty()) r << "None.\n";

@@ -6,6 +6,7 @@
 #include <bridger/translate/block_entity_translator.hpp>
 
 #include <array>
+#include <map>
 #include <string>
 
 namespace bridger::translate {
@@ -32,6 +33,82 @@ std::optional<i8> bed_color(std::string_view block_id) {
 }
 
 bool is_chest(std::string_view id) { return id == "minecraft:chest" || id == "minecraft:trapped_chest"; }
+
+// Block entities written with their id only (Bedrock ids as in Chunker's handler list).
+std::optional<std::string_view> simple_marker(std::string_view java_id) {
+    static const std::map<std::string_view, std::string_view> kMarkers{
+        {"minecraft:campfire", "Campfire"},  {"minecraft:soul_campfire", "Campfire"},
+        {"minecraft:bell", "Bell"},          {"minecraft:comparator", "Comparator"},
+        {"minecraft:lectern", "Lectern"},    {"minecraft:decorated_pot", "DecoratedPot"},
+        {"minecraft:daylight_detector", "DaylightDetector"}, {"minecraft:jukebox", "Jukebox"},
+        {"minecraft:beacon", "Beacon"},      {"minecraft:conduit", "Conduit"}};
+    if (const auto it = kMarkers.find(java_id); it != kMarkers.end()) return it->second;
+    return std::nullopt;
+}
+
+std::optional<i32> dye_index(std::string_view color) {
+    for (usize i = 0; i < kDyeColors.size(); ++i)
+        if (kDyeColors[i] == color) return static_cast<i32>(i);
+    return std::nullopt;
+}
+
+// "minecraft:<color>_banner" / "minecraft:<color>_wall_banner" -> dye index.
+std::optional<i32> banner_color(std::string_view id) {
+    constexpr std::string_view ns = "minecraft:";
+    if (!id.starts_with(ns)) return std::nullopt;
+    std::string_view rest = id.substr(ns.size());
+    if (rest.ends_with("_wall_banner")) rest.remove_suffix(12);
+    else if (rest.ends_with("_banner")) rest.remove_suffix(7);
+    else return std::nullopt;
+    return dye_index(rest);
+}
+
+// Bedrock SkullType by Java block (Chunker BedrockSkullBlockEntityHandler.SKULL_TO_ID).
+std::optional<i8> skull_type(std::string_view id) {
+    struct Entry {
+        std::string_view floor, wall;
+        i8 type;
+    };
+    static constexpr std::array<Entry, 7> kSkulls{{{"minecraft:skeleton_skull", "minecraft:skeleton_wall_skull", 0},
+                                                  {"minecraft:wither_skeleton_skull", "minecraft:wither_skeleton_wall_skull", 1},
+                                                  {"minecraft:zombie_head", "minecraft:zombie_wall_head", 2},
+                                                  {"minecraft:player_head", "minecraft:player_wall_head", 3},
+                                                  {"minecraft:creeper_head", "minecraft:creeper_wall_head", 4},
+                                                  {"minecraft:dragon_head", "minecraft:dragon_wall_head", 5},
+                                                  {"minecraft:piglin_head", "minecraft:piglin_wall_head", 6}}};
+    for (const Entry& e : kSkulls)
+        if (id == e.floor || id == e.wall) return e.type;
+    return std::nullopt;
+}
+
+// Java banner pattern id -> Bedrock short code (Java ids: data/minecraft/banner_pattern in the
+// 26.3 server jar; codes and pairing: Chunker JavaBannerPatternResolver + BedrockBannerPatternResolver).
+std::optional<std::string_view> pattern_code(std::string_view java) {
+    static const std::map<std::string_view, std::string_view> kCodes{
+        {"base", "b"}, {"square_bottom_left", "bl"}, {"square_bottom_right", "br"}, {"square_top_left", "tl"},
+        {"square_top_right", "tr"}, {"stripe_bottom", "bs"}, {"stripe_top", "ts"}, {"stripe_left", "ls"},
+        {"stripe_right", "rs"}, {"stripe_center", "cs"}, {"stripe_middle", "ms"}, {"stripe_downright", "drs"},
+        {"stripe_downleft", "dls"}, {"small_stripes", "ss"}, {"cross", "cr"}, {"straight_cross", "sc"},
+        {"triangle_bottom", "bt"}, {"triangle_top", "tt"}, {"triangles_bottom", "bts"}, {"triangles_top", "tts"},
+        {"diagonal_left", "ld"}, {"diagonal_up_right", "rd"}, {"diagonal_up_left", "lud"}, {"diagonal_right", "rud"},
+        {"circle", "mc"}, {"rhombus", "mr"}, {"half_vertical", "vh"}, {"half_horizontal", "hh"},
+        {"half_vertical_right", "vhr"}, {"half_horizontal_bottom", "hhb"}, {"border", "bo"}, {"curly_border", "cbo"},
+        {"gradient", "gra"}, {"gradient_up", "gru"}, {"bricks", "bri"}, {"globe", "glb"}, {"creeper", "cre"},
+        {"skull", "sku"}, {"flower", "flo"}, {"mojang", "moj"}, {"piglin", "pig"}, {"flow", "flw"}, {"guster", "gus"}};
+    if (java.starts_with("minecraft:")) java.remove_prefix(10);
+    if (const auto it = kCodes.find(java); it != kCodes.end()) return it->second;
+    return std::nullopt;
+}
+
+// "minecraft:potted_<plant>" -> the plant block shown in a Bedrock flower pot.
+std::optional<std::string> potted_plant(std::string_view id) {
+    constexpr std::string_view prefix = "minecraft:potted_";
+    if (!id.starts_with(prefix)) return std::nullopt;
+    const std::string_view plant = id.substr(prefix.size());
+    if (plant == "azalea_bush") return std::string("minecraft:azalea");
+    if (plant == "flowering_azalea_bush") return std::string("minecraft:flowering_azalea");
+    return "minecraft:" + std::string(plant);
+}
 
 // Containers whose slot layout is the same in both editions: Java id -> Bedrock id
 // (Bedrock ids as used by Chunker's block entity handlers, docs/formats/bedrock-world.md).
@@ -260,9 +337,60 @@ std::optional<RawNbt> finish(NbtWriter&& w) {
     return RawNbt{std::move(*bytes), Endian::Little};
 }
 
+void write_banner(NbtWriter& w, const BlockState& state, NbtView java_patterns, ConversionReport& report, BlockPos pos) {
+    // Bedrock stores dye colors reversed (15 - index), Chunker ChunkerDyeColor::getReversedID.
+    w.write_int("Base", 15 - banner_color(state.id()).value_or(0));
+    struct Layer {
+        std::string code;
+        i32 color;
+    };
+    std::vector<Layer> layers;
+    for (const NbtView p : java_patterns.items()) {
+        const auto c = p.entries();
+        std::optional<std::string_view> pid = c.find("pattern").as_string();
+        const auto color = c.find("color").as_string();
+        const auto code = pid ? pattern_code(*pid) : std::nullopt;
+        const auto dye = color ? dye_index(*color) : std::nullopt;
+        if (!code || !dye) {
+            report.add(IssueKind::LossyBlock, "banner pattern not converted", pos);
+            continue;
+        }
+        layers.push_back({std::string(*code), 15 - *dye});
+    }
+    w.begin_list("Patterns", layers.empty() ? TagType::End : TagType::Compound, layers.size());
+    for (const Layer& l : layers) {
+        w.begin_compound();
+        w.write_int("Color", l.color);
+        w.write_string("Pattern", l.code);
+        w.end_compound();
+    }
+    w.end_list();
+}
+
+void write_skull(NbtWriter& w, const BlockState& state) {
+    w.write_byte("SkullType", skull_type(state.id()).value_or(0));
+    const auto rot = state.property("rotation"); // floor skulls only; wall skulls face via the block state
+    w.write_float("Rotation", rot ? static_cast<f32>(std::stoi(std::string(*rot))) * 22.5f : 0.0f);
+    w.write_byte("DoingAnimation", state.property("powered") == "true" ? 1 : 0);
+}
+
+bool write_flower_pot(NbtWriter& w, const BlockState& state, const MappingData& m) {
+    if (const auto plant = potted_plant(state.id())) {
+        const auto jid = m.find_java_state(BlockState(*plant, {}));
+        if (!jid) return false;
+        const JavaStateMapping jm = m.map(*jid);
+        if (jm.bedrock == UINT32_MAX) return false;
+        write_block_tag(w, "PlantBlock", m, jm.bedrock);
+    }
+    return true;
+}
+
 } // namespace
 
-bool is_context_dependent(std::string_view id) noexcept { return is_chest(id) || bed_color(id).has_value(); }
+bool is_context_dependent(std::string_view id) noexcept {
+    return is_chest(id) || bed_color(id).has_value() || banner_color(id).has_value() || skull_type(id).has_value() ||
+           id == "minecraft:flower_pot" || id.starts_with("minecraft:potted_");
+}
 
 std::optional<BlockEntity> translate_block_entity(const BlockEntity& java, JavaStateId java_state, const MappingData& m,
                                                   ConversionReport& report) {
@@ -299,10 +427,31 @@ std::optional<BlockEntity> translate_block_entity(const BlockEntity& java, JavaS
         out.id = java.id == "minecraft:ender_chest" ? "EnderChest" : "EnchantTable";
         w.write_string("id", out.id);
         write_custom_name(w, c, report, java.pos);
+    } else if (const auto marker = simple_marker(java.id)) {
+        // Block entities whose block works without their (transient) data in Bedrock.
+        out.id = std::string(*marker);
+        w.write_string("id", out.id);
+        if (java.id == "minecraft:comparator")
+            if (const auto signal = c.find("OutputSignal").as_int()) w.write_int("OutputSignal", *signal);
+        for (const io::nbt::NbtEntry& e : c)
+            if (e.name != "OutputSignal" && e.name != "components") {
+                report.add(IssueKind::LossyBlock, java.id + " data dropped", java.pos);
+                break;
+            }
     } else if (java.id == "minecraft:bed") {
         out.id = "Bed";
         w.write_string("id", out.id);
         w.write_byte("color", bed_color(state->id()).value_or(14)); // red if unknown
+    } else if (java.id == "minecraft:banner") {
+        out.id = "Banner";
+        w.write_string("id", out.id);
+        write_banner(w, *state, c.find("patterns"), report, java.pos);
+        write_custom_name(w, c, report, java.pos);
+    } else if (java.id == "minecraft:skull") {
+        out.id = "Skull";
+        w.write_string("id", out.id);
+        write_skull(w, *state);
+        if (c.find("profile")) report.add(IssueKind::LossyBlock, "player head skin (profile) dropped", java.pos);
     } else if (java.id == "minecraft:sign" || java.id == "minecraft:hanging_sign") {
         out.id = java.id == "minecraft:sign" ? "Sign" : "HangingSign";
         w.write_string("id", out.id);
@@ -339,6 +488,19 @@ std::optional<BlockEntity> synthesize_block_entity(BlockPos pos, JavaStateId jav
         w.begin_list("Items", TagType::End, 0);
         w.end_list();
         write_pairing(w, *state, pos);
+    } else if (banner_color(state->id())) {
+        out.id = "Banner";
+        w.write_string("id", out.id);
+        ConversionReport ignored;
+        write_banner(w, *state, NbtView(), ignored, pos);
+    } else if (skull_type(state->id())) {
+        out.id = "Skull";
+        w.write_string("id", out.id);
+        write_skull(w, *state);
+    } else if (state->id() == "minecraft:flower_pot" || state->id().starts_with("minecraft:potted_")) {
+        out.id = "FlowerPot";
+        w.write_string("id", out.id);
+        if (!write_flower_pot(w, *state, m)) return std::nullopt;
     } else {
         return std::nullopt;
     }

@@ -23,7 +23,8 @@ catch reads or writes in the unused capacity of a `std::string` / `std::vector` 
 ASan.
 
 **Determinism test (from Phase 3):** converting with 1 thread and with N threads must produce semantically
-identical output after decoding.
+identical output after decoding. Whole-world conversion is the first parallel path; `tests/unit/formats/anvil_test.cpp`
+converts the test world with 1 and 8 threads and compares every LevelDB key and value.
 
 **Independent validation:** where possible, Bridger's output is opened with an independent implementation (an
 open-source reader for that format, or raw LevelDB tools) and compared. Such tools are used **only as test
@@ -39,6 +40,12 @@ people's worlds.
 - `tests/data/nbt/`: NBT reference files (big- and little-endian, plus gzip) for the byte-exact round-trip test.
 - `tests/data/schem/`: Sponge v1/v2/v3 schematics, one crossing section borders with a 300-entry palette, and
   `malformed/` files with the expected error code in `tests/golden/schem/malformed.json`.
+- `tests/data/structure/`, `litematic/`, `schematic/`: structure `.nbt` files in both palette spellings and with
+  several palettes; a two-region `.litematic` with a negative size and indices spanning longs; a legacy
+  `.schematic` with `AddBlocks`, unknown ids, an old-style chest and a 1.12 bed.
+- `tests/data/javaworld/basic/`: a Java world (level.dat + two region files) with zlib, gzip, uncompressed and
+  external (`.mcc`) chunks, both palette spellings, a waterlogged block, biomes, a block entity, negative chunk
+  coordinates, a partially generated chunk and a Nether folder; `old_layout/` holds a pre-1.18 chunk.
 
 **Independent validation of written worlds:** `tests/integration/validate_mcworld.py` opens a `.mcworld` with
 amulet-leveldb (test oracle only) and nbtlib, decodes every subchunk itself, checks every palette entry against the
@@ -50,13 +57,20 @@ compares the counts with Bridger's `--report`. Run it on the in-game test worlds
 | Date | File | Source | Result |
 |---|---|---|---|
 | 2026-10-12 | `AraluenBW1.21Solo.schem` (405 × 140 × 405, 23 M blocks, v3, DataVersion 3955) | WorldEdit, provided by the maintainer | read OK (`bridger info`); converted in 2.7 s; every block state mapped; 38/38 block entities translated; independent validation passed |
+| 2026-10-12 | All 1511 structure files in the Java 26.3 server jar (`data/minecraft/structure/**.nbt`) | Mojang (read from the local jar, never committed) | every file reads and converts to `.mcstructure`; the run found that Mojang writes `{id, properties}` palette entries |
+| 2026-10-12 | `containers.schem` placed into a copy of the `orientations` test world with `--into-world` | generated | source world unchanged (hash); every untouched key byte-identical; overwritten block entities reported; independent validation passed |
 
 **Fuzz budgets:** CI runs 30 s per target. Before a phase is closed, every target runs at least **60 s** locally
 with seeds (`tests/data/nbt` for `fuzz_nbt`; `tests/data/schem` and `tests/data/schem/malformed` for
 `fuzz_schem`). Phase 1–2 local run (2026-10-11): varint 336k, nbt 544k, compression 1.06M, schem 384k
 executions, no findings. Phase 3–4 local run (2026-10-12, 60 s each): varint 327k, nbt 414k, compression 846k,
 schem 398k, subchunk 429k (seeds: subchunks extracted from a written world), zip 49k (seeds: the in-game test
-worlds) executions, no findings.
+worlds) executions, no findings. Phase 5 local runs (2026-10-12, seeds from `tests/data`). The first run (90 s each) found two **slow
+inputs**, no crashes: a structure `.nbt` with size 0 x 196608 x 131074 and a `.mcstructure` with size
+786436 x 4096 x 0. Volume 0 passed every volume limit, yet loops over the other two axes ran for minutes
+(the pipeline's block count did the same). `Structure::create` now refuses a zero axis next to non-zero ones
+(regression test in `tests/unit/core/ir_test.cpp`). Second run (60 s each, `-report_slow_units=5`): java_structure
+485k, mcstructure 544k, anvil_chunk 495k, subchunk 692k, zip 95k, schem 651k, nbt 617k executions, no findings.
 
 ## In-game checklist
 

@@ -16,6 +16,7 @@ enum class ChunkTag : u8 {
     Version = 0x2C,        // chunk storage version (1 byte)
     SubChunkPrefix = 0x2F, // 16x16x16 terrain
     BlockEntity = 0x31,    // concatenated little-endian NBT roots
+    Entity = 0x32,         // legacy entity storage (worlds not re-saved since actorprefix keys), same encoding
     FinalizedState = 0x36, // i32 LE
 };
 

@@ -1,22 +1,25 @@
 # Data-safety guarantees
 
-> **Status (Phase 4):** a guarantee marked **implemented** below has code and tests behind it. Anything else is
+> **Status (Phase 5):** a guarantee marked **implemented** below has code and tests behind it. Anything else is
 > a design commitment, not a fact about the shipped binary.
 
 | Guarantee | Status |
 |---|---|
-| Inputs are never modified | **implemented**: inputs are memory-mapped read-only; a test checks the input bytes are unchanged after conversion. "Into an existing world" (0.2.0) will write a new world, never edit the original |
+| Inputs are never modified | **implemented**: inputs are memory-mapped read-only; a test checks the input bytes are unchanged after conversion. `--into-world` reads the existing world and writes a new one; a test checks the existing world's bytes are unchanged |
 | Same-directory temp file → flush → validate → atomic move | **implemented**: `platform::AtomicFileWriter` (`src/platform/atomic_replace.cpp`) |
 | Recovery procedure on replace failure | **implemented and failure-tested**: `tests/unit/platform/file_test.cpp` injects a failure at every step (create, write, flush, close, rename, each `ReplaceFileW` error code, failed restore, destination failing validation) |
-| No silent data loss (conversion report) | **implemented** for `.schem` → `.mcworld`: unmapped blocks (with fallback), lossy data, unsupported block entities, entities (not written yet), biomes, clipped blocks; shown by `bridger convert` and written by `--report` |
-| Output validated before it replaces anything | **implemented**: the written `.mcworld` is unzipped, its LevelDB opened, every subchunk decoded and the counts compared with what was written, before the atomic move |
+| No silent data loss (conversion report) | **implemented** for every conversion path: unmapped blocks (with fallback), lossy data, unsupported block entities, entities (not written yet), biomes, clipped blocks, block entities/entities removed by placement; reader warnings (skipped palette variants, structure void, unreadable or partially generated chunks, dimensions not converted) are shown and written to `--report` too |
+| Output validated before it replaces anything | **implemented**: new worlds are unzipped, their LevelDB opened, every subchunk decoded and the counts compared with what was written; `.mcstructure` files are re-read; placed worlds are compared key by key with the source (below); converted Java worlds are validated as a directory before zipping and the zip listing is checked before the move |
+| Untouched world data copied byte-for-byte | **implemented**: `validate_placed_world` checks every LevelDB key the placement did not touch is byte-identical to the source world and `level.dat` is unchanged; a test tampers with an untouched entry and expects the validation to fail |
 | Existing output is replaced only on request | **implemented**: `--overwrite` is required; without it the conversion stops before writing |
-| Untrusted-input limits | **implemented** for decompression, NBT and `.schem` (see `docs/formats/nbt.md`, `sponge-schem.md`); fuzzed |
+| Untrusted-input limits | **implemented** for decompression, NBT, zip and every reader (`.schem`, `.nbt`, `.litematic`, `.schematic`, `.mcstructure`, Anvil chunks and region files; see `docs/formats/`); fuzzed |
 
 ## 1. Inputs are never modified
 
 Bridger opens every input read-only. That includes worlds used as a placement target: `--into-world` reads the
-existing world and writes a **new** output world. The original is never edited in place.
+existing world and writes a **new** output world. The original is never edited in place: it is unzipped into a
+scratch directory under `%TEMP%`, the copy is changed there, and the result is zipped into the output. Java world
+folders are only read.
 
 ## 2. How output is written
 
@@ -58,6 +61,8 @@ What the OS does and does not promise:
 - `FlushFileBuffers` relies on the drive honouring flush requests. Drives with volatile write caches that ignore
   flushes can still lose data on power loss.
 - A `.mcworld` is a zip. The guarantees cover the zip file as a whole, not its internal entries.
+- Converted Java worlds are zipped by minizip-ng straight into the temp file (no full copy in memory). The temp
+  file is then flushed by path, validated and moved like any other output.
 
 ## 4. No silent data loss
 
@@ -75,7 +80,7 @@ the same way.
 | Existing block entities/entities in the area | **kept** unless a structure block overwrites their position; removals reported | `--clear-entities` (reported) |
 | Structure exceeds build height | **fail** with an error showing the overflow | `--clip` (dropped blocks reported), `--shift-to-fit` |
 | Chunks/keys the structure does not touch | **copied byte-for-byte** | — |
-| Placement position | new world: centred on x=0, z=0, on the flat surface | `--place-at x,y,z` |
+| Placement position | new world: centred on x=0, z=0, on the flat surface; existing world: **no default**, `--place-at` is required | `--place-at x,y,z` |
 
 Changing any default here is a data-safety change and needs maintainer approval.
 

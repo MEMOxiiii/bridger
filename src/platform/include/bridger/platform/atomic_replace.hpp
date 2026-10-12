@@ -36,6 +36,8 @@ public:
     [[nodiscard]] virtual Result<Handle> create_new(const std::filesystem::path& path) = 0; // fails if it exists
     [[nodiscard]] virtual Status write(Handle handle, std::span<const u8> bytes) = 0;
     [[nodiscard]] virtual Status flush(Handle handle) = 0; // durable: FlushFileBuffers
+    // Durably flushes a closed file by path (used for files written by other code).
+    [[nodiscard]] virtual Status flush_path(const std::filesystem::path& path) = 0;
     [[nodiscard]] virtual Status close(Handle handle) = 0;
     // Rename without replacing; durable (MOVEFILE_WRITE_THROUGH).
     [[nodiscard]] virtual Status move_new(const std::filesystem::path& from, const std::filesystem::path& to) = 0;
@@ -61,6 +63,13 @@ public:
     // Creates "<dest>.<random>.bridger-tmp" next to `destination`.
     [[nodiscard]] static Result<AtomicFileWriter> create(const std::filesystem::path& destination,
                                                          FileOps& ops = os_file_ops());
+
+    // Takes over a complete, closed file written by other code (e.g. a zip library) at a
+    // path from temp_path_for(); commit() then flushes, validates and moves it as usual.
+    [[nodiscard]] static AtomicFileWriter adopt(std::filesystem::path temp, std::filesystem::path destination,
+                                                FileOps& ops = os_file_ops());
+    // A fresh temp path next to `destination` for adopt().
+    [[nodiscard]] static Result<std::filesystem::path> temp_path_for(const std::filesystem::path& destination);
 
     AtomicFileWriter(AtomicFileWriter&& other) noexcept;
     AtomicFileWriter& operator=(AtomicFileWriter&&) = delete;

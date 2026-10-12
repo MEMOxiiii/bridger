@@ -1,0 +1,35 @@
+{
+  "_doc": [
+    "Renames applied to PrismarineJS legacy.json targets (1.13 states) to reach the pinned Java version.",
+    "Each entry cites the version that changed it (minecraft.wiki version history).",
+    "mapgen fails if a legacy target is still invalid after these rules, so nothing is skipped silently."
+  ],
+  "block_renames": [
+    {"from": "minecraft:grass", "to": "minecraft:short_grass", "comment": "Renamed in Java 1.20.3 (23w40a)."},
+    {"from": "minecraft:grass_path", "to": "minecraft:dirt_path", "comment": "Renamed in Java 1.17 (20w45a)."},
+    {"from": "minecraft:sign", "to": "minecraft:oak_sign", "comment": "Renamed in Java 1.14 (19w02a) when wood-type signs were added."},
+    {"from": "minecraft:wall_sign", "to": "minecraft:oak_wall_sign", "comment": "Renamed in Java 1.14 (19w02a)."},
+    {"from": "minecraft:stone_slab", "to": "minecraft:smooth_stone_slab", "comment": "Java 1.14 (18w43a) renamed the old stone slab (smooth stone) to smooth_stone_slab and reused stone_slab for a new block; legacy 43:0/44:0/44:8 are the smooth ones."}
+  ],
+  "state_fixes": [
+    {"block": "minecraft:cauldron", "property": "level", "value": "0", "to_block": "minecraft:cauldron", "drop_property": true,
+     "comment": "Java 1.17 (20w45a) split cauldrons: an empty cauldron has no level."},
+    {"block": "minecraft:cauldron", "property": "level", "value": "1", "to_block": "minecraft:water_cauldron", "comment": "Java 1.17: filled cauldrons are water_cauldron[level=1..3]."},
+    {"block": "minecraft:cauldron", "property": "level", "value": "2", "to_block": "minecraft:water_cauldron", "comment": "Java 1.17."},
+    {"block": "minecraft:cauldron", "property": "level", "value": "3", "to_block": "minecraft:water_cauldron", "comment": "Java 1.17."}
+  ],
+  "item_renames": [
+    {"from": "minecraft:grass", "to": "minecraft:short_grass", "comment": "Java 1.20.3 (23w40a)."},
+    {"from": "minecraft:grass_path", "to": "minecraft:dirt_path", "comment": "Java 1.17 (20w45a)."},
+    {"from": "minecraft:sign", "to": "minecraft:oak_sign", "comment": "Java 1.14 (19w02a)."},
+    {"from": "minecraft:cactus_green", "to": "minecraft:green_dye", "comment": "Java 1.14 (19w03a) renamed dye items."},
+    {"from": "minecraft:dandelion_yellow", "to": "minecraft:yellow_dye", "comment": "Java 1.14 (19w03a)."},
+    {"from": "minecraft:rose_red", "to": "minecraft:red_dye", "comment": "Java 1.14 (19w03a)."}
+  ],
+  "value_renames": [
+    {"blocks_suffix": "_wall", "properties": ["north", "east", "south", "west"], "from": "false", "to": "none",
+     "comment": "Java 1.16 (20w06a) changed wall sides from booleans to none/low/tall."},
+    {"blocks_suffix": "_wall", "properties": ["north", "east", "south", "west"], "from": "true", "to": "low",
+     "comment": "Java 1.16 (20w06a)."}
+  ]
+}

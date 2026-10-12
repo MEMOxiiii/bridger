@@ -35,7 +35,7 @@ LevelDbStore::LevelDbStore(LevelDbStore&&) noexcept = default;
 LevelDbStore& LevelDbStore::operator=(LevelDbStore&&) noexcept = default;
 LevelDbStore::~LevelDbStore() = default;
 
-Result<LevelDbStore> LevelDbStore::open(const std::filesystem::path& dir, bool create_new) {
+Result<LevelDbStore> LevelDbStore::open(const std::filesystem::path& dir, bool create_new, bool bulk_load) {
     LevelDbStore store;
     leveldb::Options options;
     options.create_if_missing = create_new;
@@ -43,7 +43,7 @@ Result<LevelDbStore> LevelDbStore::open(const std::filesystem::path& dir, bool c
     options.compressors[0] = &store.impl_->raw;
     options.compressors[1] = &store.impl_->zlib;
     options.info_log = &store.impl_->logger;
-    options.write_buffer_size = 4 * 1024 * 1024;
+    options.write_buffer_size = bulk_load ? 64 * 1024 * 1024 : 4 * 1024 * 1024;
     // leveldb-mcpe's Windows Env takes narrow paths; pass UTF-8 (it converts internally).
     BRIDGER_TRY(const std::string path, platform::path_to_utf8(dir));
     leveldb::DB* raw = nullptr;
@@ -57,6 +57,22 @@ Status LevelDbStore::put(std::string_view key, std::span<const u8> value) {
     const leveldb::Status s = impl_->db->Put(leveldb::WriteOptions(), leveldb::Slice(key.data(), key.size()),
                                              leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
     if (!s.ok()) return leveldb_error(s, "put");
+    return {};
+}
+
+Status LevelDbStore::put_batch(std::span<const std::pair<std::string, std::vector<u8>>> entries) {
+    leveldb::WriteBatch batch;
+    for (const auto& [key, value] : entries)
+        batch.Put(leveldb::Slice(key.data(), key.size()),
+                  leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
+    const leveldb::Status s = impl_->db->Write(leveldb::WriteOptions(), &batch);
+    if (!s.ok()) return leveldb_error(s, "write batch");
+    return {};
+}
+
+Status LevelDbStore::remove(std::string_view key) {
+    const leveldb::Status s = impl_->db->Delete(leveldb::WriteOptions(), leveldb::Slice(key.data(), key.size()));
+    if (!s.ok()) return leveldb_error(s, "delete");
     return {};
 }
 
@@ -80,6 +96,15 @@ Status LevelDbStore::for_each(const std::function<void(std::string_view, std::sp
         fn(std::string_view(k.data(), k.size()), std::span<const u8>(reinterpret_cast<const u8*>(v.data()), v.size()));
     }
     if (!it->status().ok()) return leveldb_error(it->status(), "iterate");
+    return {};
+}
+
+Status LevelDbStore::flush() {
+    // CompactRange always flushes the memtable first; an empty range past every key
+    // (Bedrock keys never consist of 32 0xFF bytes) then compacts nothing else.
+    const std::string past_all(32, '\xff');
+    const leveldb::Slice s(past_all);
+    impl_->db->CompactRange(&s, &s);
     return {};
 }
 

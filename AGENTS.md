@@ -99,6 +99,15 @@ additions to it are recorded here as required:
   tables of the original specification.
 - `src/platform/win32/paths_win32.cpp`: Windows implementation files carry a `_win32` suffix so their object
   files never clash with a future `posix/` twin.
+- `src/formats/include/bridger/formats/structure_file.hpp` (+ `structure_file.cpp`): the common result of every
+  Java structure reader, so the pipeline does not depend on which reader ran. `src/formats/java/nbt_helpers.hpp`:
+  internal helpers shared by the Java readers (not installed, not public).
+- `formats/java/anvil/`: Java `level.dat` reading lives in `java_world.hpp` (no separate `level_dat.hpp`: it is
+  three fields). Bit packing is local to each reader (`chunk_codec.cpp`, `litematic.cpp`), because the two
+  formats pack differently; there is no shared `java_bit_packing.hpp`.
+- `fuzz/fuzz_java_structure.cpp` (structure `.nbt`, `.litematic`, legacy `.schematic`), `fuzz/fuzz_mcstructure.cpp`,
+  `fuzz/fuzz_anvil_chunk.cpp`; `bench/bench_anvil.cpp` (chunk decode and per-chunk conversion).
+- `tests/data/javaworld/`: generated Java worlds (`generate_test_data.py`, `generate_java_world`).
 
 Module pattern: public headers in `src/<m>/include/bridger/<m>/`, `.cpp` next to them in `src/<m>/`, namespace
 `bridger::<m>`, one static library `bridger_<m>` (alias `bridger::<m>`) created by `bridger_add_module()`.

@@ -12,16 +12,16 @@ using enum Support;
 // Keep in sync with the README "Format support" matrix.
 constexpr std::array kFormats{
     FormatInfo{FormatId::LegacySchematic, Edition::Java, "schematic", ".schematic",
-               "MCEdit legacy schematic (numeric ids)", Planned, Planned},
+               "MCEdit legacy schematic (numeric ids)", InProgress, Planned},
     FormatInfo{FormatId::SpongeSchem, Edition::Java, "schem", ".schem", "Sponge schematic v1-v3", InProgress,
                Planned},
-    FormatInfo{FormatId::Litematic, Edition::Java, "litematic", ".litematic", "Litematica schematic", Planned,
+    FormatInfo{FormatId::Litematic, Edition::Java, "litematic", ".litematic", "Litematica schematic", InProgress,
                Planned},
-    FormatInfo{FormatId::StructureNbt, Edition::Java, "nbt", ".nbt", "Java structure block file", Planned,
+    FormatInfo{FormatId::StructureNbt, Edition::Java, "nbt", ".nbt", "Java structure block file", InProgress,
                Planned},
-    FormatInfo{FormatId::JavaWorld, Edition::Java, "java-world", "", "Java world (Anvil)", Planned, Planned},
+    FormatInfo{FormatId::JavaWorld, Edition::Java, "java-world", "", "Java world (Anvil)", InProgress, Planned},
     FormatInfo{FormatId::McStructure, Edition::Bedrock, "mcstructure", ".mcstructure",
-               "Bedrock structure file", Planned, Planned},
+               "Bedrock structure file", Planned, InProgress},
     FormatInfo{FormatId::McWorld, Edition::Bedrock, "mcworld", ".mcworld", "Bedrock world (zipped LevelDB)",
                Planned, InProgress},
 };

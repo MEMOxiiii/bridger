@@ -47,7 +47,8 @@ distributed. Release zips include the license texts of all shipped components (`
 |---|---|---|---|
 | [GeyserMC/mappings](https://github.com/GeyserMC/mappings) (git submodule `tools/mapgen/sources/geyser-mappings`) | `feature/26.3`, commit `01ec65e3` | MIT | Java → Bedrock block, item and biome mappings. GeyserMC notes it "does not relicense Minecraft, its data, or any other material owned by Mojang or Microsoft" |
 | [GeyserMC/Geyser](https://github.com/GeyserMC/Geyser) `block_palette.26_50.nbt` (fetched, SHA-256 pinned) | commit `50a464d7` | MIT (repository) | Bedrock block palette: names, typed states, block version |
-| Minecraft Java 26.3 data generator output (`blocks.json`, `version.json`) | 26.3 | Mojang; generated locally from the official server jar, never committed or shipped | Java block state list and ids |
+| Minecraft Java 26.3 data generator output (`blocks.json`, `registries.json`, `version.json`) | 26.3 | Mojang; generated locally from the official server jar, never committed or shipped | Java block state list and ids, item and biome registries |
+| [PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data) `data/pc/common/legacy.json` (fetched, SHA-256 pinned) | commit `dd011274` | MIT | Pre-1.13 numeric block/item ids → 1.13 names, for legacy `.schematic` files. Post-1.13 renames are Bridger's own (`tools/mapgen/overrides/legacy_renames.json`) |
 
 The `.brmap` blob contains block, item and biome **names and state values** (facts about the game, as GeyserMC
 publishes them). It contains no Mojang code, textures, models or sounds.
@@ -59,12 +60,12 @@ publishes them). It contains no Mojang code, textures, models or sounds.
 | [nbtlib](https://github.com/vberlier/nbtlib) | 2.0.4 | MIT | `tests/data/generate_test_data.py` writes the committed test files with it, so the NBT reader is tested against an independent implementation |
 | [amulet-leveldb](https://pypi.org/project/amulet-leveldb/) | 1.0.7 | Amulet's license | **Test oracle only** in `tests/integration/validate_mcworld.py` (independent reading of written worlds). No code copied, not committed |
 | [HiveGamesOSS/Chunker](https://github.com/HiveGamesOSS/Chunker) | commit `50aaf6d8` | MIT | **Consulted only** for Bedrock format behavior (`docs/formats/bedrock-world.md` cites the files). No code copied |
+| [Litematica](https://github.com/sakura-ryoko/litematica) (branch LTS/26.2) | — | LGPL-3.0 | **Consulted only** for the `.litematic` layout (`docs/formats/litematic.md`). No code copied |
 | [minizip-ng](https://github.com/zlib-ng/minizip-ng) | (see above) | Zlib | also used to write `.mcworld` zips |
 
 ## Data
 
-No third-party data is included yet. Mapping data sources (Phase 3) will be listed here with their licenses
-before use.
+Third-party data is limited to the mapping sources above, compiled into the `.brmap` blob.
 
 ## Minecraft assets
 

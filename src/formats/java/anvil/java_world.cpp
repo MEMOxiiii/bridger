@@ -1,0 +1,78 @@
+// Java world folder and level.dat, docs/formats/anvil.md.
+
+#include "../nbt_helpers.hpp"
+
+#include <bridger/formats/java/anvil/java_world.hpp>
+#include <bridger/platform/mapped_file.hpp>
+#include <bridger/platform/paths.hpp>
+
+#include <algorithm>
+
+namespace bridger::formats::java {
+namespace fs = std::filesystem;
+using io::nbt::NbtCompoundView;
+using io::nbt::TagType;
+
+Result<JavaLevelInfo> read_java_level_dat(std::span<const u8> bytes, const io::DecompressLimits& limits) {
+    BRIDGER_TRY(const detail::JavaNbt nbt, detail::parse_java_nbt(bytes, limits, {}, "level.dat"));
+    const NbtCompoundView data = nbt.doc.root().entries().find("Data", TagType::Compound).entries();
+    JavaLevelInfo info;
+    if (const auto n = data.find("LevelName").as_string()) {
+        BRIDGER_TRY(info.level_name, detail::utf8(*n));
+    }
+    if (const auto dv = data.find("DataVersion").as_int()) info.data_version = *dv;
+    if (const auto vn = data.find("Version").entries().find("Name").as_string()) {
+        BRIDGER_TRY(info.version_name, detail::utf8(*vn));
+    }
+    // Spawn: SpawnX/Y/Z ints (long-standing), or a "spawn" compound with an int-array "pos" (newer versions).
+    const auto sx = data.find("SpawnX").as_int(), sy = data.find("SpawnY").as_int(), sz = data.find("SpawnZ").as_int();
+    if (sx && sy && sz) info.spawn = BlockPos{*sx, *sy, *sz};
+    else if (const auto pos = detail::int3(data.find("spawn").entries().find("pos"))) info.spawn = BlockPos{(*pos)[0], (*pos)[1], (*pos)[2]};
+    // Seed: WorldGenSettings.seed (1.16+) or RandomSeed (older).
+    if (const auto s = data.find("WorldGenSettings").entries().find("seed").as_long()) info.seed = *s;
+    else if (const auto r = data.find("RandomSeed").as_long()) info.seed = *r;
+    return info;
+}
+
+Result<JavaWorld> open_java_world(const fs::path& path) {
+    JavaWorld w;
+    std::error_code ec;
+    w.root = fs::is_directory(path, ec) ? path : path.parent_path();
+    const fs::path level = w.root / "level.dat";
+    if (!fs::is_regular_file(level, ec)) return make_error(ErrorCode::FileNotFound, "not a Java world: level.dat is missing");
+    BRIDGER_TRY(const platform::MappedFile f, platform::MappedFile::open(level));
+    BRIDGER_TRY(w.level, read_java_level_dat(f.data()));
+
+    // Java 26.1+ (snapshot 26.1-6) keeps each dimension under dimensions/<namespace>/<name>/;
+    // older worlds keep the Overworld at the root and use DIM-1 / DIM1 [3].
+    const fs::path modern = w.root / "dimensions" / "minecraft";
+    w.modern_layout = fs::is_directory(modern / "overworld", ec);
+    const fs::path overworld = w.modern_layout ? modern / "overworld" : w.root;
+    if (fs::is_directory(overworld / "region", ec)) {
+        for (const auto& e : fs::directory_iterator(overworld / "region", ec)) {
+            if (!e.is_regular_file()) continue;
+            BRIDGER_TRY(const std::string name, platform::path_to_utf8(e.path().filename()));
+            if (name.starts_with("r.") && name.ends_with(".mca")) w.overworld_regions.push_back(e.path());
+        }
+        if (ec) return make_error(ErrorCode::IoError, "cannot list region/: " + ec.message());
+    }
+    std::sort(w.overworld_regions.begin(), w.overworld_regions.end());
+    w.has_nether = fs::is_directory(w.root / "DIM-1" / "region", ec) || fs::is_directory(modern / "the_nether" / "region", ec);
+    w.has_end = fs::is_directory(w.root / "DIM1" / "region", ec) || fs::is_directory(modern / "the_end" / "region", ec);
+    w.has_entity_regions = fs::is_directory(overworld / "entities", ec) && !fs::is_empty(overworld / "entities", ec);
+
+    // 26.1+: the seed moved from level.dat to data/minecraft/world_gen_settings.dat, a saved-data
+    // file {DataVersion, data: {seed, generate_structures, bonus_chest, dimensions}} (field names
+    // from the 26.3 server's WorldOptions codec; saved-data wrapper "data").
+    const fs::path wgs = w.root / "data" / "minecraft" / "world_gen_settings.dat";
+    if (!w.level.seed && fs::is_regular_file(wgs, ec)) {
+        BRIDGER_TRY(const platform::MappedFile wf, platform::MappedFile::open(wgs));
+        BRIDGER_TRY(const detail::JavaNbt nbt, detail::parse_java_nbt(wf.data(), {}, {}, "world_gen_settings.dat"));
+        const NbtCompoundView root = nbt.doc.root().entries();
+        if (const auto s = root.find("data").entries().find("seed").as_long()) w.level.seed = *s;
+        else if (const auto s2 = root.find("seed").as_long()) w.level.seed = *s2;
+    }
+    return w;
+}
+
+} // namespace bridger::formats::java

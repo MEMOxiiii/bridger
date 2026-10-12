@@ -61,6 +61,7 @@ int main(int argc, char** argv) {
     convert_cmd->add_flag("--shift-to-fit", conv.shift_to_fit, "Move vertically to fit the build height");
     convert_cmd->add_flag("--clear-entities", conv.clear_entities, "Remove entities in the target area (existing worlds)");
     convert_cmd->add_flag("--overwrite", conv.overwrite, "Replace the output file if it exists");
+    convert_cmd->add_option("--threads", conv.threads, "Worker threads for whole worlds (default: all cores)")->check(CLI::Range(0, 1024));
 
     CLI11_PARSE(app, argc, argv);
 

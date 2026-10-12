@@ -18,6 +18,7 @@ struct LevelDatOptions {
     i64 last_played = 0;           // seconds since the epoch
     i64 random_seed = 0;
     i32 game_type = 1; // creative: converted builds are for exploring
+    i32 generator = 2; // 2 flat (new worlds for structures), 1 infinite (converted Java worlds)
     // Pinned Bedrock version 26.50 (docs/versions.md); sources in bedrock-world.md.
     i32 storage_version = 10;
     i32 network_version = 2192;

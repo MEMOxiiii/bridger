@@ -18,8 +18,11 @@ TEST_CASE("Nothing claims support before it has passed acceptance", "[formats]")
     // a benchmark and (for writers) the in-game checklist.
     for (const auto& f : all_formats()) {
         CAPTURE(f.name);
-        CHECK(f.read == (f.id == FormatId::SpongeSchem ? Support::InProgress : Support::Planned));
-        CHECK(f.write == (f.id == FormatId::McWorld ? Support::InProgress : Support::Planned));
+        const bool java_reader = f.id == FormatId::SpongeSchem || f.id == FormatId::StructureNbt ||
+                                 f.id == FormatId::Litematic || f.id == FormatId::LegacySchematic ||
+                                 f.id == FormatId::JavaWorld;
+        CHECK(f.read == (java_reader ? Support::InProgress : Support::Planned));
+        CHECK(f.write == (f.id == FormatId::McWorld || f.id == FormatId::McStructure ? Support::InProgress : Support::Planned));
         CHECK(&info(f.id) == &f);
     }
 }
