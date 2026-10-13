@@ -10,7 +10,10 @@
 #include <bridger/platform/paths.hpp>
 
 #include <cstdio>
+#include <cwctype>
+#include <filesystem>
 #include <format>
+#include <optional>
 
 namespace bridger::cli {
 namespace {
@@ -27,7 +30,11 @@ void print_report(const convert::ConvertSummary& s) {
                   .c_str());
     for (const auto& w : s.warnings) log::warn("{}", w);
     if (s.report.exact()) {
-        std::puts("Conversion report: everything was converted exactly.");
+        if (s.warnings.empty()) std::puts("Conversion report: everything was converted exactly.");
+        else
+            std::puts(std::format("Conversion report: every block was converted exactly, but {} note(s) above describe data that was not.",
+                                  s.warnings.size())
+                          .c_str());
         return;
     }
     std::puts("Conversion report (not converted exactly):");
@@ -47,6 +54,43 @@ void print_report(const convert::ConvertSummary& s) {
             std::puts(std::format("    {} x{} (e.g. at {}, {}, {})", subject, entry.count, p.x, p.y, p.z).c_str());
         }
     }
+}
+
+// Windows paths compare case-insensitively; existing files are compared by identity (links, 8.3 names).
+bool same_path(const std::filesystem::path& a, const std::filesystem::path& b) {
+    std::error_code ec;
+    if (std::filesystem::exists(a, ec) && std::filesystem::exists(b, ec)) return std::filesystem::equivalent(a, b, ec);
+    auto norm = [](const std::filesystem::path& p) {
+        std::error_code e;
+        std::wstring w = std::filesystem::weakly_canonical(std::filesystem::absolute(p, e), e).wstring();
+        for (wchar_t& c : w) c = static_cast<wchar_t>(std::towlower(c));
+        while (!w.empty() && (w.back() == L'\\' || w.back() == L'/')) w.pop_back();
+        return w;
+    };
+    return norm(a) == norm(b);
+}
+
+bool inside(const std::filesystem::path& child, const std::filesystem::path& dir) {
+    for (std::filesystem::path p = std::filesystem::absolute(child).parent_path(); !p.empty() && p != p.parent_path(); p = p.parent_path())
+        if (same_path(p, dir)) return true;
+    return false;
+}
+
+// The report must never replace the input, the output or a world being placed into, and an existing
+// file is only replaced when asked. Checked before converting, so nothing is lost and no work is wasted.
+Status check_report_path(const std::filesystem::path& report, const convert::ConvertOptions& o) {
+    const std::string shown = platform::path_to_utf8(report).value_or("the report path");
+    if (same_path(report, o.input) || inside(report, o.input))
+        return make_error(ErrorCode::InvalidArgument, "--report " + shown + " would overwrite the input; choose another file");
+    if (same_path(report, o.output) || inside(report, o.output))
+        return make_error(ErrorCode::InvalidArgument, "--report " + shown + " would overwrite the output; choose another file");
+    if (o.into_world && same_path(report, *o.into_world))
+        return make_error(ErrorCode::InvalidArgument, "--report " + shown + " would overwrite the world given to --into-world");
+    std::error_code ec;
+    if (std::filesystem::is_directory(report, ec)) return make_error(ErrorCode::InvalidArgument, "--report " + shown + " is a folder");
+    if (std::filesystem::exists(report, ec) && !o.overwrite)
+        return make_error(ErrorCode::AlreadyExists, "--report " + shown + " already exists; pass --overwrite to replace it");
+    return {};
 }
 
 } // namespace
@@ -106,6 +150,20 @@ int run_convert(const ConvertArgs& a) {
         }
     }
 
+    std::optional<std::filesystem::path> report_path;
+    if (!a.report_path.empty()) {
+        auto rp = platform::path_from_utf8(a.report_path);
+        if (!rp) {
+            log::error("invalid --report path (not UTF-8)");
+            return kExitError;
+        }
+        if (auto st = check_report_path(*rp, o); !st) {
+            log::error("{}", st.error().message());
+            return kExitError;
+        }
+        report_path = *rp;
+    }
+
     auto summary = convert::convert(o);
     if (!summary) {
         log::error("{}", summary.error().describe());
@@ -113,12 +171,10 @@ int run_convert(const ConvertArgs& a) {
     }
     print_report(*summary);
 
-    if (!a.report_path.empty()) {
-        auto report_path = platform::path_from_utf8(a.report_path);
+    if (report_path) {
         const std::string json = convert::summary_to_json(*summary, o);
         const auto bytes = std::span<const u8>(reinterpret_cast<const u8*>(json.data()), json.size());
-        if (!report_path ||
-            !platform::write_file_atomically(*report_path, bytes, [](const std::filesystem::path&) -> Status { return {}; })) {
+        if (!platform::write_file_atomically(*report_path, bytes, [](const std::filesystem::path&) -> Status { return {}; })) {
             log::error("could not write the report to {}", a.report_path);
             return kExitError;
         }
