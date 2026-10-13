@@ -610,7 +610,9 @@ struct Renderer::Impl {
         BRIDGER_TRY(VkShaderModule lv, shader(embedded::shader_line_vert, embedded::shader_line_vert_size));
         BRIDGER_TRY(VkShaderModule lf, shader(embedded::shader_line_frag, embedded::shader_line_frag_size));
         auto op = make_pipeline(chunk_layout, cv, cf, false, false, true);
-        auto tp = make_pipeline(chunk_layout, cv, cf, false, true, false);
+        // Translucent faces write depth, like the game: sections are drawn back to front, and within
+        // a section the nearest water surface wins instead of stacked faces darkening each other.
+        auto tp = make_pipeline(chunk_layout, cv, cf, false, true, true);
         auto lp = make_pipeline(line_layout, lv, lf, true, false, true);
         for (VkShaderModule m : {cv, cf, lv, lf}) vkDestroyShaderModule(dev(), m, nullptr);
         BRIDGER_TRY(opaque_pipeline, std::move(op));

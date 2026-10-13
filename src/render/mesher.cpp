@@ -67,44 +67,102 @@ void emit_quad(std::vector<Vertex>& out, const std::array<glm::vec3, 4>& p, cons
         out.push_back({p[i].x, p[i].y, p[i].z, unorm(uv[i].x), unorm(uv[i].y), layer, static_cast<u16>(cutout ? 1 : 0), colors[i]});
 }
 
-// Fluid height at a position: sources 14/16, flowing water lower with its level, 1 under the same fluid.
-float fluid_height(const Ctx& c, int x, int y, int z, Fluid f) {
-    const BakedBlock* above = c.at(x, y + 1, z);
-    if (above != nullptr && above->fluid == f) return 1.0f;
+// Fluid surface, following the game's liquid renderer: every block has a height (sources 8/9,
+// flowing lower with their level, falling and covered fluid full), and each top corner is the
+// weighted average of the four blocks around it. Neighbouring fluid blocks therefore share their
+// corner heights, so the surface is continuous and slopes where the fluid flows; side faces take the
+// two corner heights of their edge, which closes the steps between different levels.
+constexpr float kSourceHeight = 8.0f / 9.0f;
+
+// The block's own height, or -1 if it holds no `f`; 2 marks fluid with the same fluid above it.
+float own_height(const Ctx& c, int x, int y, int z, Fluid f) {
     const BakedBlock* b = c.at(x, y, z);
-    if (b == nullptr || !b->fluid_only || b->fluid_level == 0) return 0.875f;
-    if (b->fluid_level >= 8) return 1.0f; // falling
+    if (b == nullptr || b->fluid != f) return -1.0f;
+    const BakedBlock* above = c.at(x, y + 1, z);
+    if (above != nullptr && above->fluid == f) return 2.0f;
+    if (!b->fluid_only || b->fluid_level == 0) return kSourceHeight; // source or waterlogged block
+    if (b->fluid_level >= 8) return 1.0f;                            // falling
     return std::max(0.125f, static_cast<float>(8 - b->fluid_level) / 9.0f);
 }
 
-void mesh_fluid(const Ctx& c, glm::ivec3 pos, Fluid f, SectionMesh& out, const BakedBlock& self, u16 water_layer, u16 lava_layer) {
-    const float h = fluid_height(c, pos.x, pos.y, pos.z, f);
+// Height of the top corner shared by the blocks (cx-1 .. cx, cz-1 .. cz) at height y.
+float corner_height(const Ctx& c, int cx, int y, int cz, Fluid f) {
+    float sum = 0.0f, weight = 0.0f;
+    for (int dz = -1; dz <= 0; ++dz)
+        for (int dx = -1; dx <= 0; ++dx) {
+            const int x = cx + dx, z = cz + dz;
+            const float h = own_height(c, x, y, z, f);
+            if (h >= 2.0f) return 1.0f; // fluid above any of the four: the corner is full
+            if (h >= 0.0f) {
+                const float w = h >= 0.8f ? 10.0f : 1.0f; // near-full blocks dominate (as in the game)
+                sum += h * w;
+                weight += w;
+            } else if (c.at(x, y, z) == nullptr) {
+                weight += 1.0f; // air pulls the corner down; blocks (glass, walls, ...) do not
+            }
+        }
+    return weight > 0.0f ? sum / weight : kSourceHeight;
+}
+
+void mesh_fluid(const Ctx& c, glm::ivec3 pos, Fluid f, SectionMesh& out, u16 water_layer, u16 lava_layer) {
     const glm::vec3 tint = f == Fluid::Water ? tint_color(Tint::Water) : glm::vec3(1.0f);
-    const float alpha = f == Fluid::Water ? 0.75f : 1.0f;
+    const float alpha = f == Fluid::Water ? 0.72f : 1.0f;
     std::vector<Vertex>& dst = f == Fluid::Water ? out.translucent : out.solid;
     const u16 layer = f == Fluid::Water ? water_layer : lava_layer;
-    const glm::vec3 lo(0.0f), hi(1.0f, h, 1.0f);
-    (void)self;
+    const bool covered = own_height(c, pos.x, pos.y, pos.z, f) >= 2.0f;
+    // Corner heights: (x0,z0), (x0,z1), (x1,z1), (x1,z0).
+    float h00 = 1.0f, h01 = 1.0f, h11 = 1.0f, h10 = 1.0f;
+    if (!covered) {
+        h00 = corner_height(c, pos.x, pos.y, pos.z, f);
+        h01 = corner_height(c, pos.x, pos.y, pos.z + 1, f);
+        h11 = corner_height(c, pos.x + 1, pos.y, pos.z + 1, f);
+        h10 = corner_height(c, pos.x + 1, pos.y, pos.z, f);
+    }
+    const glm::vec3 o(pos);
     for (int face = 0; face < 6; ++face) {
         const glm::ivec3 n = kFaceNormals[static_cast<usize>(face)];
         const BakedBlock* nb = c.at(pos.x + n.x, pos.y + n.y, pos.z + n.z);
-        if (nb != nullptr && nb->fluid == f) continue;                          // same fluid
-        if (face != 1 && nb != nullptr && nb->occludes[static_cast<usize>(face ^ 1)]) continue; // hidden by a wall
-        if (face == 1 && h >= 1.0f && nb != nullptr && nb->occludes[0]) continue;
-        std::array<glm::vec3, 4> p;
-        switch (face) {
-        case 0: p = {{{lo.x, lo.y, hi.z}, {lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, lo.y, hi.z}}}; break;
-        case 1: p = {{{lo.x, hi.y, lo.z}, {lo.x, hi.y, hi.z}, {hi.x, hi.y, hi.z}, {hi.x, hi.y, lo.z}}}; break;
-        case 2: p = {{{hi.x, hi.y, lo.z}, {hi.x, lo.y, lo.z}, {lo.x, lo.y, lo.z}, {lo.x, hi.y, lo.z}}}; break;
-        case 3: p = {{{lo.x, hi.y, hi.z}, {lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z}, {hi.x, hi.y, hi.z}}}; break;
-        case 4: p = {{{lo.x, hi.y, lo.z}, {lo.x, lo.y, lo.z}, {lo.x, lo.y, hi.z}, {lo.x, hi.y, hi.z}}}; break;
-        default: p = {{{hi.x, hi.y, hi.z}, {hi.x, lo.y, hi.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}}}; break;
+        if (nb != nullptr && nb->fluid == f) continue; // inside the same fluid
+        if (face == 1) {
+            if (covered) continue;
+            // A full block above hides the surface only when the surface reaches it.
+            if (nb != nullptr && nb->occludes[0] && std::min({h00, h01, h11, h10}) >= 1.0f) continue;
+        } else if (nb != nullptr && nb->occludes[static_cast<usize>(face ^ 1)]) {
+            continue; // against a wall
         }
-        for (glm::vec3& v : p) v += glm::vec3(pos);
-        const float vh = face <= 1 ? 1.0f : h;
-        const std::array<glm::vec2, 4> uv{{{0, 0}, {0, vh}, {1, vh}, {1, 0}}};
+        std::array<glm::vec3, 4> p;
+        std::array<glm::vec2, 4> uv;
+        switch (face) {
+        case 0:
+            p = {{{0, 0, 1}, {0, 0, 0}, {1, 0, 0}, {1, 0, 1}}};
+            uv = {{{0, 1}, {0, 0}, {1, 0}, {1, 1}}};
+            break;
+        case 1:
+            p = {{{0, h00, 0}, {0, h01, 1}, {1, h11, 1}, {1, h10, 0}}};
+            uv = {{{0, 0}, {0, 1}, {1, 1}, {1, 0}}};
+            break;
+        case 2: // north (z = 0): x from 1 to 0
+            p = {{{1, h10, 0}, {1, 0, 0}, {0, 0, 0}, {0, h00, 0}}};
+            uv = {{{0, 1 - h10}, {0, 1}, {1, 1}, {1, 1 - h00}}};
+            break;
+        case 3: // south (z = 1)
+            p = {{{0, h01, 1}, {0, 0, 1}, {1, 0, 1}, {1, h11, 1}}};
+            uv = {{{0, 1 - h01}, {0, 1}, {1, 1}, {1, 1 - h11}}};
+            break;
+        case 4: // west (x = 0)
+            p = {{{0, h00, 0}, {0, 0, 0}, {0, 0, 1}, {0, h01, 1}}};
+            uv = {{{0, 1 - h00}, {0, 1}, {1, 1}, {1, 1 - h01}}};
+            break;
+        default: // east (x = 1)
+            p = {{{1, h11, 1}, {1, 0, 1}, {1, 0, 0}, {1, h10, 0}}};
+            uv = {{{0, 1 - h11}, {0, 1}, {1, 1}, {1, 1 - h10}}};
+            break;
+        }
+        for (glm::vec3& v : p) v += o;
         const u32 col = pack_color(tint * kFaceShade[static_cast<usize>(face)], alpha);
-        emit_quad(dst, p, uv, layer, {col, col, col, col}, false, false);
+        // Split the (possibly non-planar) top along the diagonal that follows the slope.
+        const bool flip = face == 1 && std::abs(h00 - h11) > std::abs(h01 - h10);
+        emit_quad(dst, p, uv, layer, {col, col, col, col}, false, flip);
     }
 }
 
@@ -121,7 +179,7 @@ void mesh_section(const std::array<const BakedBlock*, kPaddedVolume>& blocks, gl
                 const BakedBlock* b = c.at(x, y, z);
                 if (b == nullptr) continue;
                 const glm::ivec3 pos(x, y, z);
-                if (b->fluid != Fluid::None) mesh_fluid(c, pos, b->fluid, out, *b, kWaterLayer, kLavaLayer);
+                if (b->fluid != Fluid::None) mesh_fluid(c, pos, b->fluid, out, kWaterLayer, kLavaLayer);
                 if (b->layer == RenderLayer::Invisible || b->variants.empty()) continue;
                 const BakedModel& model = b->variants.size() == 1 ? b->variants[0]
                                                                    : b->variants[hash_pos(section_world + pos) % b->variants.size()];
