@@ -32,7 +32,8 @@ void print_report(const convert::ConvertSummary& s) {
     if (s.report.exact()) {
         if (s.warnings.empty()) std::puts("Conversion report: everything was converted exactly.");
         else
-            std::puts(std::format("Conversion report: every block was converted exactly, but {} note(s) above describe data that was not.",
+            std::puts(std::format("Conversion report: the translation recorded no problems, but {} warning(s) above describe data "
+                                  "that was skipped or dropped. The conversion is not exact.",
                                   s.warnings.size())
                           .c_str());
         return;

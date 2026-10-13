@@ -12,10 +12,12 @@ versions follow the release plan in `docs/release.md`.
   `--overwrite`.
 - The report's `"exact"` is `true` only when nothing at all was lost: warnings (skipped dimensions, entities,
   partially generated chunks) now count. The new `"blocks_exact"` keeps the blocks-only answer. The desktop app
-  and the CLI summary say the same.
+  and the CLI summary no longer call such a result "exact": they say the translation recorded no problems but
+  other warnings describe skipped or dropped data.
 - Cancelling is checked one last time after the output is validated and right before it is moved into place, on
-  every output path (files and Java world folders). A cancelled conversion never leaves output behind; the move
-  itself is the point of no return (`docs/safety.md`).
+  every output path (files and Java world folders), through a gate the atomic writer calls exactly once. A
+  cancelled conversion never leaves output behind and an overwritten file is kept; the move itself is the point
+  of no return, and a cancel after it can no longer undo a finished replacement (`docs/safety.md`).
 - Water and lava in the 3D preview: the surface is continuous and slopes like the game's (corner heights averaged
   from the neighbouring blocks), without holes between different levels, and stacked water faces no longer
   darken each other.

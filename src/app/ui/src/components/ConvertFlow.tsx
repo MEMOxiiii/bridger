@@ -307,7 +307,7 @@ function Done({ convert, doc }: { convert: ConvertState; doc: Doc }) {
             {s.exact
               ? 'Everything was converted exactly.'
               : issues === 0
-                ? `Every block was converted exactly, but ${s.warnings.length === 1 ? 'one note below describes' : `${s.warnings.length} notes below describe`} data that was not.`
+                ? `The translation recorded no problems, but ${s.warnings.length === 1 ? 'one warning below describes' : `${s.warnings.length} warnings below describe`} data that was skipped or dropped, so the result is not exact.`
                 : `${issues.toLocaleString()} ${issues === 1 ? 'thing was' : 'things were'} converted approximately or not at all. Click one to see where it is.`}
           </div>
         </div>

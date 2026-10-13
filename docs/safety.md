@@ -52,12 +52,14 @@ folders are only read.
 6. If automatic recovery fails, Bridger stops and prints exactly which file is where: temp, backup, destination.
 
 **Cancelling** (the desktop app's Cancel, `ConvertOptions::cancel`): the request is checked between steps and
-chunk batches, and **one last time after the output was validated, immediately before step 4** (inside the
-validator for files; just before the folder rename for Java worlds). A cancel up to that moment discards the temp
+chunk batches, and **one last time after the output was validated, immediately before step 4**: a separate
+gate (`platform::MoveGate`) that the atomic writer calls exactly once, before the move, and never again after it
+(so a late cancel cannot undo a finished replacement); for Java worlds, just before the folder rename. A cancel up to that moment discards the temp
 file or temp folder and leaves the destination untouched; the conversion ends with `ErrorCode::Cancelled`. The
 move in step 4 is the point of no return: a cancel that arrives during or after it has no effect, and the
 conversion reports success with the finished file. Tests: `tests/unit/convert/cancel_test.cpp` (every output
-kind, cancelled during the last step).
+kind, cancelled during the last step, also when replacing an existing file with `--overwrite`) and
+`tests/unit/platform/file_test.cpp` (the gate runs once; a cancel after the replacement does not undo it).
 
 **The report file** (`--report`) is written the same way, and Bridger refuses, before converting, a report path
 that is the input, the output, a path inside an output world folder, or the world given to `--into-world`. An

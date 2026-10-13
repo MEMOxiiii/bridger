@@ -96,7 +96,7 @@ function FileCard({ doc }: { doc: Doc }) {
               'Read exactly — nothing was lost'
             ) : issues === 0 ? (
               <>
-                Blocks read exactly, but <b>{notes}</b> {notes === 1 ? 'note' : 'notes'} about other data
+                No report entries, but <b>{notes}</b> {notes === 1 ? 'warning' : 'warnings'} from the reader
               </>
             ) : (
               <>
