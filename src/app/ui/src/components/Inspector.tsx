@@ -4,6 +4,7 @@ import { formatMeta, issueLabel, issueTotal } from '../formats'
 import { Counter, dur, gsap, SmoothScroll, useGSAP } from '../motion'
 import { setState, useStore } from '../store'
 import { Icon } from './Icon'
+import { showIssue } from '../actions'
 
 type Tab = 'overview' | 'report' | 'view'
 
@@ -86,15 +87,7 @@ export function ReportList({ report, emptyText }: { report: Report; emptyText: s
         <p>{emptyText}</p>
       </div>
     )
-  const focus = (key: string, positions: [number, number, number][]) => {
-    if (focusKey === key || positions.length === 0) {
-      setState({ focusKey: null })
-      send({ type: 'clear_focus' })
-      return
-    }
-    setState({ focusKey: key })
-    send({ type: 'focus', positions })
-  }
+  const focus = showIssue
   return (
     <div className="report">
       {kinds.map((kind) => {

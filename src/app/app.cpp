@@ -36,8 +36,8 @@ using json = nlohmann::json;
 using formats::FormatId;
 namespace fs = std::filesystem;
 
-constexpr u32 kCharcoal = 0x1C1917; // --bg in src/app/ui/src/styles/tokens.css
-constexpr glm::vec3 kCharcoalLinear{0.110f, 0.098f, 0.090f};
+constexpr u32 kCharcoal = 0x0F1217; // --bg in src/app/ui/src/styles/tokens.css
+constexpr glm::vec3 kCharcoalLinear{0.059f, 0.071f, 0.090f};
 constexpr glm::vec3 kSky{0.62f, 0.76f, 1.0f};
 
 std::string utf8(const fs::path& p) { return platform::path_to_utf8(p).value_or(std::string()); }
@@ -170,6 +170,9 @@ struct App::Impl {
     bool dirty = true;
     std::optional<float> slice;
     bool fly = false;
+    // The 3D view runs only while the UI shows it (docs/app/bridge.md, `preview`): no rendering and no
+    // world streaming while the user is on the convert page.
+    bool previewing = false;
 
     // Document and background work.
     Document doc;
@@ -259,8 +262,10 @@ struct App::Impl {
             viewer.zoom(num("delta"));
         } else if (type == "reset_camera") {
             if (has_doc) viewer.focus(doc.lo, doc.hi, aspect());
+        } else if (type == "preview") {
+            set_preview(m.value("on", false));
         } else if (type == "fly") {
-            set_fly(m.value("on", false));
+            if (previewing) set_fly(m.value("on", false));
         } else if (type == "view") {
             if (m.contains("map") && m["map"].is_boolean()) viewer.set_map(m["map"].get<bool>());
             if (m.contains("slice")) slice = m["slice"].is_number() ? std::optional<float>(m["slice"].get<float>()) : std::nullopt;
@@ -426,7 +431,20 @@ struct App::Impl {
         }
         slice.reset();
         set_fly(false);
+        previewing = false;
         viewer.set_map(false);
+        dirty = true;
+    }
+
+    void set_preview(bool on) {
+        if (on && !has_doc) return;
+        if (!on) set_fly(false);
+        if (on && !previewing) {
+            open_started = std::chrono::steady_clock::now();
+            ttff_pending = true;
+            stream_pending = doc.streaming != nullptr;
+        }
+        previewing = on;
         dirty = true;
     }
 
@@ -436,6 +454,8 @@ struct App::Impl {
             pending_open = path_utf8;
             return;
         }
+        if (converting)
+            return toast("info", "A conversion is running. Let it finish or cancel it before opening another file.");
         auto path = platform::path_from_utf8(path_utf8);
         if (!path) return toast("error", path.error().describe());
         // level.dat stands for its world folder.
@@ -473,25 +493,35 @@ struct App::Impl {
             auto vs = convert::load_view_structure(p);
             if (stale()) return;
             if (!vs) return failed(vs.error().describe());
-            progress("Counting blocks", 0.35);
+            progress("Counting blocks", 0.5);
             const u64 blocks = count_blocks(vs->java);
+            auto view = std::make_shared<convert::ViewStructure>(std::move(*vs));
+            // The file page appears now; the 3D model is built behind it (`preview_ready`).
+            tasks.post([this, gen, full, name, view, blocks] {
+                if (gen == open_generation) opened_structure(full, name, *view, blocks);
+            });
             auto meshes = std::make_shared<std::optional<std::vector<render::MeshedSection>>>();
-            render::SceneStats stats;
             if (models) {
-                progress("Building the 3D model", 0.55);
-                auto s = render::mesh_structure(vs->java, *models, {0, 0, 0}, 0, &stats);
+                auto s = render::mesh_structure(view->java, *models, {0, 0, 0}, 0, nullptr);
                 if (s) *meshes = std::move(*s);
                 else log::error("{}", s.error().describe());
             }
-            auto view = std::make_shared<convert::ViewStructure>(std::move(*vs));
-            tasks.post([this, gen, full, name, view, meshes, blocks, stats] {
-                if (gen == open_generation) opened_structure(full, name, *view, *meshes, blocks, stats);
+            tasks.post([this, gen, meshes] {
+                if (gen == open_generation) structure_meshed(*meshes);
             });
         });
     }
 
-    void opened_structure(const std::string& path, const std::string& name, const convert::ViewStructure& v,
-                          const std::optional<std::vector<render::MeshedSection>>& sections, u64 blocks, const render::SceneStats& stats) {
+    void structure_meshed(const std::optional<std::vector<render::MeshedSection>>& sections) {
+        if (sections && renderer && models) {
+            for (const auto& s : *sections) (void)renderer->upload_section(s.origin, s.mesh);
+            (void)renderer->upload_textures(models->texture_pixels(), static_cast<u32>(models->texture_count()));
+        }
+        dirty = true;
+        send({{"type", "preview_ready"}, {"missing_models", models ? models->missing().size() : 0}});
+    }
+
+    void opened_structure(const std::string& path, const std::string& name, const convert::ViewStructure& v, u64 blocks) {
         doc.path = path;
         doc.name = name;
         doc.format = v.format;
@@ -500,14 +530,9 @@ struct App::Impl {
         doc.lo = glm::dvec3(0.0);
         doc.hi = glm::dvec3(e.x, e.y, e.z);
         has_doc = true;
-        if (sections && renderer && models) {
-            for (const auto& s : *sections) (void)renderer->upload_section(s.origin, s.mesh);
-            (void)renderer->upload_textures(models->texture_pixels(), static_cast<u32>(models->texture_count()));
-        }
         viewer.frame(doc.lo, doc.hi, aspect());
         frame.fog_start = 0;
         frame.fog_end = 0;
-        ttff_pending = true;
         dirty = true;
         settings.add_recent(path);
         save_settings(settings);
@@ -526,8 +551,6 @@ struct App::Impl {
                 {"data_version", data_version != 0 ? json(data_version) : json(nullptr)},
                 {"warnings", v.warnings},
                 {"report", report_json(v.report)},
-                {"quads", stats.quads},
-                {"missing_models", models ? models->missing().size() : 0},
                 {"targets", targets_for(v.format)}}},
               {"settings", settings_json()}});
     }
@@ -560,8 +583,6 @@ struct App::Impl {
         viewer.frame(doc.lo, doc.hi, aspect());
         frame.fog_start = static_cast<float>(r * 0.8);
         frame.fog_end = static_cast<float>(r * 1.0);
-        ttff_pending = true;
-        stream_pending = doc.streaming != nullptr;
         dirty = true;
         settings.add_recent(path);
         save_settings(settings);
@@ -580,6 +601,7 @@ struct App::Impl {
                 {"report", json::object()},
                 {"targets", targets_for(info.format)}}},
               {"settings", settings_json()}});
+        send({{"type", "preview_ready"}, {"missing_models", 0}});
     }
 
     void focus_positions(const json& positions) {
@@ -828,7 +850,7 @@ struct App::Impl {
         while (running) {
             SDL_Event e;
             // Idle: wait for input instead of spinning when nothing moves.
-            const bool idle = !dirty && !fly && !streaming_busy;
+            const bool idle = !dirty && !fly && !(previewing && streaming_busy);
             if (idle ? SDL_WaitEventTimeout(&e, 15) : SDL_PollEvent(&e)) {
                 handle_event(e);
                 while (SDL_PollEvent(&e)) handle_event(e);
@@ -852,7 +874,7 @@ struct App::Impl {
             const bool sky_moving = glm::length(sky - sky_goal) > 0.002f;
 
             streaming_busy = false;
-            if (doc.streaming) {
+            if (doc.streaming && previewing) {
                 render::Camera center = viewer.camera();
                 center.position = viewer.stream_center();
                 streaming_busy = doc.streaming->update(center, *renderer, settings.render_distance, 32);
@@ -861,7 +883,7 @@ struct App::Impl {
             const render::Camera& cam = viewer.camera();
             const bool moved = cam.position != last_camera.position || cam.yaw_degrees != last_camera.yaw_degrees ||
                                cam.pitch_degrees != last_camera.pitch_degrees || viewer.map_half_extent() != last_extent;
-            if (!(dirty || moved || sky_moving || streaming_busy || fly)) {
+            if (!previewing || !(dirty || moved || sky_moving || streaming_busy || fly)) {
                 tick_stats(0.0, false);
                 continue;
             }

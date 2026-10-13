@@ -3,7 +3,7 @@
 // double-click: enter fly mode. Deltas are batched to one message per animation frame.
 import { useEffect, useRef } from 'react'
 import { send } from '../bridge'
-import { getState, setState } from '../store'
+import { getState } from '../store'
 
 export function Viewport() {
   const ref = useRef<HTMLDivElement>(null)
@@ -72,50 +72,6 @@ export function Viewport() {
       el.removeEventListener('dblclick', dbl)
       el.removeEventListener('contextmenu', menu)
     }
-  }, [])
-
-  // Keyboard shortcuts (ignored while typing in a field).
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.isContentEditable)) return
-      const s = getState()
-      // e.code: physical keys, so the shortcuts work with any keyboard layout (Arabic too).
-      if (e.ctrlKey && e.code === 'KeyO') {
-        e.preventDefault()
-        send({ type: 'open_dialog', folder: e.shiftKey })
-        return
-      }
-      if (e.key === 'Escape') {
-        if (s.settingsOpen) setState({ settingsOpen: false })
-        else if (s.convert.open && s.convert.phase !== 'running') setState({ convert: { ...s.convert, open: false } })
-        else if (s.focusKey) {
-          setState({ focusKey: null })
-          send({ type: 'clear_focus' })
-        }
-        return
-      }
-      if (!s.doc || e.ctrlKey || e.altKey || e.metaKey) return
-      switch (e.code) {
-        case 'KeyF':
-          send({ type: 'fly', on: true })
-          break
-        case 'KeyM': {
-          const map = !s.map
-          setState({ map })
-          send({ type: 'view', map })
-          break
-        }
-        case 'KeyR':
-          send({ type: 'reset_camera' })
-          break
-        default:
-          return
-      }
-      e.preventDefault()
-    }
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
   }, [])
 
   return <div ref={ref} className="viewport" aria-label="3D view. Drag to orbit, right-drag to pan, wheel to zoom, double-click to fly." />

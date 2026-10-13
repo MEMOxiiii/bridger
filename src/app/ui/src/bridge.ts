@@ -88,6 +88,7 @@ export type Incoming =
   | { type: 'settings'; settings: Settings; assets: Assets }
   | { type: 'loading'; name: string; step: string; fraction: number }
   | { type: 'opened'; doc: Doc; settings: Settings }
+  | { type: 'preview_ready'; missing_models: number }
   | { type: 'open_failed'; message: string }
   | { type: 'stats' } & Stats
   | { type: 'fly'; on: boolean }
@@ -118,6 +119,7 @@ export type Outgoing =
   | { type: 'zoom'; delta: number }
   | { type: 'reset_camera' }
   | { type: 'fly'; on: boolean }
+  | { type: 'preview'; on: boolean }
   | { type: 'view'; map?: boolean; slice?: number | null }
   | { type: 'focus'; positions: [number, number, number][] }
   | { type: 'clear_focus' }

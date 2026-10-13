@@ -1,39 +1,48 @@
-/* Design tokens (ui-ux skill: warm charcoal dark theme, OKLCH, 4px grid, defined z-scale).
-   The app is dark-only: it sits over a 3D scene. Java = amber, Bedrock = teal; the brand
-   gradient runs from one edition to the other. */
+/* Design tokens. The palette comes from the Bridger wordmark (mint -> cyan -> royal blue on a black
+   outline) and sits on a cool slate background, so the logo looks at home everywhere. Editions keep
+   their own semantic colours: Java = amber, Bedrock = mint. Spacing is on a 4px grid; z-index uses a
+   fixed scale. Dark only: the app floats over a 3D scene. */
 :root {
   color-scheme: dark;
 
-  /* Neutrals: warm charcoal, never pure black/white. --bg matches kCharcoal in app.cpp. */
-  --bg: #1c1917;
-  --bg-raised: oklch(24.5% 0.008 60);
-  --surface: oklch(22% 0.007 60 / 0.93); /* backdrop-filter cannot blur the native 3D layer, so panels stay mostly opaque */
-  --surface-strong: oklch(24% 0.008 60 / 0.97);
-  --surface-hover: oklch(100% 0 0 / 0.06);
-  --surface-active: oklch(100% 0 0 / 0.1);
-  --border: oklch(100% 0 0 / 0.08);
-  --border-strong: oklch(100% 0 0 / 0.14);
-  --text: #f3f0eb;
-  --text-muted: oklch(80% 0.01 75);
-  --text-subtle: oklch(66% 0.012 70);
+  /* Neutrals: cool slate, never pure black or white. --bg matches kCharcoal in app.cpp. */
+  --bg: #0f1217;
+  --bg-deep: #0a0c10;
+  --surface: #161a21;
+  --surface-2: #1c212a;
+  --surface-3: #242a35;
+  --surface-hover: oklch(100% 0 0 / 0.05);
+  --surface-active: oklch(100% 0 0 / 0.09);
+  --edge: #07090c;          /* the dark "extruded" edge under blocks */
+  --border: #262c37;
+  --border-strong: #343c4a;
+  --text: #eef2f6;
+  --text-muted: #aab4c3;
+  --text-subtle: #7b8698;
 
-  /* Editions + brand. */
-  --java: oklch(80% 0.14 70);
-  --java-soft: oklch(80% 0.14 70 / 0.14);
-  --bedrock: oklch(78% 0.11 182);
-  --bedrock-soft: oklch(78% 0.11 182 / 0.14);
-  --brand-gradient: linear-gradient(120deg, var(--java) 0%, oklch(79% 0.12 120) 50%, var(--bedrock) 100%);
-  --on-brand: #1c1917;
+  /* Brand (from the wordmark). */
+  --mint: #6cf0c6;
+  --cyan: #2fb6e8;
+  --blue: #2457ff;
+  --blue-deep: #0d2a92;
+  --brand-gradient: linear-gradient(180deg, var(--mint) 0%, var(--cyan) 45%, var(--blue) 100%);
+  --brand-sweep: linear-gradient(90deg, var(--mint), var(--cyan), var(--blue));
+
+  /* Editions. */
+  --java: #f2b04a;
+  --java-soft: oklch(80% 0.13 72 / 0.14);
+  --bedrock: #6cf0c6;
+  --bedrock-soft: oklch(87% 0.12 168 / 0.12);
 
   /* Status: solid + soft. */
-  --success: oklch(76% 0.14 155);
-  --success-soft: oklch(76% 0.14 155 / 0.14);
-  --warning: oklch(83% 0.14 85);
-  --warning-soft: oklch(83% 0.14 85 / 0.14);
-  --danger: oklch(70% 0.17 25);
+  --success: #4fd69c;
+  --success-soft: oklch(79% 0.14 160 / 0.13);
+  --warning: #f5c451;
+  --warning-soft: oklch(85% 0.13 88 / 0.13);
+  --danger: #ff6b6b;
   --danger-soft: oklch(70% 0.17 25 / 0.14);
-  --info: oklch(76% 0.1 240);
-  --info-soft: oklch(76% 0.1 240 / 0.14);
+  --info: #6fa8ff;
+  --info-soft: oklch(72% 0.13 258 / 0.14);
 
   /* Type: two families. */
   --font-sans: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
@@ -43,8 +52,8 @@
   --text-md: 14px;
   --text-base: 16px;
   --text-lg: 20px;
-  --text-xl: 24px;
-  --text-2xl: clamp(28px, 2.2vw + 12px, 40px);
+  --text-xl: 26px;
+  --text-2xl: clamp(28px, 2vw + 14px, 40px);
 
   /* 4px grid. */
   --space-1: 4px;
@@ -58,16 +67,14 @@
   --space-12: 48px;
   --space-16: 64px;
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* Blocky, but not sharp. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-pill: 999px;
 
-  /* Elevation: lighter surface + soft shadow. */
-  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 4px 16px oklch(0% 0 0 / 0.22);
-  --shadow-2: 0 2px 6px oklch(0% 0 0 / 0.3), 0 16px 48px oklch(0% 0 0 / 0.38);
-  --blur: blur(18px) saturate(1.3);
+  --shadow-1: 0 1px 0 oklch(100% 0 0 / 0.04) inset, 0 6px 20px oklch(0% 0 0 / 0.35);
+  --shadow-2: 0 1px 0 oklch(100% 0 0 / 0.05) inset, 0 18px 50px oklch(0% 0 0 / 0.5);
 
   /* Motion: ease-out in, faster ease-in out; never linear. */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -78,12 +85,14 @@
 
   /* Z scale. */
   --z-viewport: 0;
+  --z-page: 5;
   --z-hud: 10;
   --z-panel: 20;
-  --z-drawer: 30;
+  --z-sheet: 30;
   --z-overlay: 40;
   --z-modal: 50;
   --z-toast: 60;
+  --z-splash: 70;
 
-  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px oklch(85% 0.1 120);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--cyan);
 }

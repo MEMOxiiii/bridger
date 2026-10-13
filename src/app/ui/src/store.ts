@@ -23,7 +23,15 @@ export interface Toast {
   message: string
 }
 
+// Screens: splash (launch) -> home (no file) -> file (convert + preview entry) <-> preview (3D).
+export type View = 'file' | 'preview'
+
 export interface State {
+  splash: boolean
+  view: View
+  previewReady: boolean // the 3D model of the open file is built (worlds: always)
+  reportOpen: boolean
+  missingModels: number
   connected: boolean
   version: string
   gpu: string
@@ -47,6 +55,11 @@ const initialConvert: ConvertState = {
 }
 
 let state: State = {
+  splash: true,
+  view: 'file',
+  previewReady: false,
+  reportOpen: false,
+  missingModels: 0,
   connected: false, version: '', gpu: '', assets: null, settings: null, doc: null, loading: null, stats: null, fly: false, map: false,
   slice: null, dropping: false, focusKey: null, convert: initialConvert, settingsOpen: false, toasts: [],
 }
@@ -104,7 +117,13 @@ onMessage((m) => {
       setState({ loading: { name: m.name, step: m.step, fraction: m.fraction } })
       break
     case 'opened':
-      setState({ doc: m.doc, settings: m.settings, loading: null, map: false, slice: null, fly: false, focusKey: null, convert: initialConvert })
+      setState({
+        doc: m.doc, settings: m.settings, loading: null, map: false, slice: null, fly: false, focusKey: null, convert: initialConvert,
+        view: 'file', previewReady: false, reportOpen: false, missingModels: 0,
+      })
+      break
+    case 'preview_ready':
+      setState({ previewReady: true, missingModels: m.missing_models })
       break
     case 'open_failed':
       setState({ loading: null })

@@ -1,7 +1,7 @@
 // Browser-only stand-in for bridger-gui.exe (`npm run dev`), so layouts and motion can be
 // designed without the native app. Never bundled into a code path the app takes.
 import type { Doc, Incoming, Outgoing, Settings } from './bridge'
-import { resetConvert, setConvert, setState } from './store'
+import { setConvert, setState } from './store'
 
 const settings: Settings = { client_jar: '', packs: [], render_distance: 12, recent: ['C:\\Builds\\castle.schem', 'C:\\Builds\\village.mcstructure'] }
 
@@ -39,6 +39,7 @@ export function handle(m: Outgoing, dispatch: (m: Incoming) => void) {
   const later = (ms: number, msg: Incoming) => setTimeout(() => dispatch(msg), ms)
   switch (m.type) {
     case 'ready':
+      if (location.hash === '#splash') return // stays on the splash for screenshots
       later(50, {
         type: 'hello',
         version: '0.4.0-dev',
@@ -54,6 +55,7 @@ export function handle(m: Outgoing, dispatch: (m: Incoming) => void) {
       later(10, { type: 'loading', name: doc.name, step: 'Reading', fraction: 0.1 })
       later(400, { type: 'loading', name: doc.name, step: 'Building the 3D model', fraction: 0.6 })
       later(900, { type: 'opened', doc, settings })
+      later(1300, { type: 'preview_ready', missing_models: 0 })
       break
     case 'pick_output':
       later(200, { type: 'output_picked', path: `C:\\Builds\\castle.${m.format}` })
@@ -79,12 +81,23 @@ export function handle(m: Outgoing, dispatch: (m: Incoming) => void) {
 function demo(name: string, dispatch: (m: Incoming) => void) {
   if (!name) return
   if (name === 'drop') return void setTimeout(() => dispatch({ type: 'drop', state: 'enter' }), 200)
+  if (name === 'cmdline') {
+    // A file passed on the command line: it opens while the splash is still up.
+    setTimeout(() => dispatch({ type: 'opened', doc, settings }), 300)
+    setTimeout(() => dispatch({ type: 'preview_ready', missing_models: 0 }), 600)
+    return
+  }
+  setState({ splash: false })
+  if (name === 'home') return
   if (name === 'settings') return void setTimeout(() => setState({ settingsOpen: true }), 300)
   setTimeout(() => dispatch({ type: 'opened', doc, settings }), 100)
+  setTimeout(() => dispatch({ type: 'preview_ready', missing_models: 0 }), 150)
   const at = (ms: number, f: () => void) => setTimeout(f, ms)
+  if (['preview', 'view', 'fly'].includes(name)) at(250, () => setState({ view: 'preview' }))
+  if (name === 'sheet') at(400, () => setState({ reportOpen: true }))
   if (name === 'report' || name === 'view') at(400, () => (document.querySelector(`[data-tab="${name}"]`) as HTMLElement | null)?.click())
   if (name === 'report') at(700, () => (document.querySelector('.issue') as HTMLElement | null)?.click())
-  if (['convert', 'running', 'done', 'failed'].includes(name)) at(300, () => resetConvert(true))
+  if (name === 'report') at(250, () => setState({ view: 'preview' }))
   if (name === 'convert') at(500, () => setConvert({ output: 'C:\\Builds\\castle.mcworld' }))
   if (name === 'running') at(500, () => setConvert({ phase: 'running', fraction: 0.62, step: 'Translating blocks' }))
   if (name === 'failed') at(500, () => setConvert({ phase: 'failed', error: 'castle.schem: the structure reaches y 340, above the Bedrock build height (319). Choose "Move it" or "Cut it" under Advanced placement.' }))

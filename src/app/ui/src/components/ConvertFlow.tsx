@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { send, type ConvertRequest, type Doc, type Target } from '../bridge'
 import { basename, dirname, formatMeta, issueTotal } from '../formats'
-import { dur, EASE_EMPHASIS, EASE_IN, gsap, SmoothScroll, useGSAP } from '../motion'
-import { setConvert, setState, useStore, type ConvertState } from '../store'
+import { dur, gsap, useGSAP } from '../motion'
+import { setConvert, useStore, type ConvertState } from '../store'
 import { Icon } from './Icon'
 import { ReportList } from './Inspector'
 
@@ -78,10 +78,10 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
     ['Java Edition', targets.filter((t) => t.edition === 'java')],
   ]
   return (
-    <div className="drawer-step">
-      <section className="drawer-section">
+    <div className="flow-step">
+      <section className="flow-section">
         <h3 className="section-title">
-          <span className="step-num">1</span> Choose a format
+          <span className="step-num">01</span> Format
         </h3>
         {groups.map(([label, list]) =>
           list.length === 0 ? null : (
@@ -102,9 +102,9 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
         )}
       </section>
 
-      <section className="drawer-section">
+      <section className="flow-section">
         <h3 className="section-title">
-          <span className="step-num">2</span> Options
+          <span className="step-num">02</span> Options
         </h3>
         <label className="field">
           <span className="field-label">{target === 'mcworld' || target === 'java-world' ? 'World name' : 'Name'}</span>
@@ -183,9 +183,9 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
         )}
       </section>
 
-      <section className="drawer-section">
+      <section className="flow-section">
         <h3 className="section-title">
-          <span className="step-num">3</span> Save as
+          <span className="step-num">03</span> Save as
         </h3>
         <button className={`save-target ${convert.output ? 'has-path' : ''}`} onClick={() => target && send({ type: 'pick_output', format: target })} disabled={!target}>
           <Icon name={target === 'java-world' ? 'folder' : 'file'} />
@@ -205,13 +205,13 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
         {convert.error && convert.phase === 'setup' && !convert.cancelled && <p className="field-error">{convert.error}</p>}
       </section>
 
-      <div className="drawer-footer">
+      <div className="flow-footer">
         <p className="safety">
           <Icon name="check" size={14} />
           Your original is never changed. The new file is checked before it is saved.
         </p>
         <button className="btn btn-primary btn-lg btn-block" onClick={start} disabled={!ready}>
-          Convert
+          Convert{meta ? ` to ${meta.short === 'folder' ? 'a Java world' : meta.short}` : ''}
           <Icon name="arrow" />
         </button>
       </div>
@@ -227,13 +227,13 @@ function Running({ convert }: { convert: ConvertState }) {
     gsap.to(ring.current, { strokeDashoffset: C * (1 - Math.max(0.02, convert.fraction)), duration: dur(0.5), ease: 'power2.out', overwrite: true })
   }, [convert.fraction, C])
   return (
-    <div className="drawer-step running" aria-live="polite">
+    <div className="flow-step running" aria-live="polite">
       <div className="ring">
         <svg viewBox="0 0 120 120" width="168" height="168" aria-hidden>
           <defs>
             <linearGradient id="ringg" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0" stopColor="oklch(80% 0.14 70)" />
-              <stop offset="1" stopColor="oklch(78% 0.11 182)" />
+              <stop offset="0" stopColor="#6cf0c6" />
+              <stop offset="1" stopColor="#2457ff" />
             </linearGradient>
           </defs>
           <circle cx="60" cy="60" r="52" className="ring-track" />
@@ -244,7 +244,7 @@ function Running({ convert }: { convert: ConvertState }) {
         </div>
       </div>
       <div className="running-step">{convert.step || 'Working'}…</div>
-      <p className="muted small">You can keep looking around while this runs.</p>
+      <p className="muted small">You can open the 3D preview while this runs.</p>
       <button className="btn btn-secondary" onClick={() => send({ type: 'cancel_convert' })}>
         <Icon name="stop" size={16} />
         Cancel
@@ -269,7 +269,7 @@ function Done({ convert, doc }: { convert: ConvertState; doc: Doc }) {
   const issues = issueTotal(s.report)
   const meta = formatMeta(s.output_format)
   return (
-    <div className="drawer-step done" ref={root}>
+    <div className="flow-step done" ref={root}>
       <div className="done-badge">
         <svg className="done-check" viewBox="0 0 24 24" width="30" height="30" aria-hidden>
           <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="40" />
@@ -339,7 +339,7 @@ function Done({ convert, doc }: { convert: ConvertState; doc: Doc }) {
 
 function Failed({ convert }: { convert: ConvertState }) {
   return (
-    <div className="drawer-step failed">
+    <div className="flow-step failed">
       <div className="failed-badge">
         <Icon name="alert" size={26} />
       </div>
@@ -353,51 +353,24 @@ function Failed({ convert }: { convert: ConvertState }) {
   )
 }
 
-export function ConvertDrawer() {
+// The conversion flow, inline on the file page: setup -> running -> done / failed.
+export function ConvertFlow() {
   const convert = useStore((s) => s.convert)
   const doc = useStore((s) => s.doc)
   const root = useRef<HTMLDivElement>(null)
-  const [mounted, setMounted] = useState(convert.open)
-
-  // Enter: slide in with an emphasized ease. Exit: faster ease-in, then unmount.
-  useEffect(() => {
-    if (convert.open) setMounted(true)
-    else if (mounted && root.current)
-      gsap.to(root.current, { xPercent: 104, autoAlpha: 0, duration: dur(0.2), ease: EASE_IN, onComplete: () => setMounted(false) })
-  }, [convert.open, mounted])
   useGSAP(
     () => {
-      if (mounted && convert.open && root.current) gsap.fromTo(root.current, { xPercent: 104, autoAlpha: 0 }, { xPercent: 0, autoAlpha: 1, duration: dur(0.45), ease: EASE_EMPHASIS })
+      if (root.current) gsap.fromTo(root.current.querySelector('.flow-step'), { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: dur(0.3) })
     },
-    { dependencies: [mounted] },
+    { dependencies: [convert.phase, doc?.path], scope: root },
   )
-  // Phase changes cross-fade.
-  useGSAP(
-    () => {
-      if (root.current) gsap.fromTo(root.current.querySelector('.drawer-step'), { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: dur(0.25) })
-    },
-    { dependencies: [convert.phase, mounted] },
-  )
-
-  if (!mounted || !doc) return null
-  const close = () => setState((s) => ({ convert: { ...s.convert, open: false } }))
+  if (!doc) return null
   return (
-    <aside className="drawer" ref={root} role="dialog" aria-label="Convert" aria-modal={false}>
-      <header className="drawer-header">
-        <div>
-          <div className="overline">Convert</div>
-          <h2 className="drawer-title">{doc.name}</h2>
-        </div>
-        <button className="icon-btn" onClick={close} aria-label={convert.phase === 'running' ? 'Hide (keeps converting)' : 'Close'}>
-          <Icon name="close" />
-        </button>
-      </header>
-      <SmoothScroll className="drawer-scroll">
-        {convert.phase === 'setup' && <Setup doc={doc} convert={convert} />}
-        {convert.phase === 'running' && <Running convert={convert} />}
-        {convert.phase === 'done' && <Done convert={convert} doc={doc} />}
-        {convert.phase === 'failed' && <Failed convert={convert} />}
-      </SmoothScroll>
-    </aside>
+    <div className="flow" ref={root}>
+      {convert.phase === 'setup' && <Setup key={doc.path} doc={doc} convert={convert} />}
+      {convert.phase === 'running' && <Running convert={convert} />}
+      {convert.phase === 'done' && <Done convert={convert} doc={doc} />}
+      {convert.phase === 'failed' && <Failed convert={convert} />}
+    </div>
   )
 }
