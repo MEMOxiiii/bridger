@@ -82,7 +82,8 @@ public:
     [[nodiscard]] Status write(std::span<const u8> bytes);
 
     // Flush, validate, move into place, validate the destination, drop the backup.
-    // On failure the returned error describes where every file is.
+    // On failure the returned error describes where every file is. A validator returning
+    // ErrorCode::Cancelled discards the temp file and yields Cancelled (the destination is untouched).
     [[nodiscard]] Status commit(const FileValidator& validate);
 
     [[nodiscard]] const std::filesystem::path& destination() const noexcept { return destination_; }

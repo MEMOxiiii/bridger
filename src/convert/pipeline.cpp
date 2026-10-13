@@ -60,6 +60,20 @@ private:
     fs::path path_;
 };
 
+// The last cancellation point: checked after the output was validated, immediately before it is
+// moved into place. The move is the point of no return; a cancel after it no longer applies.
+Status cancel_point(const ConvertOptions& o) {
+    if (o.cancel != nullptr && o.cancel->load(std::memory_order_relaxed)) return make_error(ErrorCode::Cancelled, "the conversion was cancelled");
+    return {};
+}
+
+platform::FileValidator then_cancel_point(const ConvertOptions& o, platform::FileValidator validate) {
+    return [&o, validate = std::move(validate)](const fs::path& p) -> Status {
+        BRIDGER_TRY_STATUS(validate(p));
+        return cancel_point(o);
+    };
+}
+
 // Progress report + cancellation point.
 Status step(const ConvertOptions& o, float fraction, std::string_view what) {
     if (o.cancel != nullptr && o.cancel->load(std::memory_order_relaxed)) return make_error(ErrorCode::Cancelled, "the conversion was cancelled");
@@ -322,7 +336,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
             return make_error(ErrorCode::ValidationFailed, "the zipped world does not list every world file");
         return {};
     };
-    BRIDGER_TRY_STATUS(writer.commit(validate));
+    BRIDGER_TRY_STATUS(writer.commit(then_cancel_point(o, validate)));
     phase("moved into place");
     return summary;
 }
@@ -397,8 +411,9 @@ Result<ConvertSummary> write_java_structure_output(const ConvertOptions& o, Conv
     }
     if (!bytes) return tl::unexpected(std::move(bytes).error());
     const FormatId format = summary.output_format;
+    BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
     BRIDGER_TRY_STATUS(platform::write_file_atomically(
-        o.output, *bytes, [&](const fs::path& written) { return validate_java_structure(written, format, java); }));
+        o.output, *bytes, then_cancel_point(o, [&](const fs::path& written) { return validate_java_structure(written, format, java); })));
     summary.block_entities = java.block_entities.size();
     return summary;
 }
@@ -420,7 +435,8 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
                 return make_error(ErrorCode::ValidationFailed, "re-read .mcstructure differs from what was written");
             return {};
         };
-        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, bytes, validate));
+        BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
+        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, bytes, then_cancel_point(o, validate)));
         summary.block_entities = bedrock.block_entities.size();
         return summary;
     }
@@ -449,7 +465,8 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
             BRIDGER_TRY(const ScratchDir check, ScratchDir::create("check"));
             return formats::bedrock::validate_placed_world(f.data(), world.data(), stats.touched_keys, check.path());
         };
-        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, out, validate));
+        BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
+        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, out, then_cancel_point(o, validate)));
         return summary;
     }
 
@@ -493,7 +510,8 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
                                           written.block_entities, written.chunks));
         return {};
     };
-    BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, mcworld, validate));
+    BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
+    BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, mcworld, then_cancel_point(o, validate)));
     return summary;
 }
 
@@ -660,7 +678,9 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
         if (reread != chunks)
             return make_error(ErrorCode::ValidationFailed, std::format("re-read {} chunks, expected {}", reread, chunks));
     }
-    // Move into place: a rename of the folder (never replaces anything; checked again by the OS).
+    // Last cancellation point, then the move into place: a rename of the folder (never replaces
+    // anything; checked again by the OS). A cancelled build is removed with its temp folder.
+    BRIDGER_TRY_STATUS(cancel_point(o));
     if (auto moved = platform::os_file_ops().move_new(temp, o.output); !moved) {
         tree.keep = true;
         return make_error(ErrorCode::IoError, "the converted world is complete at " + platform::path_to_utf8(temp).value_or("?") +
@@ -847,7 +867,10 @@ std::string summary_to_json(const ConvertSummary& s, const ConvertOptions& o) {
     j += std::format("  \"output\": \"{}\",\n", json_escape(platform::path_to_utf8(o.output).value_or("")));
     j += std::format("  \"input_format\": \"{}\",\n  \"output_format\": \"{}\",\n", formats::info(s.input_format).name,
                      formats::info(s.output_format).name);
-    j += std::format("  \"exact\": {},\n", s.report.exact() ? "true" : "false");
+    // "exact" means nothing was lost: no report entry and no warning (warnings describe data that was
+    // not converted, e.g. skipped chunks or dimensions). "blocks_exact" covers the report alone.
+    j += std::format("  \"exact\": {},\n", s.report.exact() && s.warnings.empty() ? "true" : "false");
+    j += std::format("  \"blocks_exact\": {},\n", s.report.exact() ? "true" : "false");
     j += std::format("  \"blocks\": {},\n  \"chunks\": {},\n  \"subchunks\": {},\n  \"block_entities\": {},\n", s.blocks,
                      s.chunks, s.subchunks, s.block_entities);
     if (s.placement)

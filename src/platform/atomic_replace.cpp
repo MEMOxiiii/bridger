@@ -97,6 +97,9 @@ Status AtomicFileWriter::commit(const FileValidator& validate) {
     //    not user data, so it is removed.
     if (auto s = validate(temp_); !s) {
         (void)ops_->remove(temp_);
+        // A cancellation checked by the validator (the last moment before the move) is not a failure.
+        if (s.error().code() == ErrorCode::Cancelled)
+            return make_error(ErrorCode::Cancelled, s.error().message() + "; the output was discarded and the destination was not touched");
         return make_error(ErrorCode::ValidationFailed,
                           "the written output failed validation (" + s.error().describe() +
                               "); it was discarded and the destination was not touched");
