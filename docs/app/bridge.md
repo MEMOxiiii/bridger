@@ -32,7 +32,7 @@ Unknown types and malformed messages are ignored on both sides.
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `hello` | `version`, `gpu`, `assets`, `settings` | Answer to `ready`. |
+| `hello` | `version`, `gpu`, `assets`, `settings` | Answer to `ready`. `assets.viewer` is false when the computer has no usable GPU for the 3D preview (`assets.viewer_error` says why); opening and converting still work and `preview` is ignored. `BRIDGER_NO_VIEWER=1` simulates it. |
 | `settings` | `settings`, `assets` | Settings or assets changed. |
 | `loading` | `name`, `step`, `fraction` | Opening progress. |
 | `opened` | `doc`, `settings` | A document is open; the UI shows its file page. `doc`: `kind` (`structure`/`world`), `path`, `name`, `format`, `edition`, `size`, `blocks`, `block_entities`, `entities`, `data_version`, `chunks`, `spawn`, `seed`, `warnings`, `report`, `targets`. |

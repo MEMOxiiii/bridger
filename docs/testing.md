@@ -166,6 +166,18 @@ Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3
 3. Check every item in the structure's checklist; take a screenshot of each structure.
 4. Record the run below.
 
+### Desktop app verification (0.4.x)
+
+Driven with simulated mouse and keyboard input on Machine A (Windows 11, RTX 4060 Laptop, 1440 x 900 at 125 %),
+`msvc-release` / `msvc-debug` builds, screenshots in the session's scratch folder; items refer to the Phase 7–8
+app checklist above.
+
+| Date | Commit | Items | Result | Notes |
+|---|---|---|---|---|
+| 2026-10-13 | `abd1860` (0.4.0 candidate, drawer UI) | 2, 3, 4, 5, 6, 7, 8 | **passed** | `.schem` → `.mcworld` through the UI with the Save dialog (file written, report shown); Cancel during a 7649-chunk world conversion left no output; fly mode with WASD/Esc (scancodes); map and slice on a real Java world; Bedrock `.mcworld` streamed; orbit/pan/zoom |
+| 2026-10-13 | `e970a88` (file page UI) | 1 (part) | **passed** | in the app: splash → home, and a file opens on its file page without starting the 3D view. Preview entry and Back to convert were checked in the browser build only (the app run was disturbed by a second instance) |
+| — | — | 9, 10, 11, 12, 13 and drag-and-drop | **open** | place-into-world hash check, report highlight on a file with issues, missing textures, reduced motion, multi-monitor DPI: to be run by the maintainer |
+
 ### Run log
 
 | Date | Bridger commit | Game + version | Structures | Result | Notes |

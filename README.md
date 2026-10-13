@@ -37,8 +37,8 @@ badly: **taking a Java schematic and getting a working Bedrock world** (`.schem`
 Get `bridger-<version>-windows-x64.zip` from the [latest release](https://github.com/MEMOxiiii/bridger/releases/latest)
 and unzip it anywhere. No installer; the Visual C++ runtime is included.
 
-- **`bridger-gui.exe`** — the desktop app. Needs a GPU with Vulkan 1.3 and the Microsoft Edge WebView2 Runtime
-  (part of Windows 11 and current Windows 10).
+- **`bridger-gui.exe`** — the desktop app. Needs the Microsoft Edge WebView2 Runtime (part of Windows 11 and current
+  Windows 10). The 3D preview needs a GPU with Vulkan 1.3; without one the app still opens and converts files.
 - **`bridger.exe`** — the command line, for scripts and batch jobs.
 
 ## Desktop app

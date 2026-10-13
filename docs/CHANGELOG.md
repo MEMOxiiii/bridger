@@ -3,6 +3,28 @@
 All notable changes to Bridger. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow the release plan in `docs/release.md`.
 
+## [Unreleased] - 0.4.1
+
+### Fixed
+
+- `--report` can no longer overwrite the input, the output, a file inside an output world folder or the world given
+  to `--into-world`; the path is checked before converting, and an existing report is replaced only with
+  `--overwrite`.
+- The report's `"exact"` is `true` only when nothing at all was lost: warnings (skipped dimensions, entities,
+  partially generated chunks) now count. The new `"blocks_exact"` keeps the blocks-only answer. The desktop app
+  and the CLI summary say the same.
+- Cancelling is checked one last time after the output is validated and right before it is moved into place, on
+  every output path (files and Java world folders). A cancelled conversion never leaves output behind; the move
+  itself is the point of no return (`docs/safety.md`).
+- Water and lava in the 3D preview: the surface is continuous and slopes like the game's (corner heights averaged
+  from the neighbouring blocks), without holes between different levels, and stacked water faces no longer
+  darken each other.
+
+### Changed
+
+- The desktop app works without a Vulkan 1.3 GPU: opening and converting files work, and the 3D preview says it is
+  unavailable instead of the app refusing to start.
+
 ## [0.4.0] - 2026-10-14
 
 ### Added

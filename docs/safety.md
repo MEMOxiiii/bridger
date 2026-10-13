@@ -51,6 +51,18 @@ folders are only read.
 5. The backup is removed only after the final destination passes validation.
 6. If automatic recovery fails, Bridger stops and prints exactly which file is where: temp, backup, destination.
 
+**Cancelling** (the desktop app's Cancel, `ConvertOptions::cancel`): the request is checked between steps and
+chunk batches, and **one last time after the output was validated, immediately before step 4** (inside the
+validator for files; just before the folder rename for Java worlds). A cancel up to that moment discards the temp
+file or temp folder and leaves the destination untouched; the conversion ends with `ErrorCode::Cancelled`. The
+move in step 4 is the point of no return: a cancel that arrives during or after it has no effect, and the
+conversion reports success with the finished file. Tests: `tests/unit/convert/cancel_test.cpp` (every output
+kind, cancelled during the last step).
+
+**The report file** (`--report`) is written the same way, and Bridger refuses, before converting, a report path
+that is the input, the output, a path inside an output world folder, or the world given to `--into-world`. An
+existing report file is replaced only with `--overwrite`.
+
 ## 3. Limits of these guarantees
 
 What the OS does and does not promise:
@@ -73,7 +85,9 @@ What the OS does and does not promise:
 Every block, block entity, entity or biome that cannot be translated exactly is counted in the
 `ConversionReport`. That covers the source state, the count, and example positions. A configurable fallback is
 written in its place (`--fallback air|marker`). The conversion ends with a report, and `--report report.json`
-writes it to a file. Placement removals (overwritten block entities, `--clear-entities`, `--clip`) are reported
+writes it to a file. Data that is skipped as a whole (other dimensions, entities, partially generated chunks)
+is listed as warnings; the report's `"exact": true` means **no report entry and no warning**, and
+`"blocks_exact"` tells whether the blocks alone were exact. The desktop app follows the same rule. Placement removals (overwritten block entities, `--clear-entities`, `--clip`) are reported
 the same way.
 
 ## 5. Placement policy (writing a structure into a world)
