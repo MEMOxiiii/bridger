@@ -17,7 +17,7 @@ decided in the build specification (§3, §10).
   Implemented in Phase 1.
 - Core libraries: **libdeflate** (whole-buffer, faster than zlib), **minizip-ng**, **oneTBB**, **tl-expected**,
   **xxHash**, **spdlog**, **CLI11**; tests and benchmarks with **Catch2 v3**, **Google Benchmark**, **libFuzzer**;
-  profiling with **Tracy**. Versions and licenses are in `THIRD_PARTY.md`.
+  profiling with **Tracy**. Versions and licenses are in `docs/THIRD_PARTY.md`.
 - spdlog stays behind `bridger::log` (`core/log.hpp`). Logs go to **stderr**, so the CLI can print
   machine-readable output on stdout.
 - **License: MPL-2.0** (the specification's default). File-level copyleft lets Bridger be used with
@@ -27,4 +27,4 @@ decided in the build specification (§3, §10).
 ## Consequences
 
 - We own NBT correctness, which is why Phase 1 requires byte-exact round-trips, fuzzing and a parse benchmark.
-- No dependency may be added without a justification and a `THIRD_PARTY.md` entry.
+- No dependency may be added without a justification and a `docs/THIRD_PARTY.md` entry.

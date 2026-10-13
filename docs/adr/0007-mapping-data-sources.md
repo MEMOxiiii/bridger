@@ -44,4 +44,4 @@ Java states are stored explicitly (one value index per property per state), not 
 - CI does not run mapgen (it needs Mojang's jar); it tests the committed blob.
 - Updating to a new version follows "How to update mapping data" in `AGENTS.md`.
 - The blob contains block, item and biome names, which are facts about the game, as GeyserMC's published files do.
-  No Mojang code or assets are included (`THIRD_PARTY.md`).
+  No Mojang code or assets are included (`docs/THIRD_PARTY.md`).

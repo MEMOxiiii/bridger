@@ -81,7 +81,8 @@ src/app/        bridger-gui.exe — main.cpp, app.{hpp,cpp}, viewer, settings, u
 tools/spike/    Phase 0.5 Bedrock world experiment      tools/mapgen/  mapping data -> .brmap
 tests/          unit/<module>/*_test.cpp, golden/, roundtrip/, integration/ (env-var paths), data/
 fuzz/           fuzz_<target>.cpp (libFuzzer)           bench/  bench_<area>.cpp (Google Benchmark)
-docs/           formats/, adr/, versions.md, safety.md, performance.md, testing.md, release.md
+docs/           README.md (index), formats/, adr/, app/, assets/, mappings/, versions.md, safety.md, performance.md,
+                testing.md, release.md, CHANGELOG.md, CONTRIBUTING.md, THIRD_PARTY.md
 ```
 
 The full planned file tree (every header per module) comes from the original build specification. These
@@ -114,7 +115,8 @@ additions to it are recorded here as required:
 - `fuzz/fuzz_java_structure.cpp` (structure `.nbt`, `.litematic`, legacy `.schematic`), `fuzz/fuzz_mcstructure.cpp`,
   `fuzz/fuzz_anvil_chunk.cpp`; `bench/bench_anvil.cpp` (chunks, Bedrock world reading), `bench/bench_structures.cpp`
   (structure formats). `.github/workflows/release.yml`: builds the portable zip and the GitHub release for a `v*` tag.
-- `CHANGELOG.md` at the root.
+- `docs/CHANGELOG.md`, `docs/CONTRIBUTING.md`, `docs/THIRD_PARTY.md` (only `README.md`, `AGENTS.md` and `CLAUDE.md`
+  stay at the root, with the build and tool configuration files); `docs/README.md` indexes the docs.
 - Phase 7 (`render`): `assets.hpp` (resource packs), `block_models.hpp` (baking), `mesher.hpp`, `renderer.hpp`,
   `scene.hpp` (structure meshing + framing), `streaming.hpp` (world streaming), `image_io.hpp` (PNG); internal
   `entity_models.*`, `external_image.hpp` + `win32/external_image_win32.cpp` (+ `posix/` stub), `vma_impl.cpp`,
@@ -213,13 +215,13 @@ time (Phase 9).
 8. Benchmark in `bench/` and record the baseline in `docs/performance.md`.
 9. Writers: re-read validation, an independent-implementation check where possible, and the **in-game
    checklist** run recorded in `docs/testing.md`.
-10. Status → Supported only after steps 1–9. Update the README support matrix and `CHANGELOG`.
+10. Status → Supported only after steps 1–9. Update the README support matrix and `docs/CHANGELOG.md`.
 
 ## How to update mapping data for a new Minecraft version
 
 1. Add the version to `docs/versions.md` with its release date and data version / protocol numbers.
 2. Update the mapping source submodules in `tools/mapgen/sources/` (GeyserMC/mappings branch for the version
-   pair), after checking that their licenses are unchanged (`THIRD_PARTY.md`). Update the pinned URLs and hashes in
+   pair), after checking that their licenses are unchanged (`docs/THIRD_PARTY.md`). Update the pinned URLs and hashes in
    `tools/mapgen/fetch_sources.py` (Mojang server jar from the launcher manifest; Bedrock palette from Geyser).
 3. `python tools/mapgen/fetch_sources.py`, then build `bridger_mapgen` and run it:
    `bridger_mapgen --java-blocks tools/mapgen/sources/cache/java-<v>-generated/reports/blocks.json
@@ -238,7 +240,7 @@ time (Phase 9).
 - Benchmarks touching the changed code have not regressed (compare against `docs/performance.md`).
 - Docs are updated: `docs/formats/`, an ADR for design decisions, README support matrix, and this file if
   commands or layout changed.
-- No new dependency without a one-line justification and a `THIRD_PARTY.md` entry.
+- No new dependency without a one-line justification and a `docs/THIRD_PARTY.md` entry.
 - Commits are small and focused, with clear messages.
 
 ## When to decide vs. when to ask

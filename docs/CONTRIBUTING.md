@@ -1,12 +1,12 @@
 # Contributing to Bridger
 
-Thanks for your interest! Please read [AGENTS.md](AGENTS.md) first. It has the build commands, architecture,
+Thanks for your interest! Please read [AGENTS.md](../AGENTS.md) first. It has the build commands, architecture,
 coding standards, and the safety and performance rules every change must follow.
 
 ## Ground rules
 
 - **Data safety first.** Never modify input files. Write output via temp file → validate → atomic replace. Never
-  drop data silently. See [docs/safety.md](docs/safety.md).
+  drop data silently. See [docs/safety.md](safety.md).
 - **Cite format details.** Every binary format detail needs a source in `docs/formats/`. If the sources are
   unclear, verify in the game. Never guess.
 - **Measure performance claims.** Optimizations come with before/after benchmark numbers.
@@ -31,4 +31,4 @@ coding standards, and the safety and performance rules every change must follow.
 Include the Bridger version (`bridger --version`), the exact command, the conversion report if one was produced,
 and, if you can share it, a small input file that reproduces the problem.
 
-By contributing, you agree that your contributions are licensed under the [MPL-2.0](LICENSE).
+By contributing, you agree that your contributions are licensed under the [MPL-2.0](../LICENSE).

@@ -1,7 +1,7 @@
 name: Release
 
 # Builds the portable zip for a version tag (docs/release.md, steps 8-9) and publishes the
-# GitHub release with the matching CHANGELOG.md section.
+# GitHub release with the matching docs/CHANGELOG.md section.
 
 on:
   push:
@@ -101,9 +101,9 @@ jobs:
           # redistributable files); the Universal CRT is part of Windows 10 and later.
           $crt = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
           foreach ($dll in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") { Copy-Item (Join-Path $crt.FullName $dll) $dir }
-          Copy-Item README.md, CHANGELOG.md, THIRD_PARTY.md $dir
+          Copy-Item README.md, docs/CHANGELOG.md, docs/THIRD_PARTY.md $dir
           Copy-Item LICENSE "$dir/licenses/bridger-MPL-2.0.txt"
-          # Shipped libraries (THIRD_PARTY.md, "Shipped: yes"): their vcpkg copyright files.
+          # Shipped libraries (docs/THIRD_PARTY.md, "Shipped: yes"): their vcpkg copyright files.
           $share = "build/vcpkg_installed/x64-windows-static-md/share"
           foreach ($port in "libdeflate", "minizip-ng", "zlib", "tbb", "tl-expected", "xxhash", "spdlog", "fmt", "cli11",
                             "glm", "volk", "vk-bootstrap", "vulkan-memory-allocator", "stb", "nlohmann-json", "sdl3", "webview2", "wil") {
@@ -112,7 +112,7 @@ jobs:
             Copy-Item $src "$dir/licenses/$port.txt"
           }
           Copy-Item third_party/leveldb-mcpe/LICENSE "$dir/licenses/leveldb-mcpe.txt"
-          # The app's embedded web interface (THIRD_PARTY.md, "Web user interface").
+          # The app's embedded web interface (docs/THIRD_PARTY.md, "Web user interface").
           $npm = "src/app/ui/node_modules"
           foreach ($pkg in "react", "react-dom", "scheduler", "lenis", "@fontsource-variable/inter", "@fontsource/jetbrains-mono") {
             $src = Join-Path $npm "$pkg/LICENSE"
@@ -142,13 +142,13 @@ jobs:
           Compress-Archive -Path $dir -DestinationPath "dist/$name.zip"
           "ZIP=dist/$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Release notes from CHANGELOG.md
+      - name: Release notes from docs/CHANGELOG.md
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
-          $lines = Get-Content -Encoding utf8 CHANGELOG.md
+          $lines = Get-Content -Encoding utf8 docs/CHANGELOG.md
           $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]").LineNumber
-          if (-not $start) { throw "CHANGELOG.md has no section for $version" }
+          if (-not $start) { throw "docs/CHANGELOG.md has no section for $version" }
           $rest = $lines[$start..($lines.Count - 1)]
           $end = ($rest | Select-String -Pattern '^## \[' | Select-Object -First 1).LineNumber
           $section = if ($end) { $rest[0..($end - 2)] } else { $rest }

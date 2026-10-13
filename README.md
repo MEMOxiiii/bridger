@@ -2,108 +2,76 @@
   <img src="docs/assets/bridger-logo.png" alt="Bridger" width="520">
 </p>
 
-<p align="center">High-performance Java ⇄ Bedrock converter for Minecraft schematics, structures and worlds, with a 3D viewer.</p>
+<p align="center">
+  <b>Convert Minecraft builds between Java and Bedrock — and look at them in 3D first.</b><br>
+  Schematics, structures and whole worlds. Native, fast, and it never loses data silently.
+</p>
+
+<p align="center">
+  <a href="https://github.com/MEMOxiiii/bridger/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/MEMOxiiii/bridger"></a>
+  <a href="https://github.com/MEMOxiiii/bridger/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/MEMOxiiii/bridger/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20x64-2457ff">
+  <img alt="Minecraft" src="https://img.shields.io/badge/Java%2026.3%20%E2%87%84%20Bedrock%2026.52-6cf0c6">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MPL--2.0-lightgrey"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/file.png" alt="Bridger's file page: the opened schematic on the left, the conversion options on the right" width="860">
+</p>
+
+## Why Bridger
 
 Moving builds between Minecraft Java Edition and Bedrock Edition is painful. Existing tools are slow on large
-inputs, lose data silently (block orientations, waterlogging, chest contents), and handle the most common
-request badly: **taking a Java schematic and getting a working Bedrock world** (`.schem` → `.mcworld`). Bridger
-is a native Windows tool written in C++20. It aims to be faster and more reliable, and every claim is backed by
-tests, benchmarks and in-game checks. It never modifies your input files, and it reports anything it could not
-convert exactly.
+inputs, lose data silently (block orientations, waterlogging, chest contents), and handle the most common request
+badly: **taking a Java schematic and getting a working Bedrock world** (`.schem` → `.mcworld`).
 
-> **Status: 0.4.0.** `bridger convert` works in both directions: Java schematics (`.schem`, `.litematic`,
-> structure `.nbt`, legacy `.schematic`) and whole Java worlds become Bedrock worlds (`.mcworld`) or `.mcstructure`
-> files, a structure can be placed into a copy of an existing Bedrock world, and `.mcstructure` files and Bedrock
-> worlds become Java schematics and Java worlds. Every format passed the automated tests, fuzzing, the independent
-> checks and the in-game checklist in Java 26.3 and Bedrock 26.52. 0.4.0 adds the desktop app
-> `bridger-gui.exe` (convert without the command line, with an optional 3D preview) and `bridger render`.
+- **Both directions.** Java schematics and worlds to Bedrock, and Bedrock structures and worlds back to Java.
+- **Nothing lost silently.** Anything that cannot be converted exactly is counted in a report, and the desktop app
+  shows you where it is in 3D.
+- **Your files are safe.** Inputs are never modified; outputs are validated before they replace anything.
+- **Fast, and measured.** Native C++20; every speed claim has a benchmark behind it
+  ([docs/performance.md](docs/performance.md)).
 
-## Format support
+## Download
 
-| Format | Edition | Read | Write |
-|---|---|---|---|
-| `.schem` (Sponge v1–v3; writes v3) | Java | supported | supported |
-| `.schematic` (MCEdit legacy) | Java | supported | — |
-| `.litematic` | Java | supported | supported |
-| Structure `.nbt` | Java | supported | supported |
-| Java world (Anvil, 1.18+ layout, Overworld) | Java | supported | supported |
-| `.mcstructure` | Bedrock | supported | supported |
-| `.mcworld` (new world; reading: Overworld) | Bedrock | supported | supported |
-| `.mcworld` (place into existing world → new output) | Bedrock | — | supported |
+Get `bridger-<version>-windows-x64.zip` from the [latest release](https://github.com/MEMOxiiii/bridger/releases/latest)
+and unzip it anywhere. No installer; the Visual C++ runtime is included.
 
-"Supported" means: golden tests, a fuzz target, a benchmark, and a recorded in-game check all pass. Run
-`bridger formats` to see what your build supports.
+- **`bridger-gui.exe`** — the desktop app. Needs a GPU with Vulkan 1.3 and the Microsoft Edge WebView2 Runtime
+  (part of Windows 11 and current Windows 10).
+- **`bridger.exe`** — the command line, for scripts and batch jobs.
 
-**Game versions:** v1 targets exactly **Java Edition 26.3** and **Bedrock Edition 26.52**
-([docs/versions.md](docs/versions.md)).
+## Desktop app
 
-## Screenshots
+<p align="center">
+  <img src="docs/assets/screenshots/home.png" alt="Home screen" width="420">
+  <img src="docs/assets/screenshots/done.png" alt="A finished conversion with its report" width="420">
+</p>
 
-_Coming with the 3D viewer (0.4.0)._
+1. **Open** — drop a file or world anywhere on the window, or choose one.
+2. **Check** — the file page shows what is in it and anything that could not be read exactly.
+3. **Preview (optional)** — open the 3D view: orbit, pan, zoom; **fly** like a player (double-click or F, then
+   WASD, Space/Shift, Ctrl to sprint, Esc to stop); a top-down **map** (M); a **slice** to look inside. Worlds
+   stream in around you. **Back to convert** returns to the same file.
+4. **Convert** — pick the format, a name, where to put it (a new world, or a copy of one of your worlds at a
+   position) and where to save. Progress can be cancelled; nothing is written then. The report links every
+   approximation to its blocks in 3D.
 
-## Installation
+The 3D preview uses the textures of your own Minecraft Java 26.3 installation
+(`%APPDATA%/.minecraft/versions/26.3/26.3.jar`, or a client jar you choose in Settings) plus any resource packs you
+add. Converting works without them.
 
-Download `bridger-<version>-windows-x64.zip` from the [releases page](https://github.com/MEMOxiiii/bridger/releases)
-and unzip it anywhere. Double-click `bridger-gui.exe` for the desktop app, or run `bridger.exe` from a terminal.
-No installer; the Visual C++ runtime DLLs are included. The app needs a GPU with Vulkan 1.3 and the Microsoft
-Edge WebView2 Runtime (part of Windows 11 and current Windows 10).
-
-### Building from source (Windows x64)
-
-Requirements:
-- Visual Studio 2022 17.10+ with "Desktop development with C++". The optional component "C++ Clang Compiler
-  for Windows" is needed for the clang-cl presets.
-- CMake ≥ 3.28 and Ninja (both ship with Visual Studio).
-- [vcpkg](https://github.com/microsoft/vcpkg), checked out at tag `2026.07.29`, with `VCPKG_ROOT` set.
-- [Node.js](https://nodejs.org) 22 or newer (npm builds the desktop app's interface).
-
-```bat
-git clone --recursive https://github.com/MEMOxiiii/bridger.git
-cd bridger
-:: from an "x64 Native Tools Command Prompt for VS 2022".
-:: Set VCPKG_ROOT *here*: the prompt points it at Visual Studio's bundled vcpkg, which is too old.
-set VCPKG_ROOT=%USERPROFILE%\vcpkg
-cmake --preset msvc-release
-cmake --build --preset msvc-release
-ctest --preset msvc-release
-```
-
-The first configure builds all dependencies with vcpkg, which takes a while. Presets: `msvc-debug`,
-`msvc-release`, `msvc-asan`, `clangcl-release`, `clangcl-fuzz`.
-
-## Usage
-
-### Desktop app
-
-`bridger-gui.exe` takes a file or world you drop on its window (or pass on the command line) and shows its file
-page: what is in it, what could not be read exactly, and the conversion options. The 3D preview, drawn with your
-own Minecraft Java textures, is one click away, and **Back to convert** returns to the same file:
-
-- **View:** orbit, pan and zoom; **fly** through it like a player (double-click or F, then WASD, Space/Shift,
-  Ctrl to sprint, Esc to stop); a top-down **map** (M); a **slice** to look inside; worlds stream around the
-  camera.
-- **Convert:** choose the format (Bedrock or Java), a name, where to put it (a new world, or a copy of one of
-  your worlds at a position), and where to save it. Progress can be cancelled; nothing is written then.
-- **Report:** everything that was not converted exactly, grouped and counted. Clicking an entry outlines those
-  blocks in the 3D view and flies the camera there.
-
-The textures come from `%APPDATA%/.minecraft/versions/26.3/26.3.jar` (install that version once with the
-launcher) or a client jar you choose in Settings, plus any resource packs you add. Converting works without them.
-
-### Command line
+## Command line
 
 ```text
-bridger --version
-bridger formats                                   # list formats and their support status
+bridger formats                                   # formats and their support status
 bridger info <file or world folder>               # describe any supported structure file or world
-bridger convert <input> <output> [options]        # any supported pair; see "bridger formats"
-bridger render <file or world> out.png [--size WxH --map --slice Y --pack p.zip]   # screenshot of the 3D view
-    --target-version X   --fallback air|marker   --report report.json   --format <name>
-    --into-world <existing.mcworld>   --place-at x,y,z   --air keep|replace
-    --clear-entities   --clip | --shift-to-fit   --threads N   --overwrite
+bridger convert <input> <output> [options]        # any supported pair
+    --report report.json   --fallback air|marker   --format <name>   --threads N   --overwrite
+    --into-world <existing.mcworld>   --place-at x,y,z   --air keep|replace   --clear-entities
+    --clip | --shift-to-fit
+bridger render <file or world> out.png [--size WxH --map --slice Y --pack p.zip]   # 3D screenshot
 ```
-
-Example:
 
 ```text
 bridger convert castle.schem castle.mcworld --report castle-report.json
@@ -114,57 +82,81 @@ bridger convert house.mcstructure house.schem
 bridger convert my-bedrock-world.mcworld "C:\saves\Converted World"     # no extension: a Java world folder
 ```
 
-A structure converted to a new world is placed on a superflat world, centered on x = 0, z = 0, and the world
-opens in creative mode. A Java world keeps its seed, spawn and biomes; chunks it never generated are generated by
-Bedrock. `--into-world` never modifies the existing world: it writes a new world in which only the chunks the
-structure touches differ. The conversion report lists everything that was not converted exactly: entities (not
-written yet), item enchantments and names, text formatting on signs, and so on.
+The output format comes from the file extension. A structure converted to a new world stands on a superflat world
+centred on x = 0, z = 0. A Java world keeps its seed, spawn and biomes. `--into-world` never modifies the existing
+world: it writes a new one in which only the chunks the structure touches differ. Defaults are chosen for safety:
+air in the structure keeps existing blocks, and a structure that exceeds the build height is an error unless you
+pass `--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
 
-The output format is inferred from the file extension. Defaults are chosen for safety: air in the structure
-keeps existing blocks, and a structure that exceeds the world's build height is an error unless you pass
-`--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
+## Supported formats
+
+| Format | Edition | Read | Write |
+|---|---|---|---|
+| `.schem` (Sponge v1–v3; writes v3) | Java | ✓ | ✓ |
+| `.schematic` (MCEdit legacy) | Java | ✓ | — |
+| `.litematic` | Java | ✓ | ✓ |
+| Structure `.nbt` | Java | ✓ | ✓ |
+| Java world (Anvil, 1.18+ layout, Overworld) | Java | ✓ | ✓ |
+| `.mcstructure` | Bedrock | ✓ | ✓ |
+| `.mcworld` (new world; reading: Overworld) | Bedrock | ✓ | ✓ |
+| `.mcworld` (place into a copy of an existing world) | Bedrock | — | ✓ |
+
+✓ means golden tests, a fuzz target, a benchmark and a recorded in-game check all pass. Game versions: exactly
+**Java Edition 26.3** and **Bedrock Edition 26.52** ([docs/versions.md](docs/versions.md)).
 
 ## Performance
 
-Bridger publishes only **measured** results, with machine specs and reproduction steps. The full table is in
-[docs/performance.md](docs/performance.md). Early baselines on an Intel i7-13620H laptop (`msvc-release`):
+Measured on an Intel i7-13620H laptop (`msvc-release`); the full table, machine details and how to reproduce are in
+[docs/performance.md](docs/performance.md).
 
 | Operation | Result |
 |---|---|
-| NBT validation (zero-copy) | 1.37 GiB/s |
-| Reading a gzip `.schem` into the IR (256 × 128 × 256) | 155 M blocks/s (54.7 ms) |
+| Reading a gzip `.schem` into memory (256 × 128 × 256) | 155 M blocks/s (54.7 ms) |
 | Translating Java → Bedrock (8.4 M blocks) | 34.4 ms |
 | A real 405 × 140 × 405 WorldEdit schematic → `.mcworld` (incl. validation) | 2.7 s |
 | A synthetic 4096-chunk Java world → `.mcworld` (16 threads, incl. validation) | 9.2 s |
-| 3D viewer: a real Java world streamed in at render distance 20 (1257 chunks, 7.6 M quads; RTX 4060 Laptop) | 2.3–3.0 s, then 60 fps (vsync) |
+| 3D preview: a real Java world at render distance 20 (1257 chunks, 7.6 M quads; RTX 4060 Laptop) | 2.3–3.0 s, then 60 fps (vsync) |
 
-These measure Bridger alone. No comparison with other tools has been measured yet.
+These measure Bridger alone; no comparison with other tools has been measured yet.
 
 ## Known limitations
 
 - Worlds: only the Overworld, in both directions; Java worlds saved by Java 1.18 or newer.
-- A Java world folder is never overwritten: the destination folder must not exist.
-- Bedrock-only blocks (Education Edition chemistry, item frames as blocks, …) have no Java equivalent: they are
-  replaced and reported. Fence and pane connections rebuilt for Java use an approximation of which blocks are
-  solid; the game corrects any wrong one on the next block update.
-- Entities (armor stands, item frames, mobs) are not written yet; they are listed in the report.
-- Item components (enchantments, custom names, durability) and text formatting are dropped and reported.
-- Only whole-world conversion uses several threads; structures are converted on one thread.
-- Windows x64 only for now. The code keeps OS-specific parts in one module so other platforms can be added
-  later.
-- One Java and one Bedrock version at a time (see above).
+- Entities (armor stands, item frames, mobs) are not written yet; item components (enchantments, names) and sign
+  text formatting are dropped. All of it is listed in the report.
+- Bedrock-only blocks have no Java equivalent: they are replaced and reported.
+- One Java and one Bedrock version at a time; Windows x64 only for now.
 
-## Contributing
+## Building from source
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
+Requirements: Visual Studio 2022 17.10+ ("Desktop development with C++"; add "C++ Clang Compiler for Windows" for
+the clang-cl presets), CMake ≥ 3.28 and Ninja (both ship with Visual Studio), [vcpkg](https://github.com/microsoft/vcpkg)
+at tag `2026.07.29`, and [Node.js](https://nodejs.org) 22+ for the app's interface.
+
+```bat
+git clone --recursive https://github.com/MEMOxiiii/bridger.git
+cd bridger
+:: From an "x64 Native Tools Command Prompt for VS 2022". Set VCPKG_ROOT here: the prompt
+:: points it at Visual Studio's bundled vcpkg, which is too old.
+set VCPKG_ROOT=%USERPROFILE%\vcpkg
+cmake --preset msvc-release
+cmake --build --preset msvc-release
+ctest --preset msvc-release
+```
+
+The first configure builds every dependency with vcpkg, which takes a while. Other presets: `msvc-debug`,
+`msvc-asan`, `clangcl-release`, `clangcl-fuzz`.
+
+## Documentation
+
+Everything else lives in [docs/](docs/README.md): architecture decisions, the byte-level format notes, safety and
+testing, performance, the changelog and third-party licenses. Contributors start with
+[AGENTS.md](AGENTS.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## License
 
-[Mozilla Public License 2.0](LICENSE). Third-party components and their licenses:
-[THIRD_PARTY.md](THIRD_PARTY.md).
+[Mozilla Public License 2.0](LICENSE). Third-party components and their licenses: [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
 
-## Disclaimer
-
-Bridger is not an official Minecraft product. It is not approved by or associated with Mojang or Microsoft.
-Bridger does not include or distribute any Minecraft assets. Textures and models are loaded at runtime from your
-own Minecraft installation or a resource pack you provide.
+Bridger is not an official Minecraft product and is not approved by or associated with Mojang or Microsoft. It
+does not include or distribute any Minecraft assets: textures and models are loaded at runtime from your own
+installation or a resource pack you provide.
