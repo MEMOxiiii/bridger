@@ -3,7 +3,7 @@
 All notable changes to Bridger. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow the release plan in `docs/release.md`.
 
-## [Unreleased] - 0.4.0
+## [0.4.0] - 2026-10-14
 
 ### Added
 
@@ -67,4 +67,5 @@ Edition 26.3** (DataVersion 5023) and **Bedrock Edition 26.52** (palette 26.50).
 - One Java and one Bedrock version at a time.
 - Windows x64 only.
 
+[0.4.0]: https://github.com/MEMOxiiii/bridger/releases/tag/v0.4.0
 [0.3.0]: https://github.com/MEMOxiiii/bridger/releases/tag/v0.3.0

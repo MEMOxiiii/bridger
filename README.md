@@ -11,12 +11,12 @@ is a native Windows tool written in C++20. It aims to be faster and more reliabl
 tests, benchmarks and in-game checks. It never modifies your input files, and it reports anything it could not
 convert exactly.
 
-> **Status: 0.3.0.** `bridger convert` works in both directions: Java schematics (`.schem`, `.litematic`,
+> **Status: 0.4.0.** `bridger convert` works in both directions: Java schematics (`.schem`, `.litematic`,
 > structure `.nbt`, legacy `.schematic`) and whole Java worlds become Bedrock worlds (`.mcworld`) or `.mcstructure`
 > files, a structure can be placed into a copy of an existing Bedrock world, and `.mcstructure` files and Bedrock
 > worlds become Java schematics and Java worlds. Every format passed the automated tests, fuzzing, the independent
-> checks and the in-game checklist in Java 26.3 and Bedrock 26.52. The 3D viewer and the desktop app are implemented
-> and pass the automated checks; they ship in 0.4.0 after the app checklist.
+> checks and the in-game checklist in Java 26.3 and Bedrock 26.52. 0.4.0 adds the desktop app
+> `bridger-gui.exe` (convert without the command line, with an optional 3D preview) and `bridger render`.
 
 ## Format support
 
