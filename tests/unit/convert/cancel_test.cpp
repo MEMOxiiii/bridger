@@ -49,6 +49,28 @@ TEST_CASE("A cancel during the last step leaves no output, for every kind of out
     CHECK(only_entries(dir.path, 0));
 }
 
+TEST_CASE("A cancel during the last step with --overwrite keeps the previous file", "[convert][safety]") {
+    const std::string out = GENERATE("castle.mcworld", "castle.schem");
+    CAPTURE(out);
+    test::TempDir dir;
+    const std::vector<u8> previous{'o', 'l', 'd'};
+    test::write_file(dir.path / out, previous);
+    std::atomic<bool> cancel{false};
+    ConvertOptions o;
+    o.input = test::data_path("ingame/containers.schem");
+    o.output = dir.path / out;
+    o.overwrite = true;
+    o.cancel = &cancel;
+    o.progress = [&](float, std::string_view step) {
+        if (step == "Saving") cancel = true;
+    };
+    const auto r = bridger::convert::convert(o);
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code() == ErrorCode::Cancelled);
+    CHECK(test::read_file(o.output) == previous);
+    CHECK(only_entries(dir.path, 1)); // no temp file, no backup
+}
+
 TEST_CASE("A cancel while packing a converted Java world leaves no .mcworld", "[convert][safety]") {
     test::TempDir dir;
     std::atomic<bool> cancel{false};

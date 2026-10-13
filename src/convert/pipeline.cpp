@@ -67,11 +67,9 @@ Status cancel_point(const ConvertOptions& o) {
     return {};
 }
 
-platform::FileValidator then_cancel_point(const ConvertOptions& o, platform::FileValidator validate) {
-    return [&o, validate = std::move(validate)](const fs::path& p) -> Status {
-        BRIDGER_TRY_STATUS(validate(p));
-        return cancel_point(o);
-    };
+// The gate the atomic writer calls once, after validation and right before the move.
+platform::MoveGate cancel_gate(const ConvertOptions& o) {
+    return [&o]() -> Status { return cancel_point(o); };
 }
 
 // Progress report + cancellation point.
@@ -336,7 +334,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
             return make_error(ErrorCode::ValidationFailed, "the zipped world does not list every world file");
         return {};
     };
-    BRIDGER_TRY_STATUS(writer.commit(then_cancel_point(o, validate)));
+    BRIDGER_TRY_STATUS(writer.commit(validate, cancel_gate(o)));
     phase("moved into place");
     return summary;
 }
@@ -413,7 +411,7 @@ Result<ConvertSummary> write_java_structure_output(const ConvertOptions& o, Conv
     const FormatId format = summary.output_format;
     BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
     BRIDGER_TRY_STATUS(platform::write_file_atomically(
-        o.output, *bytes, then_cancel_point(o, [&](const fs::path& written) { return validate_java_structure(written, format, java); })));
+        o.output, *bytes, [&](const fs::path& written) { return validate_java_structure(written, format, java); }, cancel_gate(o)));
     summary.block_entities = java.block_entities.size();
     return summary;
 }
@@ -436,7 +434,7 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
             return {};
         };
         BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
-        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, bytes, then_cancel_point(o, validate)));
+        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, bytes, validate, cancel_gate(o)));
         summary.block_entities = bedrock.block_entities.size();
         return summary;
     }
@@ -466,7 +464,7 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
             return formats::bedrock::validate_placed_world(f.data(), world.data(), stats.touched_keys, check.path());
         };
         BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
-        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, out, then_cancel_point(o, validate)));
+        BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, out, validate, cancel_gate(o)));
         return summary;
     }
 
@@ -511,7 +509,7 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
         return {};
     };
     BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
-    BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, mcworld, then_cancel_point(o, validate)));
+    BRIDGER_TRY_STATUS(platform::write_file_atomically(o.output, mcworld, validate, cancel_gate(o)));
     return summary;
 }
 

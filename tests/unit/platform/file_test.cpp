@@ -253,6 +253,44 @@ TEST_CASE("Destination failing validation after replace restores the previous fi
     CHECK(test::read_file(dest) == kOld);
 }
 
+TEST_CASE("The move gate runs once, before the move; refusing keeps the old file", "[platform][safety]") {
+    test::TempDir dir;
+    const auto dest = dir.path / "out.mcworld";
+    test::write_file(dest, kOld);
+    int gate_calls = 0;
+    auto refuse = [&gate_calls]() -> Status {
+        ++gate_calls;
+        return make_error(ErrorCode::Cancelled, "cancelled");
+    };
+    const auto r = write_file_atomically(dest, kNew, accept, refuse);
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code() == ErrorCode::Cancelled); // passed through, not turned into a validation failure
+    CHECK(gate_calls == 1);
+    CHECK(test::read_file(dest) == kOld);
+    CHECK(count_files(dir.path) == 1); // temp file removed
+}
+
+TEST_CASE("A cancel arriving after the replacement does not undo it", "[platform][safety]") {
+    test::TempDir dir;
+    const auto dest = dir.path / "out.mcworld";
+    test::write_file(dest, kOld);
+    bool cancelled = false;
+    int validations = 0;
+    auto gate = [&cancelled]() -> Status {
+        if (cancelled) return make_error(ErrorCode::Cancelled, "cancelled");
+        return {};
+    };
+    // The second validation runs on the destination after the replace: the user presses Cancel then.
+    auto validate = [&](const std::filesystem::path&) -> Status {
+        if (++validations == 2) cancelled = true;
+        return {};
+    };
+    REQUIRE(write_file_atomically(dest, kNew, validate, gate));
+    CHECK(validations == 2);
+    CHECK(test::read_file(dest) == kNew);
+    CHECK(count_files(dir.path) == 1);
+}
+
 TEST_CASE("Temp names are siblings of the destination", "[platform]") {
     const auto t = sibling_temp_path(std::filesystem::path("C:/worlds/out.mcworld"), "bridger-tmp");
     REQUIRE(t);

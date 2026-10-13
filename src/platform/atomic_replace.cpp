@@ -69,7 +69,7 @@ Status AtomicFileWriter::write(std::span<const u8> bytes) {
     return ops_->write(handle_, bytes);
 }
 
-Status AtomicFileWriter::commit(const FileValidator& validate) {
+Status AtomicFileWriter::commit(const FileValidator& validate, const MoveGate& before_move) {
     if (committed_) return make_error(ErrorCode::InvalidArgument, "commit called twice");
     committed_ = true;
 
@@ -97,12 +97,18 @@ Status AtomicFileWriter::commit(const FileValidator& validate) {
     //    not user data, so it is removed.
     if (auto s = validate(temp_); !s) {
         (void)ops_->remove(temp_);
-        // A cancellation checked by the validator (the last moment before the move) is not a failure.
-        if (s.error().code() == ErrorCode::Cancelled)
-            return make_error(ErrorCode::Cancelled, s.error().message() + "; the output was discarded and the destination was not touched");
         return make_error(ErrorCode::ValidationFailed,
                           "the written output failed validation (" + s.error().describe() +
                               "); it was discarded and the destination was not touched");
+    }
+
+    // 2b. The caller's last word (cancellation). Once past this point the move happens and
+    //     nothing undoes it except a failed validation of the destination itself.
+    if (before_move) {
+        if (auto s = before_move(); !s) {
+            (void)ops_->remove(temp_);
+            return make_error(s.error().code(), s.error().message() + "; the output was discarded and the destination was not touched");
+        }
     }
 
     // 3a. New file: rename without replacing. If something appeared at the destination
@@ -173,9 +179,14 @@ Status AtomicFileWriter::replace_existing(const FileValidator& validate) {
 
 Status write_file_atomically(const std::filesystem::path& destination, std::span<const u8> bytes,
                              const FileValidator& validate, FileOps& ops) {
+    return write_file_atomically(destination, bytes, validate, MoveGate{}, ops);
+}
+
+Status write_file_atomically(const std::filesystem::path& destination, std::span<const u8> bytes,
+                             const FileValidator& validate, const MoveGate& before_move, FileOps& ops) {
     BRIDGER_TRY(AtomicFileWriter writer, AtomicFileWriter::create(destination, ops));
     BRIDGER_TRY_STATUS(writer.write(bytes));
-    return writer.commit(validate);
+    return writer.commit(validate, before_move);
 }
 
 } // namespace bridger::platform

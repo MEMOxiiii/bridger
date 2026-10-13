@@ -58,6 +58,12 @@ public:
 // Validates a written file (e.g. re-reads it with Bridger's own reader).
 using FileValidator = std::function<Status(const std::filesystem::path&)>;
 
+// Called exactly once, after the temp file passed validation and immediately before it is moved
+// into place: the last moment the caller can still say no (e.g. a cancelled conversion). An error
+// discards the temp file and leaves the destination untouched; its error code is passed through.
+// It is never called after the move, so it cannot undo a finished replacement.
+using MoveGate = std::function<Status()>;
+
 class AtomicFileWriter {
 public:
     // Creates "<dest>.<random>.bridger-tmp" next to `destination`.
@@ -81,10 +87,9 @@ public:
 
     [[nodiscard]] Status write(std::span<const u8> bytes);
 
-    // Flush, validate, move into place, validate the destination, drop the backup.
-    // On failure the returned error describes where every file is. A validator returning
-    // ErrorCode::Cancelled discards the temp file and yields Cancelled (the destination is untouched).
-    [[nodiscard]] Status commit(const FileValidator& validate);
+    // Flush, validate, ask `before_move`, move into place, validate the destination, drop the backup.
+    // On failure the returned error describes where every file is.
+    [[nodiscard]] Status commit(const FileValidator& validate, const MoveGate& before_move = {});
 
     [[nodiscard]] const std::filesystem::path& destination() const noexcept { return destination_; }
     [[nodiscard]] const std::filesystem::path& temp_path() const noexcept { return temp_; }
@@ -105,5 +110,8 @@ private:
 // Convenience: write a whole buffer safely.
 [[nodiscard]] Status write_file_atomically(const std::filesystem::path& destination, std::span<const u8> bytes,
                                            const FileValidator& validate, FileOps& ops = os_file_ops());
+[[nodiscard]] Status write_file_atomically(const std::filesystem::path& destination, std::span<const u8> bytes,
+                                           const FileValidator& validate, const MoveGate& before_move,
+                                           FileOps& ops = os_file_ops());
 
 } // namespace bridger::platform
