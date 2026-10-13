@@ -1,6 +1,8 @@
-# Bridger
+<p align="center">
+  <img src="docs/assets/bridger-logo.png" alt="Bridger" width="520">
+</p>
 
-High-performance Java ⇄ Bedrock converter for Minecraft schematics, structures and worlds, with a 3D viewer.
+<p align="center">High-performance Java ⇄ Bedrock converter for Minecraft schematics, structures and worlds, with a 3D viewer.</p>
 
 Moving builds between Minecraft Java Edition and Bedrock Edition is painful. Existing tools are slow on large
 inputs, lose data silently (block orientations, waterlogging, chest contents), and handle the most common
@@ -13,7 +15,8 @@ convert exactly.
 > structure `.nbt`, legacy `.schematic`) and whole Java worlds become Bedrock worlds (`.mcworld`) or `.mcstructure`
 > files, a structure can be placed into a copy of an existing Bedrock world, and `.mcstructure` files and Bedrock
 > worlds become Java schematics and Java worlds. Every format passed the automated tests, fuzzing, the independent
-> checks and the in-game checklist in Java 26.3 and Bedrock 26.52. The 3D viewer and desktop app come next (0.4.0).
+> checks and the in-game checklist in Java 26.3 and Bedrock 26.52. The 3D viewer and the desktop app are implemented
+> and pass the automated checks; they ship in 0.4.0 after the app checklist.
 
 ## Format support
 
@@ -72,8 +75,9 @@ The first configure builds all dependencies with vcpkg, which takes a while. Pre
 
 ### Desktop app
 
-`bridger-gui.exe` opens a file or world you drop on its window (or pass on the command line) in a 3D view drawn
-with your own Minecraft Java textures, shows what is in it and what would not convert exactly, and converts it:
+`bridger-gui.exe` takes a file or world you drop on its window (or pass on the command line) and shows its file
+page: what is in it, what could not be read exactly, and the conversion options. The 3D preview, drawn with your
+own Minecraft Java textures, is one click away, and **Back to convert** returns to the same file:
 
 - **View:** orbit, pan and zoom; **fly** through it like a player (double-click or F, then WASD, Space/Shift,
   Ctrl to sprint, Esc to stop); a top-down **map** (M); a **slice** to look inside; worlds stream around the

@@ -13,7 +13,8 @@ Unknown types and malformed messages are ignored on both sides.
 | `pan` | `dx`, `dy` (pixels) | Pan; in map mode moves the map. |
 | `zoom` | `delta` (wheel steps, > 0 = in) | Zoom; in fly mode changes the speed. |
 | `reset_camera` | | Animate back to the whole document. |
-| `fly` | `on` | Enter fly mode (the app leaves it on Esc or when the window loses focus). |
+| `preview` | `on` | Show or hide the 3D preview. The app renders and streams worlds only while it is on; the file page covers the window otherwise. |
+| `fly` | `on` | Enter fly mode, in the preview only (the app leaves it on Esc or when the window loses focus). |
 | `view` | `map?` (bool), `slice?` (number or `null`) | Top-down map; hide blocks at and above `slice`. |
 | `focus` | `positions` ([[x,y,z], ...]) | Outline these blocks and fly the camera to them (report highlights). |
 | `clear_focus` | | Remove the outlines. |
@@ -34,7 +35,8 @@ Unknown types and malformed messages are ignored on both sides.
 | `hello` | `version`, `gpu`, `assets`, `settings` | Answer to `ready`. |
 | `settings` | `settings`, `assets` | Settings or assets changed. |
 | `loading` | `name`, `step`, `fraction` | Opening progress. |
-| `opened` | `doc`, `settings` | A document is shown. `doc`: `kind` (`structure`/`world`), `path`, `name`, `format`, `edition`, `size`, `blocks`, `block_entities`, `entities`, `data_version`, `chunks`, `spawn`, `seed`, `warnings`, `report`, `targets`. |
+| `opened` | `doc`, `settings` | A document is open; the UI shows its file page. `doc`: `kind` (`structure`/`world`), `path`, `name`, `format`, `edition`, `size`, `blocks`, `block_entities`, `entities`, `data_version`, `chunks`, `spawn`, `seed`, `warnings`, `report`, `targets`. |
+| `preview_ready` | `missing_models` | The 3D model of the open document is built (structures mesh after `opened`; worlds are ready at once and stream on demand). |
 | `open_failed` | `message` | |
 | `stats` | `fps`, `frame_ms`, `sections`, `quads`, `gpu_mb`, `chunks_loaded?`, `chunks_total?`, `chunks_pending?` | Twice a second. `fps` counts rendered frames: an idle viewer renders none. |
 | `fly` | `on` | Fly mode changed. |

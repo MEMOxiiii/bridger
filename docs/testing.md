@@ -145,7 +145,7 @@ Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3
 
 | # | Check |
 |---|---|
-| 1 | The window opens on the empty screen (dark, animated); "Open a file" and drag-and-drop both open `tests/data/ingame/*.schem`. |
+| 1 | The window opens on the Bridger wordmark, then the home screen; "Choose a file" and drag-and-drop both open `tests/data/ingame/*.schem` on its file page (no 3D view yet). "Open the 3D preview" shows it; "Back to convert" (or Esc) returns to the same file page; "Open another file" replaces it. |
 | 2 | Each in-game test structure renders like the game: block models and rotations (`orientations`), glass and stained glass, water and lava levels (`waterlogged`), chests (single and double), beds, signs, shulker boxes. |
 | 3 | Orbit (drag), pan (right-drag), zoom (wheel) feel smooth and stop exactly; "Frame" returns to the whole build. |
 | 4 | Fly: double-click or F, WASD + Space/Shift + Ctrl, mouse look; Esc returns to the UI; with an Arabic or other non-Latin keyboard layout too. |

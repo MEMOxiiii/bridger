@@ -7,8 +7,9 @@ versions follow the release plan in `docs/release.md`.
 
 ### Added
 
-- **Desktop app `bridger-gui.exe`.** Drop or open a structure file or world to see it in 3D and convert it
-  without the command line:
+- **Desktop app `bridger-gui.exe`.** It opens on the Bridger wordmark, then a home screen to drop or choose a
+  file. Each opened file gets a page with its facts, what could not be read exactly, and the conversion options;
+  the 3D preview is optional, one click away, and returns to the same file page. In detail:
   - a convert drawer with every supported target format, a world name, placement (a new flat world, or a copy of
     one of your worlds at x, y, z), advanced placement options, a Save dialog, progress and Cancel;
   - the report of everything not converted exactly, grouped and counted; clicking an entry outlines those blocks
