@@ -151,7 +151,8 @@ const SDL_DialogFileFilter kSaveFilters[] = {
 struct App::Impl {
     SDL_Window* window = nullptr;
     void* hwnd = nullptr;
-    std::optional<render::Renderer> renderer;
+    std::optional<render::Renderer> renderer; // empty without a usable GPU: the app still converts
+    std::string viewer_error;
     std::unique_ptr<Compositor> compositor;
     std::unique_ptr<WebViewHost> web;
     UiBundle bundle;
@@ -221,7 +222,8 @@ struct App::Impl {
     void toast(std::string_view kind, std::string_view message) { send({{"type", "toast"}, {"kind", kind}, {"message", message}}); }
 
     json assets_json() const {
-        json j = {{"ok", models != nullptr}, {"jar", assets_jar}, {"error", assets_error}};
+        json j = {{"ok", models != nullptr}, {"jar", assets_jar}, {"error", assets_error},
+                  {"viewer", renderer.has_value()}, {"viewer_error", viewer_error}};
         if (const auto m = translate::MappingData::embedded()) {
             j["java_version"] = (*m)->java_version();
             j["bedrock_version"] = (*m)->bedrock_version();
@@ -383,6 +385,10 @@ struct App::Impl {
         models.reset();
         assets_error.clear();
         assets_jar.clear();
+        if (!renderer) {
+            assets_error = "the 3D preview is off on this computer";
+            return;
+        }
         std::vector<fs::path> packs;
         if (!settings.client_jar.empty()) {
             auto p = platform::path_from_utf8(settings.client_jar);
@@ -437,7 +443,7 @@ struct App::Impl {
     }
 
     void set_preview(bool on) {
-        if (on && !has_doc) return;
+        if (on && (!has_doc || !renderer)) return;
         if (!on) set_fly(false);
         if (on && !previewing) {
             open_started = std::chrono::steady_clock::now();
@@ -735,12 +741,19 @@ struct App::Impl {
         cfg.width = static_cast<u32>(w);
         cfg.height = static_cast<u32>(h);
         cfg.shared_target = true;
-        auto r = render::Renderer::create(cfg);
-        if (!r) return fatal("The 3D viewer needs a GPU with Vulkan 1.3.\n\n" + r.error().describe());
-        renderer.emplace(std::move(*r));
-        compositor = Compositor::create(hwnd, renderer->adapter_luid(), cfg.width, cfg.height);
-        if (!compositor) return fatal("Could not set up DirectComposition for the window.");
-        if (auto s = renderer->set_shared_target(compositor->shared_handle(), cfg.width, cfg.height); !s) return fatal(s.error().describe());
+        // The 3D preview is optional: without a Vulkan 1.3 GPU (or without texture sharing with
+        // Direct3D) the app still opens files and converts them; the preview says why it is off.
+        if (std::getenv("BRIDGER_NO_VIEWER") != nullptr) viewer_error = "turned off by BRIDGER_NO_VIEWER"; // testing
+        else if (auto r = render::Renderer::create(cfg)) renderer.emplace(std::move(*r));
+        else viewer_error = r.error().describe();
+        compositor = Compositor::create(hwnd, renderer ? renderer->adapter_luid() : std::nullopt, cfg.width, cfg.height);
+        if (!compositor) return fatal("Could not set up the window's drawing surface (Direct3D 11 / DirectComposition).");
+        if (renderer)
+            if (auto s = renderer->set_shared_target(compositor->shared_handle(), cfg.width, cfg.height); !s) {
+                viewer_error = s.error().describe();
+                renderer.reset();
+            }
+        if (!renderer) log::warn("3D preview disabled: {}", viewer_error);
         settings = load_settings();
         load_assets();
         bundle = UiBundle::embedded();
@@ -783,7 +796,7 @@ struct App::Impl {
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED: running = false; break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
             const auto w = static_cast<u32>(std::max(1, e.window.data1)), h = static_cast<u32>(std::max(1, e.window.data2));
-            if (compositor->resize(w, h)) (void)renderer->set_shared_target(compositor->shared_handle(), w, h);
+            if (compositor->resize(w, h) && renderer) (void)renderer->set_shared_target(compositor->shared_handle(), w, h);
             if (web) web->resize(e.window.data1, e.window.data2);
             dirty = true;
             break;
@@ -883,7 +896,7 @@ struct App::Impl {
             const render::Camera& cam = viewer.camera();
             const bool moved = cam.position != last_camera.position || cam.yaw_degrees != last_camera.yaw_degrees ||
                                cam.pitch_degrees != last_camera.pitch_degrees || viewer.map_half_extent() != last_extent;
-            if (!previewing || !(dirty || moved || sky_moving || streaming_busy || fly)) {
+            if (!renderer || !previewing || !(dirty || moved || sky_moving || streaming_busy || fly)) {
                 tick_stats(0.0, false);
                 continue;
             }

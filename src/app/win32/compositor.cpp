@@ -76,6 +76,9 @@ struct Compositor::Impl {
         constexpr D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
         hr = D3D11CreateDevice(adapter.get(), adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
                                D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 2, D3D11_SDK_VERSION, device.put(), nullptr, context.put());
+        if (FAILED(hr)) // no usable GPU driver: WARP (software) still composites the interface
+            hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 2, D3D11_SDK_VERSION,
+                                   device.put(), nullptr, context.put());
         if (FAILED(hr)) return fail("D3D11CreateDevice", hr);
 
         DXGI_SWAP_CHAIN_DESC1 sd{};

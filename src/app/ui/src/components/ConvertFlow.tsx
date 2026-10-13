@@ -301,12 +301,14 @@ function Done({ convert, doc }: { convert: ConvertState; doc: Doc }) {
             In the game the build's corner is at <span className="mono">{s.origin?.join(', ')}</span>; you spawn in front of it.
           </p>
         )}
-        <div className={`callout ${issues === 0 ? 'callout-success' : 'callout-warning'}`}>
-          <Icon name={issues === 0 ? 'check' : 'alert'} size={18} />
+        <div className={`callout ${s.exact ? 'callout-success' : 'callout-warning'}`}>
+          <Icon name={s.exact ? 'check' : 'alert'} size={18} />
           <div>
-            {issues === 0
-              ? 'Every block converted exactly.'
-              : `${issues.toLocaleString()} ${issues === 1 ? 'thing was' : 'things were'} converted approximately or not at all. Click one to see where it is.`}
+            {s.exact
+              ? 'Everything was converted exactly.'
+              : issues === 0
+                ? `Every block was converted exactly, but ${s.warnings.length === 1 ? 'one note below describes' : `${s.warnings.length} notes below describe`} data that was not.`
+                : `${issues.toLocaleString()} ${issues === 1 ? 'thing was' : 'things were'} converted approximately or not at all. Click one to see where it is.`}
           </div>
         </div>
         {issues > 0 && <ReportList report={s.report} emptyText="" />}

@@ -52,7 +52,10 @@ function FileCard({ doc }: { doc: Doc }) {
   const missing = useStore((s) => s.missingModels)
   const meta = formatMeta(doc.format)
   const issues = issueTotal(doc.report)
-  const noTextures = assets !== null && !assets.ok
+  const notes = doc.warnings.length
+  const noViewer = assets !== null && assets.viewer === false
+  const noTextures = !noViewer && assets !== null && !assets.ok
+  const blocked = noViewer || noTextures
   return (
     <section className="file-card" aria-label="Opened file">
       <div className="file-kicker">
@@ -83,55 +86,55 @@ function FileCard({ doc }: { doc: Doc }) {
 
       {doc.kind === 'structure' && (
         <button
-          className={`health ${issues === 0 ? 'health--ok' : 'health--warn'}`}
-          onClick={() => issues > 0 && setState({ reportOpen: true })}
-          disabled={issues === 0}
+          className={`health ${issues === 0 && notes === 0 ? 'health--ok' : 'health--warn'}`}
+          onClick={() => (issues > 0 || notes > 0) && setState({ reportOpen: true })}
+          disabled={issues === 0 && notes === 0}
         >
-          <Icon name={issues === 0 ? 'check' : 'alert'} size={18} />
+          <Icon name={issues === 0 && notes === 0 ? 'check' : 'alert'} size={18} />
           <span className="health-text">
-            {issues === 0 ? (
+            {issues === 0 && notes === 0 ? (
               'Read exactly — nothing was lost'
+            ) : issues === 0 ? (
+              <>
+                Blocks read exactly, but <b>{notes}</b> {notes === 1 ? 'note' : 'notes'} about other data
+              </>
             ) : (
               <>
                 <b>{issues.toLocaleString()}</b> {issues === 1 ? 'item needs' : 'items need'} a look
               </>
             )}
           </span>
-          {issues > 0 && <span className="health-cta">Review</span>}
+          {(issues > 0 || notes > 0) && <span className="health-cta">Review</span>}
         </button>
       )}
 
-      <button className="preview-tile" onClick={enterPreview} disabled={!previewReady || noTextures}>
+      <button className="preview-tile" onClick={enterPreview} disabled={!previewReady || blocked}>
         <PreviewArt edition={doc.edition} />
         <span className="preview-text">
           <span className="preview-title">
-            {noTextures ? '3D preview needs textures' : previewReady ? 'Open the 3D preview' : 'Preparing the 3D preview…'}
+            {noViewer
+              ? '3D preview unavailable here'
+              : noTextures
+                ? '3D preview needs textures'
+                : previewReady
+                  ? 'Open the 3D preview'
+                  : 'Preparing the 3D preview…'}
           </span>
           <span className="preview-sub">
-            {noTextures
-              ? 'Choose your Minecraft Java client jar in Settings.'
-              : doc.kind === 'world'
+            {noViewer
+              ? 'It needs a GPU with Vulkan 1.3. Converting works normally.'
+              : noTextures
+                ? 'Choose your Minecraft Java client jar in Settings.'
+                : doc.kind === 'world'
                 ? 'Fly over the world; chunks load around you.'
                 : 'Orbit, fly through and slice it before converting.'}
           </span>
         </span>
         <span className="preview-go" aria-hidden>
-          {previewReady && !noTextures ? <Icon name="arrow" /> : <span className="spinner" />}
+          {blocked ? <Icon name="info" /> : previewReady ? <Icon name="arrow" /> : <span className="spinner" />}
         </span>
       </button>
       {missing > 0 && <p className="file-note">{missing} block types have no model in your resource packs and are not drawn.</p>}
-      {doc.warnings.length > 0 && (
-        <details className="file-warnings">
-          <summary>
-            {doc.warnings.length} {doc.warnings.length === 1 ? 'note' : 'notes'} from the reader
-          </summary>
-          <ul>
-            {doc.warnings.slice(0, 30).map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </details>
-      )}
     </section>
   )
 }
@@ -175,7 +178,17 @@ export function ReportSheet() {
         </header>
         <SmoothScroll className="sheet-scroll">
           <div className="sheet-body">
-            <ReportList report={doc.report} emptyText="Nothing to report." />
+            {issueTotal(doc.report) > 0 && <ReportList report={doc.report} emptyText="" />}
+            {doc.warnings.length > 0 && (
+              <div className="warnings">
+                <div className="overline">Notes from the reader</div>
+                <ul>
+                  {doc.warnings.slice(0, 50).map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </SmoothScroll>
       </aside>

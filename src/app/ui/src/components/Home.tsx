@@ -121,7 +121,13 @@ export function Home() {
               </li>
             </ol>
           </div>
-          {assets && !assets.ok && (
+          {assets && assets.viewer === false && (
+            <div className="side-block side-note">
+              <Icon name="info" size={16} />
+              <span>The 3D preview is off on this computer (it needs a GPU with Vulkan 1.3). Opening and converting work normally.</span>
+            </div>
+          )}
+          {assets && assets.viewer !== false && !assets.ok && (
             <div className="side-block side-note">
               <Icon name="info" size={16} />
               <span>

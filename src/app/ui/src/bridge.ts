@@ -42,6 +42,8 @@ export interface Doc {
 
 export interface Assets {
   ok: boolean
+  viewer?: boolean // false: no usable GPU, the 3D preview is off (converting still works)
+  viewer_error?: string
   jar: string
   error: string
   java_version?: string
