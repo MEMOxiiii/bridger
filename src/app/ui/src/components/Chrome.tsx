@@ -1,11 +1,65 @@
 // Chrome around the pages: the top bar (all screens), and in the 3D preview the camera dock and the
 // stats HUD.
+import { useEffect, useRef, useState } from 'react'
 import { send } from '../bridge'
-import { exitPreview, openFile } from '../actions'
+import { exitPreview, openFile, openFolder } from '../actions'
 import { formatMeta } from '../formats'
 import { setState, useStore } from '../store'
 import { Wordmark } from './Brand'
 import { Icon } from './Icon'
+
+// "Open another": a file or a Java world folder (a world is a folder, so it needs its own dialog).
+function OpenMenu() {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', close)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', close)
+    }
+  }, [open])
+  const pick = (f: () => void) => {
+    setOpen(false)
+    f()
+  }
+  return (
+    <div className="open-menu" ref={root}>
+      <button className="btn btn-secondary btn-sm" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+        <Icon name="upload" size={18} />
+        Open another
+        <span className={`open-menu-caret ${open ? 'is-open' : ''}`} aria-hidden>
+          <Icon name="chevron" size={14} />
+        </span>
+      </button>
+      {open && (
+        <div className="open-menu-list" role="menu">
+          <button role="menuitem" onClick={() => pick(openFile)}>
+            <Icon name="file" size={18} />
+            <span>
+              <span className="open-menu-title">A file</span>
+              <span className="open-menu-sub">.schem, .litematic, .nbt, .schematic, .mcstructure, .mcworld</span>
+            </span>
+            <kbd>Ctrl O</kbd>
+          </button>
+          <button role="menuitem" onClick={() => pick(openFolder)}>
+            <Icon name="folder" size={18} />
+            <span>
+              <span className="open-menu-title">A Java world folder</span>
+              <span className="open-menu-sub">The world's folder in .minecraft/saves</span>
+            </span>
+            <kbd>Ctrl Shift O</kbd>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function TopBar() {
   const doc = useStore((s) => s.doc)
@@ -33,10 +87,7 @@ export function TopBar() {
       )}
       <div className="topbar-actions">
         {doc && !preview && (
-          <button className="btn btn-secondary btn-sm" onClick={openFile} title="Open another file (Ctrl+O)">
-            <Icon name="upload" size={18} />
-            Open another file
-          </button>
+          <OpenMenu />
         )}
         <button className="icon-btn" onClick={() => setState({ settingsOpen: true })} aria-label="Settings" title="Settings">
           <Icon name="settings" />

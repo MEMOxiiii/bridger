@@ -381,6 +381,75 @@ kbd {
   margin-left: auto;
 }
 
+.open-menu {
+  position: relative;
+}
+
+.open-menu-caret {
+  display: inline-grid;
+  transform: rotate(90deg);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.open-menu-caret.is-open {
+  transform: rotate(-90deg);
+}
+
+.open-menu-list {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 340px;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 3px 0 var(--edge), var(--shadow-2);
+  animation: menu-in var(--dur-base) var(--ease-out);
+}
+
+.open-menu-list button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.open-menu-list button:hover,
+.open-menu-list button:focus-visible {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.open-menu-title {
+  display: block;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.open-menu-sub {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 /* In the preview the bar floats over the scene: its pieces become slabs. */
 .topbar--preview {
   padding-left: var(--space-4);

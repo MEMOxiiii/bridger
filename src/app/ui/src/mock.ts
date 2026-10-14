@@ -95,6 +95,7 @@ function demo(name: string, dispatch: (m: Incoming) => void) {
   const at = (ms: number, f: () => void) => setTimeout(f, ms)
   if (['preview', 'view', 'fly'].includes(name)) at(250, () => setState({ view: 'preview' }))
   if (name === 'sheet') at(400, () => setState({ reportOpen: true }))
+  if (name === 'openmenu') at(600, () => (document.querySelector('.open-menu button') as HTMLElement | null)?.click())
   if (name === 'report' || name === 'view') at(400, () => (document.querySelector(`[data-tab="${name}"]`) as HTMLElement | null)?.click())
   if (name === 'report') at(700, () => (document.querySelector('.issue') as HTMLElement | null)?.click())
   if (name === 'report') at(250, () => setState({ view: 'preview' }))

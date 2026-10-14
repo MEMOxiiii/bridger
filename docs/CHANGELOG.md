@@ -3,6 +3,13 @@
 All notable changes to Bridger. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow the release plan in `docs/release.md`.
 
+## [Unreleased]
+
+### Fixed
+
+- The desktop app's file page can open a Java world folder again: "Open another" offers a file or a Java world
+  folder (Ctrl+O / Ctrl+Shift+O). Choosing a folder that is not a world says so (no `level.dat`).
+
 ## [0.4.1] - 2026-10-14
 
 ### Fixed
