@@ -13,8 +13,11 @@ silent, the jar's files and in-game comparison decided (noted below).
 
 - **Packs**, lowest priority first: the client jar of the pinned version, then the user's resource packs
   (zip or folder). A file is taken from the highest-priority pack that has it (`AssetSource::read`).
-- The jar is found at `%APPDATA%/.minecraft/versions/<v>/<v>.jar` (`AssetSource::find_client_jar`), or chosen
-  in the app's settings / with `--client-jar`.
+- The jar is, in order: the one chosen in the app's settings (or `--client-jar`); the launcher's
+  `%APPDATA%/.minecraft/versions/<v>/<v>.jar` (`AssetSource::find_client_jar`); or one the app downloaded from
+  Mojang on request to `%APPDATA%/Bridger/assets/<v>/client.jar` (`render/asset_download.hpp`). The download reads
+  Mojang's `version_manifest_v2.json` → the version file → `downloads.client` (URL, SHA-1, size), e.g. for 26.3
+  `client.jar` of 41 483 720 bytes, SHA-1 `e877b6a07acd633fb3bb475002175cec036e7b87` (checked 2026-10-15).
 - Zip reading uses minizip-ng with the same limits as other untrusted zips (`io::ZipReader`). Every JSON file is
   untrusted input: unknown fields are ignored, bad files make the block fall back to the missing model and are
   listed in `BlockModels::missing()`.

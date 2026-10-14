@@ -59,7 +59,8 @@ and unzip it anywhere. No installer; the Visual C++ runtime is included.
 
 The 3D preview uses the textures of your own Minecraft Java 26.3 installation
 (`%APPDATA%/.minecraft/versions/26.3/26.3.jar`, or a client jar you choose in Settings) plus any resource packs you
-add. Converting works without them.
+add. Without Minecraft Java, the app offers to download that file (about 40 MB) from Mojang's official servers, only
+when you ask, verified against Mojang's published hash. Converting works without any of it.
 
 ## Command line
 

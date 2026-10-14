@@ -5,6 +5,13 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Without Minecraft Java installed, the desktop app offers to download the 26.3 client jar (about 40 MB) for the 3D
+  preview from Mojang's official servers, only when the user presses the button: https to Mojang's hosts only,
+  checked against Mojang's published SHA-1 and size, saved in Bridger's own folder, never executed, and
+  cancellable (`docs/safety.md`, "Network access").
+
 ### Fixed
 
 - The desktop app's file page can open a Java world folder again: "Open another" offers a file or a Java world

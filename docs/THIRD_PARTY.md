@@ -87,4 +87,6 @@ Third-party data is limited to the mapping sources above, compiled into the `.br
 ## Minecraft assets
 
 Bridger does **not** include or distribute any Mojang assets (textures, models, sounds, block data files). The
-viewer loads them at runtime from the user's own Minecraft installation or a resource pack the user provides.
+viewer loads them at runtime from the user's own Minecraft installation or a resource pack the user provides. If
+Minecraft Java is not installed, the user can ask the app to download the client jar from Mojang's own servers, as
+the official launcher does; it is stored on the user's computer only (`docs/safety.md`, "Network access").
