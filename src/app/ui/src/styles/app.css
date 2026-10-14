@@ -1819,6 +1819,53 @@ kbd {
   font-size: var(--text-sm);
 }
 
+/* Texture download offer */
+
+.textures-offer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(135deg, oklch(80% 0.13 175 / 0.08), oklch(55% 0.2 262 / 0.1)),
+    var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.textures-offer.is-compact {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.textures-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--cyan);
+}
+
+.textures-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.textures-text {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.textures-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 /* Report sheet */
 
 .sheet-backdrop {

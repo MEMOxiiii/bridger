@@ -4,6 +4,7 @@ import { basename } from '../formats'
 import { dur, EASE_IN, gsap, SmoothScroll, useGSAP } from '../motion'
 import { dismissToast, setState, useStore } from '../store'
 import { Icon } from './Icon'
+import { TexturesOffer } from './TexturesOffer'
 
 // Mounted while `show`, with an entrance and a faster exit before unmounting.
 function useAnimatedPresence(show: boolean, ref: React.RefObject<HTMLElement | null>, from: gsap.TweenVars, exit: gsap.TweenVars) {
@@ -187,8 +188,10 @@ export function SettingsDialog() {
               <div>
                 <div className="asset-title">{assets?.ok ? 'Textures loaded' : 'Textures not found'}</div>
                 <div className="asset-path mono">{assets?.ok ? assets.jar : assets?.error}</div>
+                {assets?.ok && assets.downloaded && <div className="asset-path">Downloaded from Mojang by Bridger.</div>}
               </div>
             </div>
+            <TexturesOffer />
             <div className="row">
               <button className="btn btn-secondary" onClick={() => send({ type: 'pick_client_jar' })}>
                 Choose a client jar…

@@ -12,6 +12,7 @@
 #include <bridger/core/block_registry.hpp>
 #include <bridger/core/log.hpp>
 #include <bridger/platform/paths.hpp>
+#include <bridger/render/asset_download.hpp>
 #include <bridger/render/renderer.hpp>
 #include <bridger/render/scene.hpp>
 #include <bridger/render/streaming.hpp>
@@ -184,6 +185,11 @@ struct App::Impl {
     std::atomic<bool> convert_cancel{false};
     bool converting = false;
     std::string pending_open;
+    // Textures downloaded from Mojang on request (render/asset_download.hpp).
+    std::thread download_worker;
+    std::atomic<bool> download_cancel{false};
+    bool downloading = false;
+    bool using_downloaded_jar = false;
     // Time to first frame (docs/performance.md): from open() to the first frame showing the document,
     // and for worlds until every chunk in the render distance is on screen.
     std::chrono::steady_clock::time_point open_started;
@@ -197,7 +203,9 @@ struct App::Impl {
 
     ~Impl() {
         convert_cancel = true;
+        download_cancel = true;
         if (convert_worker.joinable()) convert_worker.join();
+        if (download_worker.joinable()) download_worker.join();
         if (open_worker.joinable()) open_worker.join();
         doc.streaming.reset();
         doc.view_world.reset();
@@ -223,7 +231,11 @@ struct App::Impl {
 
     json assets_json() const {
         json j = {{"ok", models != nullptr}, {"jar", assets_jar}, {"error", assets_error},
-                  {"viewer", renderer.has_value()}, {"viewer_error", viewer_error}};
+                  {"viewer", renderer.has_value()}, {"viewer_error", viewer_error},
+                  {"downloaded", using_downloaded_jar},
+                  // The textures can be fetched from Mojang: missing, the viewer works, and no jar was chosen by hand.
+                  {"can_download", models == nullptr && renderer.has_value() && settings.client_jar.empty()},
+                  {"downloading", downloading}};
         if (const auto m = translate::MappingData::embedded()) {
             j["java_version"] = (*m)->java_version();
             j["bedrock_version"] = (*m)->bedrock_version();
@@ -296,6 +308,10 @@ struct App::Impl {
             SDL_ShowOpenFileDialog(&Impl::on_jar_picked, this, window, kJarFilter, 1, nullptr, false);
         } else if (type == "add_pack") {
             SDL_ShowOpenFileDialog(&Impl::on_pack_picked, this, window, kPackFilter, 1, nullptr, false);
+        } else if (type == "download_textures") {
+            start_texture_download();
+        } else if (type == "cancel_textures") {
+            download_cancel = true;
         } else if (type == "settings") {
             apply_settings(m);
         }
@@ -385,6 +401,7 @@ struct App::Impl {
         models.reset();
         assets_error.clear();
         assets_jar.clear();
+        using_downloaded_jar = false;
         if (!renderer) {
             assets_error = "the 3D preview is off on this computer";
             return;
@@ -396,8 +413,16 @@ struct App::Impl {
         } else {
             const auto m = translate::MappingData::embedded();
             const std::string version = m ? std::string((*m)->java_version()) : std::string("26.3");
-            if (auto jar = render::AssetSource::find_client_jar(version)) packs.push_back(*jar);
-            else assets_error = "Minecraft Java " + version + " was not found in the launcher folder";
+            std::error_code ec;
+            const auto downloaded = render::downloaded_client_jar_path(version);
+            // BRIDGER_SKIP_LAUNCHER_JAR (testing): act as if Minecraft Java were not installed.
+            const auto launcher = std::getenv("BRIDGER_SKIP_LAUNCHER_JAR") ? std::nullopt : render::AssetSource::find_client_jar(version);
+            if (launcher) packs.push_back(*launcher);
+            else if (downloaded && fs::exists(*downloaded, ec)) {
+                packs.push_back(*downloaded); // fetched from Mojang earlier (asset_download.hpp)
+                using_downloaded_jar = true;
+            } else
+                assets_error = "Minecraft Java " + version + " was not found in the launcher folder";
         }
         if (packs.empty()) {
             if (assets_error.empty()) assets_error = "no client jar";
@@ -704,6 +729,45 @@ struct App::Impl {
             tasks.post([this, summary = std::move(summary)] {
                 converting = false;
                 send({{"type", "convert_done"}, {"summary", summary}});
+            });
+        });
+    }
+
+    // ---- Texture download -------------------------------------------------------------------
+
+    // Only on the user's request: Mojang's client jar for the pinned version, verified and saved in
+    // Bridger's own folder (docs/safety.md, "Network access").
+    void start_texture_download() {
+        if (downloading || models || !renderer) return;
+        const auto m = translate::MappingData::embedded();
+        const std::string version = m ? std::string((*m)->java_version()) : std::string("26.3");
+        if (download_worker.joinable()) download_worker.join();
+        downloading = true;
+        download_cancel = false;
+        send({{"type", "textures_progress"}, {"fraction", 0.0}, {"step", "Starting"}});
+        download_worker = std::thread([this, version] {
+            auto last = std::make_shared<float>(-1.0f);
+            auto r = render::download_client_jar(version, [this, last](float f, std::string_view step) {
+                if (f - *last >= 0.005f || f >= 1.0f) {
+                    *last = f;
+                    tasks.post([this, f, step = std::string(step)] { send({{"type", "textures_progress"}, {"fraction", f}, {"step", step}}); });
+                }
+                return !download_cancel.load();
+            });
+            tasks.post([this, ok = r.has_value(), cancelled = !r && r.error().code() == ErrorCode::Cancelled,
+                        msg = r ? std::string() : r.error().describe()] {
+                downloading = false;
+                if (!ok) {
+                    send({{"type", "textures_failed"}, {"message", msg}, {"cancelled", cancelled}});
+                    return;
+                }
+                const std::string reopen = has_doc && !converting ? doc.path : std::string();
+                if (!reopen.empty()) close_document();
+                load_assets();
+                send({{"type", "settings"}, {"settings", settings_json()}, {"assets", assets_json()}});
+                send({{"type", "textures_done"}});
+                toast("success", models ? "Textures ready. The 3D preview is available." : "Downloaded, but the textures could not be loaded: " + assets_error);
+                if (!reopen.empty()) open(reopen); // build the 3D model with the new textures
             });
         });
     }

@@ -44,6 +44,9 @@ export interface Assets {
   ok: boolean
   viewer?: boolean // false: no usable GPU, the 3D preview is off (converting still works)
   viewer_error?: string
+  downloaded?: boolean // the textures come from a jar Bridger downloaded from Mojang
+  can_download?: boolean // missing, and the user may fetch them from Mojang
+  downloading?: boolean
   jar: string
   error: string
   java_version?: string
@@ -101,6 +104,9 @@ export type Incoming =
   | { type: 'convert_done'; summary: Summary }
   | { type: 'convert_failed'; message: string; cancelled: boolean }
   | { type: 'toast'; kind: 'info' | 'error' | 'success'; message: string }
+  | { type: 'textures_progress'; fraction: number; step: string }
+  | { type: 'textures_done' }
+  | { type: 'textures_failed'; message: string; cancelled: boolean }
 
 export interface ConvertRequest {
   output: string
@@ -133,6 +139,8 @@ export type Outgoing =
   | { type: 'cancel_convert' }
   | { type: 'reveal'; path: string }
   | { type: 'pick_client_jar' }
+  | { type: 'download_textures' }
+  | { type: 'cancel_textures' }
   | { type: 'add_pack' }
   | { type: 'settings'; client_jar?: string; packs?: string[]; render_distance?: number }
 

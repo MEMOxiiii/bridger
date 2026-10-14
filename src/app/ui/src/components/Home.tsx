@@ -7,6 +7,7 @@ import { dur, gsap, useGSAP } from '../motion'
 import { useStore } from '../store'
 import { Wordmark } from './Brand'
 import { Icon } from './Icon'
+import { TexturesOffer } from './TexturesOffer'
 
 const JAVA = ['schem', 'litematic', 'nbt', 'schematic', 'java-world']
 const BEDROCK = ['mcstructure', 'mcworld']
@@ -127,7 +128,12 @@ export function Home() {
               <span>The 3D preview is off on this computer (it needs a GPU with Vulkan 1.3). Opening and converting work normally.</span>
             </div>
           )}
-          {assets && assets.viewer !== false && !assets.ok && (
+          {assets && assets.can_download && (
+            <div className="side-block">
+              <TexturesOffer compact />
+            </div>
+          )}
+          {assets && assets.viewer !== false && !assets.ok && !assets.can_download && (
             <div className="side-block side-note">
               <Icon name="info" size={16} />
               <span>

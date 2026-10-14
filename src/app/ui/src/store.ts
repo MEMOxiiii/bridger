@@ -26,8 +26,16 @@ export interface Toast {
 // Screens: splash (launch) -> home (no file) -> file (convert + preview entry) <-> preview (3D).
 export type View = 'file' | 'preview'
 
+export interface TexturesState {
+  phase: 'idle' | 'running' | 'failed'
+  fraction: number
+  step: string
+  error: string
+}
+
 export interface State {
   splash: boolean
+  textures: TexturesState
   view: View
   previewReady: boolean // the 3D model of the open file is built (worlds: always)
   reportOpen: boolean
@@ -56,6 +64,7 @@ const initialConvert: ConvertState = {
 
 let state: State = {
   splash: true,
+  textures: { phase: 'idle', fraction: 0, step: '', error: '' },
   view: 'file',
   previewReady: false,
   reportOpen: false,
@@ -159,6 +168,16 @@ onMessage((m) => {
       break
     case 'toast':
       toast(m.kind, m.message)
+      break
+    case 'textures_progress':
+      setState({ textures: { phase: 'running', fraction: m.fraction, step: m.step, error: '' } })
+      break
+    case 'textures_done':
+      setState({ textures: { phase: 'idle', fraction: 1, step: '', error: '' } })
+      break
+    case 'textures_failed':
+      setState({ textures: { phase: m.cancelled ? 'idle' : 'failed', fraction: 0, step: '', error: m.message } })
+      if (m.cancelled) toast('info', 'Download cancelled. Nothing was saved.')
       break
   }
 })

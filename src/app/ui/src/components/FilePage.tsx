@@ -9,6 +9,7 @@ import { setState, useStore } from '../store'
 import { ConvertFlow } from './ConvertFlow'
 import { Icon } from './Icon'
 import { ReportList } from './Inspector'
+import { TexturesOffer } from './TexturesOffer'
 
 // A small isometric stack in the file's edition colour (decorates the preview tile).
 function PreviewArt({ edition }: { edition: 'java' | 'bedrock' }) {
@@ -124,7 +125,7 @@ function FileCard({ doc }: { doc: Doc }) {
             {noViewer
               ? 'It needs a GPU with Vulkan 1.3. Converting works normally.'
               : noTextures
-                ? 'Choose your Minecraft Java client jar in Settings.'
+                ? 'Download them below, or choose a client jar in Settings.'
                 : doc.kind === 'world'
                 ? 'Fly over the world; chunks load around you.'
                 : 'Orbit, fly through and slice it before converting.'}
@@ -134,6 +135,7 @@ function FileCard({ doc }: { doc: Doc }) {
           {blocked ? <Icon name="info" /> : previewReady ? <Icon name="arrow" /> : <span className="spinner" />}
         </span>
       </button>
+      {noTextures && <TexturesOffer />}
       {missing > 0 && <p className="file-note">{missing} block types have no model in your resource packs and are not drawn.</p>}
     </section>
   )
