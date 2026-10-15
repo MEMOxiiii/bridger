@@ -3,6 +3,8 @@
 
 #include "commands.hpp"
 
+#include <bridger/translate/targets.hpp>
+
 #include <bridger/convert/pipeline.hpp>
 #include <bridger/core/log.hpp>
 #include <bridger/formats/detect.hpp>
@@ -109,6 +111,7 @@ int run_convert(const ConvertArgs& a) {
     o.overwrite = a.overwrite;
     o.threads = a.threads;
     o.level_name = a.level_name;
+    o.target_version = a.target_version;
     o.fallback = a.fallback == "marker" ? translate::Fallback::Marker : translate::Fallback::Air;
     if (a.fallback != "air" && a.fallback != "marker") {
         log::error("invalid --fallback '{}' (expected air or marker)", a.fallback);
@@ -181,7 +184,24 @@ int run_convert(const ConvertArgs& a) {
         }
         std::puts(std::format("Report written to {}", a.report_path).c_str());
     }
-    std::puts(std::format("Done: {}", a.output).c_str());
+    std::puts(std::format("Done: {} ({} -> {})", a.output, convert::describe(summary->source_version), summary->target_version).c_str());
+    return kExitOk;
+}
+
+int run_versions() {
+    const auto java = translate::JavaTargets::embedded();
+    const auto bedrock = translate::BedrockTargets::embedded();
+    if (!java || !bedrock) {
+        log::error("{}", (!java ? java.error() : bedrock.error()).describe());
+        return kExitError;
+    }
+    std::string line = "Java (structures, worlds):";
+    for (const auto& t : (*java)->targets()) line += " " + t.name;
+    std::puts(line.c_str());
+    line = "Bedrock (.mcstructure, .mcworld):";
+    for (const auto& t : (*bedrock)->targets()) line += " " + t.name;
+    std::puts(line.c_str());
+    std::puts("The first of each list is the default. Older versions get the blocks they have; the report lists the rest.");
     return kExitOk;
 }
 

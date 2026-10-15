@@ -20,6 +20,7 @@ struct JavaLevelInfo {
     std::string level_name;
     std::optional<i32> data_version;
     std::optional<std::string> version_name;
+    std::optional<i32> storage_format; // level.dat "version": 19132 McRegion, 19133 Anvil
     std::optional<BlockPos> spawn;
     std::optional<i64> seed;
 };

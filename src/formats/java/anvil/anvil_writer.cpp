@@ -209,20 +209,67 @@ Result<std::vector<u8>> encode_java_level_dat(const JavaLevelOptions& o) {
     w.write_byte("allowCommands", 1);
     w.write_byte("initialized", 1);
     w.write_long("Time", 0);
-    w.begin_compound("spawn");
-    w.write_string("dimension", "minecraft:overworld");
-    const std::array<i32, 3> pos{o.spawn.x, o.spawn.y, o.spawn.z};
-    w.write_int_array("pos", pos);
-    w.write_float("yaw", 0.0f);
-    w.write_float("pitch", 0.0f);
-    w.end_compound();
+    if (o.data_version >= kJava1_21_9) {
+        // 1.21.9+ (25w32a): the spawn point is a compound (Chunker v1_21_9 LevelWriter, 26.3 RespawnData).
+        w.begin_compound("spawn");
+        w.write_string("dimension", "minecraft:overworld");
+        const std::array<i32, 3> pos{o.spawn.x, o.spawn.y, o.spawn.z};
+        w.write_int_array("pos", pos);
+        w.write_float("yaw", 0.0f);
+        w.write_float("pitch", 0.0f);
+        w.end_compound();
+    } else {
+        w.write_int("SpawnX", o.spawn.x); // before 1.21.9 (minecraft.wiki "Java Edition level format")
+        w.write_int("SpawnY", o.spawn.y);
+        w.write_int("SpawnZ", o.spawn.z);
+    }
+    if (o.data_version < kJava26_1) {
+        // Before 26.1 the world generation settings live in level.dat as WorldGenSettings, with the three
+        // vanilla dimensions (fields as HiveGamesOSS/Chunker's v1_16/v1_18 LevelWriter writes them; the
+        // generator "seed" is required by 1.18 and ignored by later versions).
+        const i64 seed = o.seed.value_or(0);
+        w.begin_compound("WorldGenSettings");
+        w.write_byte("bonus_chest", 0);
+        w.write_byte("generate_features", 1);
+        w.write_long("seed", seed);
+        w.begin_compound("dimensions");
+        for (const auto& [dim, settings] : {std::pair{"minecraft:overworld", "minecraft:overworld"}, std::pair{"minecraft:the_nether", "minecraft:nether"},
+                                            std::pair{"minecraft:the_end", "minecraft:end"}}) {
+            w.begin_compound(dim);
+            w.begin_compound("generator");
+            w.write_string("type", "minecraft:noise");
+            w.write_string("settings", settings);
+            w.write_long("seed", seed);
+            w.begin_compound("biome_source");
+            if (std::string_view(dim) == "minecraft:the_end") {
+                w.write_string("type", "minecraft:the_end");
+                w.write_long("seed", seed);
+            } else {
+                w.write_string("type", "minecraft:multi_noise");
+                w.write_string("preset", std::string_view(dim) == "minecraft:overworld" ? "minecraft:overworld" : "minecraft:nether");
+            }
+            w.end_compound();
+            w.end_compound();
+            w.write_string("type", dim);
+            w.end_compound();
+        }
+        w.end_compound();
+        w.end_compound();
+    }
     w.begin_compound("DataPacks");
-    w.begin_list("Enabled", TagType::String, 1);
+    w.begin_list("Enabled", TagType::String, 1 + o.experiments.size());
     w.write_string({}, "vanilla");
+    for (const std::string& e : o.experiments) w.write_string({}, e);
     w.end_list();
     w.begin_list("Disabled", TagType::End, 0);
     w.end_list();
     w.end_compound();
+    if (!o.experiments.empty()) {
+        w.begin_list("enabled_features", TagType::String, 1 + o.experiments.size());
+        w.write_string({}, "vanilla");
+        for (const std::string& e : o.experiments) w.write_string({}, e);
+        w.end_list();
+    }
     w.end_compound();
     w.end_compound();
     BRIDGER_TRY(const std::vector<u8> raw, std::move(w).finish());

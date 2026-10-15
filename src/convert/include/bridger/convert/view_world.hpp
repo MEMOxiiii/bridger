@@ -5,6 +5,7 @@
 // Opening never modifies the input; a Bedrock world is unzipped into a scratch directory that is
 // removed when the object is destroyed.
 
+#include <bridger/convert/source_version.hpp>
 #include <bridger/core/result.hpp>
 #include <bridger/core/structure.hpp>
 #include <bridger/formats/format.hpp>
@@ -29,6 +30,7 @@ struct ViewWorldInfo {
     BlockPos spawn{0, 64, 0};
     std::optional<i64> seed;
     usize chunk_count = 0;
+    GameVersionInfo source_version;
 };
 
 class ViewWorld {

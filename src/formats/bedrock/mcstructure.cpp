@@ -134,6 +134,7 @@ Result<McStructureFile> read_mcstructure(std::span<const u8> bytes, std::shared_
     std::vector<u32> palette;
     std::set<std::string> unknown_names;
     for (const NbtView entry : def.find("block_palette").items()) {
+        out.block_version = std::max(out.block_version, entry.entries().find("version").as_int().value_or(0));
         const auto id = lookup(entry.entries());
         if (!id) {
             const auto name = entry.entries().find("name").as_string();

@@ -165,6 +165,8 @@ Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3
 | 13 | Resize, maximise and move the window between monitors with different scaling: the UI and the 3D view stay sharp and aligned. |
 | 14 | Distant terrain (Settings → View, default 32 chunks): simplified land continues past the render distance up to the fog; the HUD counts "+ N far"; moving the slider to Off removes it. Closing and reopening the same world shows the distant land at once (cache). |
 | 15 | Old worlds open and convert: a Bedrock world folder from `minecraftWorlds` (the folder itself, not a `.mcworld`), a Java world from before 1.13; the original folders are unchanged afterwards. |
+| 16 | The convert page shows "Saved by" with the right version for a `.schem` from an older WorldEdit, a 1.20 Java world, a `.mcworld` and a `.schematic`; the "Game version" list offers every target, newest first, and the line under it reads "source → target". |
+| 17 | Target versions in the game: a world converted for Java 1.20.1 and one for 1.18.2 open in those versions (launcher installations) with the build and chests intact; a `.schem` written for 1.20.1 pastes in WorldEdit on 1.20.1. A `.mcworld` written for an older Bedrock version opens in the current Bedrock (which upgrades it). |
 
 ### Procedure
 

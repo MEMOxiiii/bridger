@@ -7,6 +7,7 @@
 
 #include <bridger/core/result.hpp>
 #include <bridger/core/structure.hpp>
+#include <bridger/formats/bedrock/mcworld/chunk_key.hpp>
 #include <bridger/formats/bedrock/mcworld/level_dat.hpp>
 #include <bridger/formats/bedrock/mcworld/subchunk_codec.hpp>
 
@@ -34,6 +35,7 @@ struct NewWorldOptions {
     std::vector<FlatLayer> flat_layers;
     u32 air_state = 0;
     i32 default_biome = 1; // Bedrock numeric biome id (plains)
+    u8 chunk_version = kChunkVersion; // Version key byte of the target version (translate/targets.hpp)
 };
 
 struct WorldWriteStats {
@@ -74,7 +76,8 @@ public:
     // so workers can encode in parallel while one thread stores columns with put() in a
     // fixed order (identical output for any thread count).
     [[nodiscard]] static Result<EncodedColumn> encode_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state,
-                                                             i32 default_biome, const StateNbtFn& state_nbt);
+                                                             i32 default_biome, const StateNbtFn& state_nbt,
+                                                             u8 chunk_version = kChunkVersion);
     [[nodiscard]] Status put(const EncodedColumn& column);
 
     // `column`: a Bedrock-domain 16 x h x 16 structure whose local (0,0,0) is world

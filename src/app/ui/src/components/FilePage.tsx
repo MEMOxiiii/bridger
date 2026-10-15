@@ -1,7 +1,7 @@
 // The file page: what was opened (left) and what to do with it (right). Converting is the main
 // job, so it gets the larger column; the 3D preview is one click away, never forced.
 import { useEffect, useRef } from 'react'
-import type { Doc } from '../bridge'
+import type { Doc, GameVersion } from '../bridge'
 import { enterPreview } from '../actions'
 import { formatMeta, issueTotal } from '../formats'
 import { Counter, dur, EASE_IN, gsap, SmoothScroll, useGSAP } from '../motion'
@@ -47,6 +47,20 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
+// "Saved by Java 1.20.1": the version the file comes from, with how Bridger knows it.
+function SourceVersion({ v }: { v: GameVersion }) {
+  const edition = v.edition === 'java' ? 'Java' : 'Bedrock'
+  return (
+    <div className={`source-version source-version--${v.edition}`} aria-label={`Saved by ${v.text}`}>
+      <span className="source-version-label">Saved by</span>
+      <span className="source-version-name">
+        {edition} <b className="mono">{v.name || 'unknown version'}</b>
+      </span>
+      {v.detail && <span className="source-version-detail">{v.detail}</span>}
+    </div>
+  )
+}
+
 function FileCard({ doc }: { doc: Doc }) {
   const previewReady = useStore((s) => s.previewReady)
   const assets = useStore((s) => s.assets)
@@ -68,6 +82,8 @@ function FileCard({ doc }: { doc: Doc }) {
         {doc.path}
       </p>
 
+      {doc.source_version && <SourceVersion v={doc.source_version} />}
+
       <dl className="facts">
         {doc.kind === 'structure' && doc.size && <Fact label="Size">{doc.size.join(' × ')}</Fact>}
         {doc.blocks !== undefined && (
@@ -82,7 +98,6 @@ function FileCard({ doc }: { doc: Doc }) {
           </Fact>
         )}
         {doc.kind === 'world' && doc.spawn && <Fact label="Spawn">{doc.spawn.join(', ')}</Fact>}
-        {doc.data_version ? <Fact label="Data version">{doc.data_version}</Fact> : null}
       </dl>
 
       {doc.kind === 'structure' && (

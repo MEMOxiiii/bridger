@@ -22,6 +22,13 @@ versions follow the release plan in `docs/release.md`.
   "Distant terrain"; `bridger render --distant N`), cached on disk so reopening a world shows it without decoding
   those chunks again.
 
+- The game version each file was saved by is shown on the convert page and by `bridger info` ("Saved by Java 1.20.1",
+  "Bedrock 1.21.50", "before 1.13", ...), for every format.
+- Target versions: conversions can be written for any Java release from 1.18 to 26.3 and any Bedrock version from
+  1.18.30 to 26.50 ("Game version" list on the convert page, `bridger convert --target-version`, `bridger versions`).
+  Blocks, biomes, block entities, item names and the world files follow the target; whatever the target cannot hold is
+  reported. Block data from Mojang's data generator (Java) and BedrockBlockPaletteArchive (Bedrock, CC0).
+
 ### Changed
 
 - Legacy `.schematic` files: flower pot contents, skull types and banner colours are converted now, and door

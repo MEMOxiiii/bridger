@@ -67,6 +67,8 @@ Result<ViewWorld> ViewWorld::open(const fs::path& path) {
         m.info.level_name = jw.level.level_name;
         m.info.spawn = jw.level.spawn.value_or(BlockPos{0, 64, 0});
         m.info.seed = jw.level.seed;
+        m.info.source_version = java_version_info(formats::FormatId::JavaWorld, jw.level.data_version, jw.level.version_name,
+                                                  jw.level.storage_format);
         for (const fs::path& rp : jw.overworld_regions) {
             auto r = formats::java::RegionFile::open(rp);
             if (!r) continue;
@@ -88,6 +90,7 @@ Result<ViewWorld> ViewWorld::open(const fs::path& path) {
         m.info.level_name = reader.level().level_name;
         m.info.spawn = reader.level().spawn;
         m.info.seed = reader.level().seed;
+        m.info.source_version = bedrock_world_version_info(reader.level().last_opened_version);
         m.chunks = reader.overworld_chunks();
         m.bedrock.emplace(std::move(reader));
     }

@@ -806,6 +806,46 @@ kbd {
   user-select: text;
 }
 
+.source-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--java);
+  background: var(--java-soft);
+}
+
+.source-version--bedrock {
+  border-left-color: var(--bedrock);
+  background: var(--bedrock-soft);
+}
+
+.source-version-label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.source-version-name {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.source-version-name b {
+  font-weight: 800;
+}
+
+.source-version-detail {
+  flex-basis: 100%;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
 .facts {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -819,6 +859,10 @@ kbd {
 .fact {
   padding: var(--space-3);
   background: var(--surface-2);
+}
+
+.fact:last-child:nth-child(odd) {
+  grid-column: span 2;
 }
 
 .fact dt {
@@ -2592,4 +2636,178 @@ kbd {
 /* Browser preview (npm run dev): a stand-in for the 3D scene behind the page. */
 html.preview .app.screen-preview {
   background: linear-gradient(180deg, #8fb4f0 0%, #b5cdf2 55%, #5d6a52 55%, #4a5541 100%);
+}
+
+/* ---- Target game version ------------------------------------------------------------------------ */
+
+.version-field {
+  margin-top: var(--space-5);
+}
+
+.version-picker {
+  position: relative;
+  max-width: 360px;
+}
+
+.version-button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  box-shadow: inset 0 0 0 1px var(--border), 0 3px 0 var(--edge);
+  transition: transform 90ms var(--ease-out), background var(--dur-base) var(--ease-out);
+}
+
+.version-button:hover {
+  background: var(--surface-3);
+}
+
+.version-button:active {
+  transform: translateY(3px);
+  box-shadow: inset 0 0 0 1px var(--border), 0 0 0 var(--edge);
+}
+
+.version-picker.is-open .version-button svg {
+  transform: rotate(-90deg);
+}
+
+.version-button svg {
+  margin-left: auto;
+  color: var(--text-muted);
+  transform: rotate(90deg);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.version-button-edition {
+  font-size: var(--text-xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--java);
+}
+
+.version-picker--bedrock .version-button-edition {
+  color: var(--bedrock);
+}
+
+.version-button-name {
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+
+.version-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.version-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  margin: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-2);
+}
+
+.version-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version-line {
+  position: sticky;
+  top: calc(var(--space-2) * -1);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
+  background: var(--surface);
+}
+
+.version-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  font-size: var(--text-md);
+}
+
+.version-option.is-active {
+  background: var(--surface-active);
+}
+
+.version-option.is-selected .mono {
+  font-weight: 800;
+  color: var(--mint);
+}
+
+.version-check {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
+.version-check--game {
+  color: var(--success);
+}
+
+.route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.route svg {
+  color: var(--text-subtle);
+}
+
+.route-end {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--java-soft);
+}
+
+.route-end--bedrock {
+  background: var(--bedrock-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .version-button,
+  .version-button svg {
+    transition: none;
+  }
+}
+
+.done-versions {
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+  font-size: var(--text-sm);
 }

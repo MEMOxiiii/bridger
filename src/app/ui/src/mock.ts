@@ -1,8 +1,15 @@
 // Browser-only stand-in for bridger-gui.exe (`npm run dev`), so layouts and motion can be
 // designed without the native app. Never bundled into a code path the app takes.
-import type { Doc, Incoming, Outgoing, Settings } from './bridge'
+import type { Doc, Incoming, Outgoing, Settings, TargetVersion } from './bridge'
 import { setConvert, setState } from './store'
 
+const javaVersions: TargetVersion[] = ['26.3', '26.2', '26.1.2', '26.1', '1.21.11', '1.21.10', '1.21.4', '1.21.1', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2'].map(
+  (name, i) => ({ name, checked: i === 0 || name === '1.20.1' ? 'game' : 'data' }),
+)
+const bedrockVersions: TargetVersion[] = ['26.50', '26.40', '26.30', '1.21.130', '1.21.100', '1.21.50', '1.21.0', '1.20.80', '1.20.0', '1.19.80', '1.18.30'].map((name, i) => ({
+  name,
+  checked: i === 0 ? 'game' : 'data',
+}))
 const settings: Settings = { client_jar: '', packs: [], render_distance: 12, distant_terrain: 32, recent: ['C:\\Builds\\castle.schem', 'C:\\Builds\\village.mcstructure'] }
 
 const doc: Doc = {
@@ -15,7 +22,8 @@ const doc: Doc = {
   blocks: 18234,
   block_entities: 12,
   entities: 0,
-  data_version: 5023,
+  data_version: 3465,
+  source_version: { edition: 'java', name: '1.20.1', detail: 'DataVersion 3465', exact: true, text: 'Java 1.20.1 (DataVersion 3465)' },
   warnings: [],
   report: {
     lossy_block: [
@@ -27,11 +35,11 @@ const doc: Doc = {
   quads: 52344,
   missing_models: 0,
   targets: [
-    { id: 'mcworld', ext: '.mcworld', edition: 'bedrock', description: 'Bedrock world (zipped LevelDB)' },
-    { id: 'mcstructure', ext: '.mcstructure', edition: 'bedrock', description: 'Bedrock structure file' },
-    { id: 'schem', ext: '.schem', edition: 'java', description: 'Sponge schematic v1-v3' },
-    { id: 'litematic', ext: '.litematic', edition: 'java', description: 'Litematica schematic' },
-    { id: 'nbt', ext: '.nbt', edition: 'java', description: 'Java structure block file' },
+    { id: 'mcworld', ext: '.mcworld', edition: 'bedrock', description: 'Bedrock world (zipped LevelDB)', versions: bedrockVersions },
+    { id: 'mcstructure', ext: '.mcstructure', edition: 'bedrock', description: 'Bedrock structure file', versions: bedrockVersions },
+    { id: 'schem', ext: '.schem', edition: 'java', description: 'Sponge schematic v1-v3', versions: javaVersions },
+    { id: 'litematic', ext: '.litematic', edition: 'java', description: 'Litematica schematic', versions: javaVersions },
+    { id: 'nbt', ext: '.nbt', edition: 'java', description: 'Java structure block file', versions: javaVersions },
   ],
 }
 

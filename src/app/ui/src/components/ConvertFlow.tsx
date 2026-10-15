@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { send, type ConvertRequest, type Doc, type Target } from '../bridge'
+import { VersionPicker } from './VersionPicker'
 import { basename, dirname, formatMeta, issueTotal } from '../formats'
 import { dur, gsap, useGSAP } from '../motion'
 import { setConvert, useStore, type ConvertState } from '../store'
@@ -38,10 +39,31 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
   )
 }
 
+// "Java 1.20.1 → Bedrock 26.50": what the conversion does, in one line.
+function Route({ doc, edition, version }: { doc: Doc; edition: Target['edition']; version: string }) {
+  const src = doc.source_version
+  const from = src ? `${src.edition === 'java' ? 'Java' : 'Bedrock'} ${src.name || '(version not recorded)'}` : null
+  const to = `${edition === 'java' ? 'Java' : 'Bedrock'} ${version}`
+  return (
+    <p className="route" aria-label={from ? `From ${from} to ${to}` : `To ${to}`}>
+      {from && (
+        <>
+          <span className={`route-end route-end--${src!.edition}`}>{from}</span>
+          <Icon name="arrow" size={16} />
+        </>
+      )}
+      <span className={`route-end route-end--${edition}`}>{to}</span>
+    </p>
+  )
+}
+
 function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
   const targets = doc.targets
   const target = convert.target ?? targets[0]?.id ?? null
   const meta = target ? formatMeta(target) : null
+  const targetInfo = targets.find((t) => t.id === target) ?? null
+  const versions = targetInfo?.versions ?? []
+  const version = versions.find((v) => v.name === convert.targetVersion)?.name ?? versions[0]?.name ?? null
   const [name, setName] = useState(stem(doc.kind === 'world' ? doc.name : doc.name))
   const [placement, setPlacement] = useState<'new' | 'into'>('new')
   const [air, setAir] = useState<'keep' | 'replace'>('keep')
@@ -65,6 +87,7 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
       clear_entities: into && clearEntities,
       overwrite: true, // the save dialog already asked before replacing a file
     }
+    if (version && !into) req.target_version = version // placing into a world writes for that world's game
     if (into && convert.intoWorld) {
       req.into_world = convert.intoWorld
       req.place_at = pos.map((p) => parseInt(p, 10)) as [number, number, number]
@@ -93,13 +116,21 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
                     key={t.id}
                     t={t}
                     selected={t.id === target}
-                    onSelect={() => target !== t.id && setConvert({ target: t.id, output: null })}
+                    onSelect={() => target !== t.id && setConvert({ target: t.id, targetVersion: null, output: null })}
                   />
                 ))}
               </div>
             </div>
           ),
         )}
+        {targetInfo && version && !into && (
+          <div className="field version-field">
+            <span className="field-label">Game version</span>
+            <VersionPicker edition={targetInfo.edition} versions={versions} value={version} onChange={(v) => setConvert({ targetVersion: v })} />
+            <Route doc={doc} edition={targetInfo.edition} version={version} />
+          </div>
+        )}
+        {into && <p className="field-hint version-field">The build is written for the game version of the world you place it into.</p>}
       </section>
 
       <section className="flow-section">
@@ -280,6 +311,12 @@ function Done({ convert, doc }: { convert: ConvertState; doc: Doc }) {
         <p className="done-file" title={s.output}>
           {basename(s.output)}
         </p>
+        {s.target_version && (
+          <p className="done-versions">
+            For <b>{s.target_version}</b>
+            {s.source_version ? <span className="muted"> · from {s.source_version}</span> : null}
+          </p>
+        )}
         <dl className="stats-grid stats-grid--3">
           <div className="stat">
             <dt className="overline">Blocks</dt>

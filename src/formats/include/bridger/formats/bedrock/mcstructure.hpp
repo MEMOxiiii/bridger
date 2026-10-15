@@ -30,6 +30,7 @@ struct McStructureFile {
     Structure structure;
     std::vector<std::string> warnings; // unknown states, structure void, ...
     std::array<i32, 3> world_origin{0, 0, 0};
+    i32 block_version = 0; // highest palette entry "version" (packed major.minor.patch.revision); 0: none
 };
 
 struct McStructureReadOptions {

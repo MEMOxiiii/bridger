@@ -102,11 +102,17 @@ pass `--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
 | `.mcworld` or world folder (Overworld; reads Pocket Edition 0.9 – 26.52, writes 26.52) | Bedrock | ✓ | ✓ |
 | `.mcworld` (place into a copy of an existing world) | Bedrock | — | ✓ |
 
-✓ means golden tests, a fuzz target, a benchmark and a recorded in-game check all pass. Bridger writes exactly
-**Java Edition 26.3** and **Bedrock Edition 26.52** ([docs/versions.md](docs/versions.md)). It reads worlds and
-structures saved by older versions and upgrades their blocks and biomes: Java worlds back to Beta 1.3 (McRegion,
-numeric ids, every palette layout) and Bedrock worlds back to Pocket Edition 0.9
-([anvil.md](docs/formats/anvil.md#old-worlds), [bedrock-world.md](docs/formats/bedrock-world.md#old-worlds-reading)).
+✓ means golden tests, a fuzz target, a benchmark and a recorded in-game check all pass. The pinned versions are
+**Java Edition 26.3** and **Bedrock Edition 26.52** ([docs/versions.md](docs/versions.md)).
+
+- **Reads** worlds and structures saved by older versions and upgrades their blocks and biomes: Java worlds back to
+  Beta 1.3 (McRegion, numeric ids, every palette layout) and Bedrock worlds back to Pocket Edition 0.9
+  ([anvil.md](docs/formats/anvil.md#old-worlds), [bedrock-world.md](docs/formats/bedrock-world.md#old-worlds-reading)).
+  The convert page shows which version saved the file.
+- **Writes** for any Java release from 1.18 to 26.3 and any Bedrock version from 1.18.30 to 26.50
+  (`--target-version`, or the "Game version" list in the app); what an older version cannot hold is reported
+  ([target versions](docs/versions.md#target-versions-what-a-conversion-writes)). The newest versions are checked in
+  the game; the older ones against their exact block data.
 
 ## Performance
 

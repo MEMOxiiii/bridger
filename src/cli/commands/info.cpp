@@ -2,6 +2,8 @@
 
 #include "commands.hpp"
 
+#include <bridger/convert/source_version.hpp>
+
 #include <bridger/convert/pipeline.hpp>
 #include <bridger/core/log.hpp>
 #include <bridger/formats/bedrock/mcstructure.hpp>
@@ -59,7 +61,7 @@ int info_schem(const std::string& name, std::span<const u8> bytes) {
 
     line("File:", name);
     line("Format:", std::format("Sponge schematic v{} ({})", i.version, io::to_string(i.compression)));
-    line("DataVersion:", i.data_version ? std::to_string(*i.data_version) : std::string("(none)"));
+    line("Saved by:", convert::describe(convert::java_version_info(formats::FormatId::SpongeSchem, i.data_version)));
     line("Size:", std::format("{} x {} x {} ({} blocks)", i.width, i.height, i.length, s.size().volume()));
     line("Offset:", std::format("{}, {}, {}", i.offset[0], i.offset[1], i.offset[2]));
     line("Block palette:", std::format("{} states", i.palette_size));
@@ -124,7 +126,7 @@ int info_java_structure(const std::string& name, std::span<const u8> bytes, form
     const Structure& s = file->structure;
     line("File:", name);
     line("Format:", std::string(formats::info(format).description));
-    line("DataVersion:", file->data_version ? std::to_string(*file->data_version) : std::string("(none)"));
+    line("Saved by:", convert::describe(convert::java_version_info(format, file->data_version)));
     line("Size:", std::format("{} x {} x {} ({} blocks)", s.size().x, s.size().y, s.size().z, s.size().volume()));
     line("Block states:", std::format("{} distinct", s.block_registry().size()));
     line("Non-air blocks:", std::to_string(count_non_air(s)));
@@ -155,6 +157,7 @@ int info_mcstructure(const std::string& name, std::span<const u8> bytes) {
             }
     line("File:", name);
     line("Format:", "Bedrock structure (.mcstructure, format_version 1)");
+    line("Saved by:", convert::describe(convert::bedrock_block_version_info(file->block_version)));
     line("Size:", std::format("{} x {} x {} ({} blocks)", s.size().x, s.size().y, s.size().z, s.size().volume()));
     line("World origin:", std::format("{}, {}, {}", file->world_origin[0], file->world_origin[1], file->world_origin[2]));
     line("Non-air blocks:", std::to_string(count_non_air(s, air)));
@@ -189,6 +192,7 @@ int info_mcworld(const std::string& name, const std::filesystem::path& path) {
     line("File:", name);
     line("Format:", formats::bedrock::is_bedrock_world_folder(path) ? "Bedrock world (folder)" : "Bedrock world (.mcworld)");
     line("Level name:", lv.level_name.empty() ? std::string("(none)") : lv.level_name);
+    line("Saved by:", convert::describe(convert::bedrock_world_version_info(lv.last_opened_version)));
     line("Generator:", lv.generator >= 0 && lv.generator < 6 ? std::string(kGenerators[lv.generator]) : std::to_string(lv.generator));
     line("Seed:", std::to_string(lv.seed));
     line("Spawn:", std::format("{}, {}, {}", lv.spawn.x, lv.spawn.y, lv.spawn.z));
@@ -224,8 +228,8 @@ int info_java_world(const std::string& name, const std::filesystem::path& path) 
     line("Folder:", name);
     line("Format:", world->modern_layout ? "Java world (26.1+ folder layout)" : "Java world (Anvil)");
     line("Level name:", lv.level_name.empty() ? std::string("(none)") : lv.level_name);
-    line("Version:", lv.version_name.value_or("(unknown)"));
-    line("DataVersion:", lv.data_version ? std::to_string(*lv.data_version) : std::string("(none)"));
+    line("Saved by:", convert::describe(convert::java_version_info(formats::FormatId::JavaWorld, lv.data_version, lv.version_name,
+                                                                    lv.storage_format)));
     line("Seed:", lv.seed ? std::to_string(*lv.seed) : std::string("(unknown)"));
     if (lv.spawn) line("Spawn:", std::format("{}, {}, {}", lv.spawn->x, lv.spawn->y, lv.spawn->z));
     line("Overworld:", std::format("{} region files, {} chunks", world->overworld_regions.size(), chunks));

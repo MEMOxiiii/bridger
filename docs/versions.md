@@ -1,8 +1,8 @@
 # Pinned game versions
 
-Bridger v1 supports **exactly one Java version and one Bedrock version**: the latest stable release of each when
-Phase 0 started (2026-10-11). Other versions are added later, one at a time (Phase 9). The mapping data
-(`.brmap`) records the same versions.
+The mapping data (`.brmap`) translates between **one pinned Java version and one pinned Bedrock version**: the latest
+stable release of each when Phase 0 started (2026-10-11). Files from older versions are read and upgraded to the
+pinned versions, and output can be written for older versions ("Target versions" below).
 
 | Edition | Version | Released | How it was confirmed |
 |---|---|---|---|
@@ -25,6 +25,71 @@ These identifiers are part of the formats Bridger reads and writes. Fill them in
 | Bedrock chunk `Version` key (`0x2C`) | world writer | Chunker writer chain for 26.50 | **42** |
 
 Values marked ⚠ in `docs/formats/bedrock-world.md` are confirmed by the in-game checklist.
+
+## Version names (what saved a file)
+
+The convert page and `bridger info` show which game version saved the input ("Saved by"), from what the file records
+(`convert/source_version.cpp`):
+
+| Input | Recorded | Shown |
+|---|---|---|
+| Java world | `level.dat` `Version.Name` (since 1.9), else `DataVersion`, else `version` (19132 McRegion, 19133 Anvil) | the name, e.g. "Java 1.20.1" |
+| `.schem` v2/v3, `.nbt`, `.litematic` | `DataVersion` / `MinecraftDataVersion` | the release with that DataVersion, or "a snapshot between X and Y" |
+| `.schem` v1 | nothing | "version not recorded (1.13 or newer)" |
+| `.schematic` | numeric ids | "before 1.13" |
+| Bedrock world (`.mcworld` or folder) | `level.dat` `lastOpenedWithVersion` | e.g. "Bedrock 1.21.50" (26.x versions as "26.50") |
+| `.mcstructure` | the highest palette `version` | "Bedrock 1.21.60 or newer" (block data versions change less often than releases) |
+
+DataVersion → release name: Mojang's version manifest joined with PrismarineJS minecraft-data
+`pc/common/protocolVersions.json` (MIT), every release since 1.9 (`core/game_versions.cpp`).
+
+## Target versions (what a conversion writes)
+
+Every conversion can be written for an older version than the pinned one: `bridger convert --target-version <v>`,
+`bridger versions` for the lists, and the "Game version" list on the app's convert page. The translators produce
+pinned states; a final pass (`translate/targets.cpp`) rewrites them for the target and reports what the target
+cannot hold. Nothing is dropped silently.
+
+| Edition | Targets | Block data | Checked |
+|---|---|---|---|
+| Java | every release 1.18 – 26.3 (32) | `blocks.json` and `registries.json` (items) of every release from **Mojang's own data generator** run on each official server jar (`tools/mapgen/build_java_targets.py` → `src/translate/data/java-targets.nbt`) | 26.3 in game; the others against their block data |
+| Bedrock | every release 1.18.30 – 26.50 (37) | each version's block palette from **BedrockBlockPaletteArchive** (CC0), every state upgraded with Bridger's own upgrader to get an exact map pinned → target (`build_bedrock_targets.py`, `bridger_targetgen` → `bedrock-targets.nbt`); item renames from **BedrockItemUpgradeSchema** (CC0) applied backwards | 26.50 in game; the others against their block data (the Bedrock game only runs its newest version) |
+
+Checks built into the data: every state of every archived Bedrock palette resolves (0 unresolved), and the 26.50
+target reproduces the pinned palette exactly (0 missing, 0 respelled).
+
+**Blocks.** A state is written as the target spells it (renamed blocks such as `short_grass` → `grass` before
+1.20.3, `iron_chain` → `chain` before 1.21.9; Bedrock respellings such as `red_wool` → `wool[color=red]` before
+1.19.70). Properties the target lacks are dropped and properties it has take its default; that is reported as lossy
+unless the dropped value was the default. Blocks the target does not have become the fallback block and are
+reported. On Bedrock, a missing state of a block the target has becomes the same block's closest state (e.g. fence
+connections and the stairs' corner shape, which 26.50 started saving and older versions compute; those are not
+reported).
+
+**Experimental blocks (Java).** Mojang's reports list blocks of experimental features in the releases where they were
+still experimental (`update_1_20` in 1.19.3 – 1.19.4, `update_1_21` in 1.20.3 – 1.20.6, `winter_drop` in 1.21.2 –
+1.21.3; minecraft.wiki "Experiments"). Such blocks are written; a world gets the experiment switched on in its
+`level.dat` (data packs and `enabled_features`, as Chunker does), a structure gets a warning. Bedrock palettes also
+contain experimental states without marking them; for Bedrock targets this is a known limit (the experiment is not
+switched on).
+
+**Biomes** newer than the target become the closest older one, reported: deep dark → dripstone caves and mangrove
+swamp → swamp (before Java 1.19 / Bedrock 1.19.0), cherry grove → meadow (before 1.20 / 1.20.0), pale garden →
+dark forest (before Java 1.21.4 / Bedrock 1.21.50).
+
+**Block entities.** Java: item stacks `{id, Count: Byte}` without components before 1.20.5, items the target lacks
+dropped (reported), text as JSON strings before 1.21.5, signs as `Text1`–`Text4`/`Color`/`GlowingText` before 1.20,
+banner patterns as `{Pattern: code, Color: dye}` before 1.20.5; block entities of blocks the target lacks are removed
+with them. Bedrock: signs with the front face at the root before 1.19.80; item ids, data values and the items' `Block`
+tag in the target's spelling.
+
+**World files.** Java: before 26.1 the Overworld is in `region/` and the generation settings (`WorldGenSettings`
+with the three vanilla dimensions) in `level.dat`; before 1.21.9 the spawn is `SpawnX/Y/Z`; `DataVersion`,
+`Version.Name` and every chunk's `DataVersion` are the target's. Bedrock: `level.dat` `lastOpenedWithVersion`,
+`MinimumCompatibleClientVersion`, `NetworkVersion` and `StorageVersion`, the chunks' `Version` byte (40 from 1.18.30,
+41 from 1.21.40, 42 from 1.21.120) and the palette entries' `version` are the target's
+(`tools/mapgen/overrides/bedrock_targets.json` cites each value). Placing into an existing world always writes for
+that world's game and refuses another target.
 
 ## Watch list
 

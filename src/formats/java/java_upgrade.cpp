@@ -4,6 +4,8 @@
 
 #include "java_upgrade.hpp"
 
+#include <bridger/formats/java/upgrade.hpp>
+
 #include <algorithm>
 #include <array>
 #include <string>
@@ -205,3 +207,9 @@ std::optional<LegacyBiome> legacy_biome(i32 id) {
 }
 
 } // namespace bridger::formats::detail
+
+namespace bridger::formats::java {
+
+BlockState upgrade_block_state(const BlockState& state, i32 data_version) { return detail::upgraded(state, data_version); }
+
+} // namespace bridger::formats::java

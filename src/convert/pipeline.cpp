@@ -19,7 +19,9 @@
 #include <bridger/platform/atomic_replace.hpp>
 #include <bridger/platform/mapped_file.hpp>
 #include <bridger/platform/paths.hpp>
+#include <bridger/formats/java/upgrade.hpp>
 #include <bridger/translate/bedrock_upgrade.hpp>
+#include <bridger/translate/targets.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -153,6 +155,67 @@ u64 count_non_air(const Structure& s, u32 air) {
     return n;
 }
 
+// The output's target version (ConvertOptions::target_version), resolved once per conversion.
+struct OutputTarget {
+    const translate::JavaTargets* java_targets = nullptr;
+    const translate::JavaTarget* java = nullptr;
+    const translate::BedrockTargets* bedrock_targets = nullptr;
+    const translate::BedrockTarget* bedrock = nullptr;
+};
+
+bool bedrock_output(FormatId f) { return f == FormatId::McWorld || f == FormatId::McStructure; }
+
+Result<OutputTarget> resolve_target(const ConvertOptions& o, FormatId output, ConvertSummary& summary) {
+    OutputTarget t;
+    if (bedrock_output(output)) {
+        BRIDGER_TRY(t.bedrock_targets, translate::BedrockTargets::embedded());
+        t.bedrock = o.target_version.empty() ? &t.bedrock_targets->pinned() : t.bedrock_targets->find(o.target_version);
+        if (t.bedrock == nullptr)
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("Bedrock {} is not a target version Bridger can write ({} to {})", o.target_version,
+                                          t.bedrock_targets->targets().back().name, t.bedrock_targets->pinned().name));
+        if (o.into_world && !t.bedrock->pinned)
+            return make_error(ErrorCode::InvalidArgument, "placing into an existing world writes for that world's game; leave the target "
+                                                          "version at the newest");
+        summary.target_version = "Bedrock " + t.bedrock->name;
+    } else {
+        BRIDGER_TRY(t.java_targets, translate::JavaTargets::embedded());
+        t.java = o.target_version.empty() ? &t.java_targets->pinned() : t.java_targets->find(o.target_version);
+        if (t.java == nullptr)
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("Java {} is not a target version Bridger can write ({} to {})", o.target_version,
+                                          t.java_targets->targets().back().name, t.java_targets->pinned().name));
+        summary.target_version = "Java " + t.java->name;
+        summary.target_data_version = static_cast<u32>(t.java->data_version);
+    }
+    return t;
+}
+
+// Bedrock palette entries for the target: the pinned encoder, or the target's spellings and block version.
+formats::bedrock::StateNbtFn target_state_nbt(const OutputTarget& t, const translate::MappingData& m, formats::bedrock::StateNbtFn pinned) {
+    if (t.bedrock == nullptr || t.bedrock->pinned) return pinned;
+    return [&t, &m](u32 state) -> Result<std::span<const u8>> {
+        const std::span<const u8> bytes = t.bedrock_targets->state_nbt(*t.bedrock, state, m);
+        if (bytes.empty()) return make_error(ErrorCode::InvalidArgument, "unknown Bedrock state");
+        return bytes;
+    };
+}
+
+void apply_target_level(const OutputTarget& t, formats::bedrock::LevelDatOptions& level) {
+    if (t.bedrock == nullptr) return;
+    level.storage_version = t.bedrock->storage_version;
+    level.network_version = t.bedrock->protocol;
+    level.version = t.bedrock->version;
+}
+
+translate::BedrockStateIndex bedrock_fallback(const translate::MappingData& m, translate::Fallback f) {
+    return f == translate::Fallback::Air ? m.find_bedrock("minecraft:air", {}).value_or(0) : m.find_bedrock("minecraft:info_update", {}).value_or(0);
+}
+
+BlockState java_fallback(translate::Fallback f) {
+    return BlockState(f == translate::Fallback::Air ? "minecraft:air" : "minecraft:sponge", {});
+}
+
 Status check_output(const ConvertOptions& o) {
     if (!o.overwrite && fs::exists(o.output))
         return make_error(ErrorCode::AlreadyExists, "output exists; pass --overwrite to replace it: " +
@@ -177,6 +240,8 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     BRIDGER_TRY(const translate::MappingData* mapping, translate::MappingData::embedded());
     summary.target_data_version = mapping->java_data_version();
     summary.source_data_version = world.level.data_version;
+    summary.source_version = java_version_info(FormatId::JavaWorld, world.level.data_version, world.level.version_name,
+                                               world.level.storage_format);
     const auto air = mapping->find_bedrock("minecraft:air", {});
     if (!air) return make_error(ErrorCode::Malformed, "mapping data lacks air");
     if (!world.level.data_version)
@@ -202,10 +267,14 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
         const auto now = std::chrono::steady_clock::now();
         log::debug("{}: {} ms", what, std::chrono::duration_cast<std::chrono::milliseconds>(now - t0).count());
     };
+    BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::McWorld, summary));
     BedrockStateNbt state_nbt(*mapping);
     state_nbt.prepare_all(); // read-only afterwards: shared by the worker threads without locks
     const formats::java::LegacyTables legacy = legacy_tables(*mapping); // pre-1.13 chunks (numeric ids)
-    const auto state_fn = state_nbt.fn();
+    if (!target.bedrock->pinned) // encode every target spelling up front too (the cache then only reads)
+        for (u32 s = 0; s < mapping->bedrock_state_count(); ++s) (void)target.bedrock_targets->state_nbt(*target.bedrock, s, *mapping);
+    const auto state_fn = target_state_nbt(target, *mapping, state_nbt.fn());
+    const translate::BedrockStateIndex fallback_state = bedrock_fallback(*mapping, o.fallback);
     translate::TranslateOptions topt;
     topt.fallback = o.fallback;
     usize skipped_partial = 0, clipped = 0;
@@ -261,8 +330,13 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
                 r.report.set_origin({chunk->pos.x * 16, chunk->min_y, chunk->pos.z * 16});
                 auto bedrock = translate::translate_to_bedrock(chunk->column, *mapping, topt, r.report);
                 if (!bedrock) return fail(std::move(bedrock).error());
+                if (auto rw = translate::rewrite_for_bedrock_target(*bedrock, *target.bedrock_targets, *target.bedrock, *mapping,
+                                                                    fallback_state, r.report);
+                    !rw)
+                    return fail(std::move(rw).error());
                 auto encoded = formats::bedrock::WorldBuilder::encode_column(chunk->pos, chunk->min_y, *bedrock, *air,
-                                                                             translate::kDefaultBedrockBiome, state_fn);
+                                                                             translate::kDefaultBedrockBiome, state_fn,
+                                                                             static_cast<u8>(target.bedrock->chunk_version));
                 if (!encoded) return fail(std::move(encoded).error());
                 r.encoded = std::move(*encoded);
                 r.kind = ChunkResult::Kind::Done;
@@ -311,6 +385,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     level.flat_world_layers = formats::bedrock::default_flat_world_layers();
     level.last_played =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    apply_target_level(target, level);
     phase("chunks converted");
     BRIDGER_TRY_STATUS(step(o, 0.86f, "Compacting the world database"));
     BRIDGER_TRY_STATUS(builder.finish(level));
@@ -375,7 +450,7 @@ Status check_output_directory(const ConvertOptions& o) {
 }
 
 // Re-reads a written Java structure file and compares every block with what was written.
-Status validate_java_structure(const fs::path& written, FormatId format, const Structure& expected) {
+Status validate_java_structure(const fs::path& written, FormatId format, const Structure& expected, i32 data_version) {
     BRIDGER_TRY(const platform::MappedFile f, platform::MappedFile::open(written));
     BRIDGER_TRY(const formats::StructureFile back,
                 formats::read_java_structure(f.data(), format, std::make_shared<BlockStateRegistry>(),
@@ -396,7 +471,10 @@ Status validate_java_structure(const fs::path& written, FormatId format, const S
                     const StateId mapped = st ? expected.block_registry().intern(*st) : UINT32_MAX;
                     it = same.emplace(got, mapped).first;
                 }
-                if (it->second != expected.block(p))
+                // Written for an older version, a state reads back upgraded (e.g. grass -> short_grass).
+                const StateId want = expected.block(p);
+                if (it->second != want &&
+                    expected.block_registry().intern(formats::java::upgrade_block_state(expected.block_registry().get(want), data_version)) != it->second)
                     return make_error(ErrorCode::ValidationFailed,
                                       std::format("re-read block at {},{},{} differs from what was written", p.x, p.y, p.z));
             }
@@ -420,16 +498,18 @@ Result<ConvertSummary> write_java_structure_output(const ConvertOptions& o, Conv
     const FormatId format = summary.output_format;
     BRIDGER_TRY_STATUS(step(o, 0.9f, "Saving"));
     BRIDGER_TRY_STATUS(platform::write_file_atomically(
-        o.output, *bytes, [&](const fs::path& written) { return validate_java_structure(written, format, java); }, cancel_gate(o)));
+        o.output, *bytes, [&](const fs::path& written) { return validate_java_structure(written, format, java, data_version); },
+        cancel_gate(o)));
     summary.block_entities = java.block_entities.size();
     return summary;
 }
 
 Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSummary summary, const Structure& bedrock,
-                                            const translate::MappingData& m, u32 air) {
-    BedrockStateNbt state_nbt(m);
+                                            const translate::MappingData& m, u32 air, const OutputTarget& target) {
+    BedrockStateNbt pinned_nbt(m);
+    const formats::bedrock::StateNbtFn state_fn = target_state_nbt(target, m, pinned_nbt.fn());
     if (summary.output_format == FormatId::McStructure) {
-        BRIDGER_TRY(const std::vector<u8> bytes, formats::bedrock::write_mcstructure(bedrock, air, state_nbt.fn()));
+        BRIDGER_TRY(const std::vector<u8> bytes, formats::bedrock::write_mcstructure(bedrock, air, state_fn));
         const auto lookup = bedrock_lookup(m);
         auto validate = [&](const fs::path& written) -> Status {
             BRIDGER_TRY(const platform::MappedFile f, platform::MappedFile::open(written));
@@ -459,7 +539,7 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
         BRIDGER_TRY(const ScratchDir work, ScratchDir::create("place"));
         formats::bedrock::PlaceStats stats;
         BRIDGER_TRY(const std::vector<u8> out,
-                    formats::bedrock::place_into_world(world.data(), bedrock, po, state_nbt.fn(), work.path(), &stats));
+                    formats::bedrock::place_into_world(world.data(), bedrock, po, state_fn, work.path(), &stats));
         for (const auto& r : stats.removed_block_entities)
             summary.report.add(translate::IssueKind::RemovedBlockEntity, r.id, r.pos);
         for (const auto& r : stats.removed_entities) summary.report.add(translate::IssueKind::RemovedEntity, r.id, r.pos);
@@ -495,11 +575,13 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
     wopt.level.flat_world_layers = formats::bedrock::default_flat_world_layers();
     wopt.level.last_played =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    apply_target_level(target, wopt.level);
+    if (target.bedrock != nullptr) wopt.chunk_version = static_cast<u8>(target.bedrock->chunk_version);
 
     BRIDGER_TRY(const ScratchDir build_dir, ScratchDir::create("world"));
     formats::bedrock::WorldWriteStats written;
     BRIDGER_TRY(const std::vector<u8> mcworld,
-                formats::bedrock::write_new_world(bedrock, wopt, state_nbt.fn(), build_dir.path(), &written));
+                formats::bedrock::write_new_world(bedrock, wopt, state_fn, build_dir.path(), &written));
     summary.chunks = written.chunks;
     summary.subchunks = written.subchunks;
     summary.block_entities = written.block_entities;
@@ -533,6 +615,7 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     // A .mcworld or a world folder; either way only a copy is opened.
     BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(o.input, unpacked.path()));
     if (reader.overworld_chunks().empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld chunks");
+    summary.source_version = bedrock_world_version_info(reader.level().last_opened_version);
     if (reader.has_other_dimensions())
         summary.warnings.push_back("the Nether and the End were not converted: only the Overworld is supported");
     if (reader.entity_count() > 0)
@@ -548,9 +631,12 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
             if (!keep) fs::remove_all(path, ec);
         }
     } tree{temp};
-    const fs::path region_dir = temp / "dimensions" / "minecraft" / "overworld" / "region";
+    BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::JavaWorld, summary));
+    const bool modern_layout = target.java->data_version >= formats::java::kJava26_1; // dimensions/ folders since 26.1
+    const fs::path region_dir = modern_layout ? temp / "dimensions" / "minecraft" / "overworld" / "region" : temp / "region";
     fs::create_directories(region_dir);
-    fs::create_directories(temp / "data" / "minecraft");
+    if (modern_layout) fs::create_directories(temp / "data" / "minecraft");
+    const BlockState java_fallback_state = java_fallback(o.fallback);
 
     const auto lookup = bedrock_lookup(m);
     translate::TranslateOptions topt;
@@ -571,8 +657,10 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
         std::map<std::string, u64> unknown;
         u64 blocks = 0;
         usize block_entities = 0;
+        std::vector<std::string> features; // experimental features of the target its blocks need
     };
     usize chunks = 0, block_entities = 0;
+    std::vector<std::string> experiments;
     std::map<std::string, usize> failures;
     std::string first_failure;
     usize regions_done = 0;
@@ -610,8 +698,14 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
                 r.error = std::move(java).error();
                 return;
             }
+            auto rw = translate::rewrite_for_java_target(*java, *target.java_targets, *target.java, java_fallback_state, r.report);
+            if (!rw) {
+                r.error = std::move(rw).error();
+                return;
+            }
+            r.features = std::move(rw->features);
             r.block_entities = java->block_entities.size();
-            auto nbt = formats::java::encode_chunk(*java, c, col->min_y, static_cast<i32>(m.java_data_version()));
+            auto nbt = formats::java::encode_chunk(*java, c, col->min_y, target.java->data_version);
             if (!nbt) {
                 r.error = std::move(nbt).error();
                 return;
@@ -632,6 +726,8 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
                                                                        {cols[i].x * 16, 0, cols[i].z * 16}, n);
             summary.blocks += r.blocks;
             block_entities += r.block_entities;
+            for (std::string& f : r.features)
+                if (std::find(experiments.begin(), experiments.end(), f) == experiments.end()) experiments.push_back(std::move(f));
             BRIDGER_TRY_STATUS(region.add(static_cast<u32>(cols[i].x & 31), static_cast<u32>(cols[i].z & 31), r.nbt));
             ++chunks;
             r = ColumnResult{};
@@ -648,18 +744,25 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
                                                              : platform::path_to_utf8(o.output.filename()).value_or("Bridger World");
     level.spawn = reader.level().spawn;
     level.seed = reader.level().seed;
-    level.data_version = static_cast<i32>(m.java_data_version());
-    level.version_name = std::string(m.java_version());
+    level.data_version = target.java->data_version;
+    level.version_name = target.java->name;
+    level.experiments = experiments;
+    for (const std::string& e : experiments)
+        summary.warnings.push_back(std::format("the world uses blocks of the experimental feature {} of Java {}; it is switched on in "
+                                               "the world (the game marks it as experimental)", e, target.java->name));
     level.last_played_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     BRIDGER_TRY(const std::vector<u8> level_dat, formats::java::encode_java_level_dat(level));
-    BRIDGER_TRY(const std::vector<u8> wgs, formats::java::encode_world_gen_settings(reader.level().seed, level.data_version));
     {
         std::ofstream f(temp / "level.dat", std::ios::binary);
         f.write(reinterpret_cast<const char*>(level_dat.data()), static_cast<std::streamsize>(level_dat.size()));
+        if (!f) return make_error(ErrorCode::IoError, "cannot write level.dat");
+    }
+    if (modern_layout) { // 26.1+: the seed is in data/minecraft/world_gen_settings.dat (before: in level.dat)
+        BRIDGER_TRY(const std::vector<u8> wgs, formats::java::encode_world_gen_settings(reader.level().seed, level.data_version));
         std::ofstream g(temp / "data" / "minecraft" / "world_gen_settings.dat", std::ios::binary);
         g.write(reinterpret_cast<const char*>(wgs.data()), static_cast<std::streamsize>(wgs.size()));
-        if (!f || !g) return make_error(ErrorCode::IoError, "cannot write level.dat");
+        if (!g) return make_error(ErrorCode::IoError, "cannot write world_gen_settings.dat");
     }
     if (reader.level().generator != 1)
         summary.warnings.push_back("the Bedrock world is not an infinite world; chunks it never had are generated by Java's "
@@ -760,6 +863,7 @@ Result<ViewStructure> load_view_structure(const fs::path& input) {
                                                     m->bedrock_block_version(), bedrock_state_lookup(*m), air.value_or(0));
         if (!f) return tl::unexpected(std::move(f).error().with_file(name));
         v.warnings = f->warnings;
+        v.source_version = bedrock_block_version_info(f->block_version);
         BRIDGER_TRY(v.java, translate::translate_to_java(f->structure, *m, {}, v.report));
         return v;
     }
@@ -769,6 +873,7 @@ Result<ViewStructure> load_view_structure(const fs::path& input) {
     auto f = formats::read_java_structure(file.data(), v.format, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), &legacy);
     if (!f) return tl::unexpected(std::move(f).error().with_file(name));
     v.warnings = f->warnings;
+    v.source_version = java_version_info(v.format, f->data_version);
     v.java = std::move(f->structure);
     return v;
 }
@@ -832,6 +937,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
                                                        bedrock_lookup(*mapping), *air);
         if (!file) return tl::unexpected(std::move(file).error().with_file(input_name));
         summary.warnings = file->warnings;
+        summary.source_version = bedrock_block_version_info(file->block_version);
         source = std::move(file->structure);
         summary.blocks = count_non_air(source, *air);
     } else {
@@ -841,6 +947,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
         if (!file) return tl::unexpected(std::move(file).error().with_file(input_name));
         summary.warnings = file->warnings;
         summary.source_data_version = file->data_version;
+        summary.source_version = java_version_info(summary.input_format, file->data_version);
         if (file->data_version && static_cast<u32>(*file->data_version) != mapping->java_data_version() && out_bedrock)
             summary.warnings.push_back(std::format(
                 "source DataVersion {} differs from the pinned Java version's {} ({}); renamed blocks are upgraded, and states "
@@ -872,15 +979,21 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
         target = std::move(source);
     }
 
-    // 4. Write, 5. validate + atomic move.
+    // 4. Rewrite for the target version, write, 5. validate + atomic move.
+    BRIDGER_TRY(const OutputTarget version, resolve_target(o, summary.output_format, summary));
     BRIDGER_TRY_STATUS(step(o, 0.55f, "Writing and validating"));
     if (out_java) {
-        const i32 data_version = target.source().data_version != 0 && !src_bedrock
-                                     ? static_cast<i32>(target.source().data_version)
-                                     : static_cast<i32>(mapping->java_data_version());
-        return write_java_structure_output(o, std::move(summary), target, data_version);
+        BRIDGER_TRY(const translate::JavaRewrite rewritten,
+                    translate::rewrite_for_java_target(target, *version.java_targets, *version.java, java_fallback(o.fallback), summary.report));
+        for (const std::string& e : rewritten.features)
+            summary.warnings.push_back(std::format("blocks of the experimental feature {} of Java {}: load it into a world with that "
+                                                   "experiment switched on", e, version.java->name));
+        return write_java_structure_output(o, std::move(summary), target, version.java->data_version);
     }
-    return write_bedrock_output(o, std::move(summary), target, *mapping, *air);
+    BRIDGER_TRY(const u64 rewritten, translate::rewrite_for_bedrock_target(target, *version.bedrock_targets, *version.bedrock, *mapping,
+                                                                           bedrock_fallback(*mapping, o.fallback), summary.report));
+    (void)rewritten;
+    return write_bedrock_output(o, std::move(summary), target, *mapping, *air, version);
 }
 
 Result<ConvertSummary> convert_schem_to_new_mcworld(const ConvertOptions& options) {
@@ -899,6 +1012,8 @@ std::string summary_to_json(const ConvertSummary& s, const ConvertOptions& o) {
                      formats::info(s.output_format).name);
     // "exact" means nothing was lost: no report entry and no warning (warnings describe data that was
     // not converted, e.g. skipped chunks or dimensions). "blocks_exact" covers the report alone.
+    j += std::format("  \"source_version\": \"{}\",\n", json_escape(describe(s.source_version)));
+    j += std::format("  \"target_version\": \"{}\",\n", json_escape(s.target_version));
     j += std::format("  \"exact\": {},\n", s.report.exact() && s.warnings.empty() ? "true" : "false");
     j += std::format("  \"blocks_exact\": {},\n", s.report.exact() ? "true" : "false");
     j += std::format("  \"blocks\": {},\n  \"chunks\": {},\n  \"subchunks\": {},\n  \"block_entities\": {},\n", s.blocks,

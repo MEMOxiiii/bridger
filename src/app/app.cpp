@@ -17,6 +17,7 @@
 #include <bridger/render/scene.hpp>
 #include <bridger/render/lod_cache.hpp>
 #include <bridger/render/streaming.hpp>
+#include <bridger/translate/targets.hpp>
 #include <bridger/translate/mapping_data.hpp>
 
 #include <SDL3/SDL.h>
@@ -52,6 +53,20 @@ bool is_structure_format(FormatId f) {
 }
 
 // What the convert dialog offers for an input (docs/formats/README.md, supported paths).
+// Game versions a format can be written for, newest (the default) first. "checked": "game" for the versions
+// whose output passed the in-game checklist (docs/testing.md), "data" for those checked against their block data.
+json versions_for(FormatId output) {
+    json out = json::array();
+    const bool bedrock = output == FormatId::McWorld || output == FormatId::McStructure;
+    if (bedrock) {
+        if (const auto t = translate::BedrockTargets::embedded())
+            for (const auto& v : (*t)->targets()) out.push_back({{"name", v.name}, {"checked", v.pinned ? "game" : "data"}});
+    } else if (const auto t = translate::JavaTargets::embedded()) {
+        for (const auto& v : (*t)->targets()) out.push_back({{"name", v.name}, {"checked", v.pinned ? "game" : "data"}});
+    }
+    return out;
+}
+
 json targets_for(FormatId input) {
     std::vector<FormatId> ids;
     if (is_structure_format(input))
@@ -66,9 +81,19 @@ json targets_for(FormatId input) {
         out.push_back({{"id", f.name},
                        {"ext", f.extension},
                        {"edition", id == FormatId::McWorld || id == FormatId::McStructure ? "bedrock" : "java"},
-                       {"description", f.description}});
+                       {"description", f.description},
+                       {"versions", versions_for(id)}});
     }
     return out;
+}
+
+// Which game version saved the file (convert/source_version.hpp).
+json version_json(const convert::GameVersionInfo& v) {
+    return {{"edition", v.edition == Edition::Java ? "java" : "bedrock"},
+            {"name", v.name},
+            {"detail", v.detail},
+            {"exact", v.exact},
+            {"text", convert::describe(v)}};
 }
 
 json report_json(const translate::ConversionReport& report) {
@@ -636,6 +661,7 @@ struct App::Impl {
                 {"block_entities", v.java.block_entities.size()},
                 {"entities", v.java.entities.size()},
                 {"data_version", data_version != 0 ? json(data_version) : json(nullptr)},
+                {"source_version", version_json(v.source_version)},
                 {"warnings", v.warnings},
                 {"report", report_json(v.report)},
                 {"targets", targets_for(v.format)}}},
@@ -682,6 +708,7 @@ struct App::Impl {
                 {"chunks", info.chunk_count},
                 {"spawn", {sp.x, sp.y, sp.z}},
                 {"seed", info.seed ? json(*info.seed) : json(nullptr)},
+                {"source_version", version_json(info.source_version)},
                 {"warnings", json::array()},
                 {"report", json::object()},
                 {"targets", targets_for(info.format)}}},
@@ -738,6 +765,7 @@ struct App::Impl {
         o.output = *out;
         if (const auto f = formats::format_from_name(m.value("format", std::string()))) o.output_format = *f;
         o.level_name = m.value("level_name", std::string());
+        o.target_version = m.value("target_version", std::string());
         o.overwrite = m.value("overwrite", false);
         o.placement.air = m.value("air", std::string("keep")) == "replace" ? convert::AirMode::Replace : convert::AirMode::Keep;
         const std::string height = m.value("height", std::string("fail"));

@@ -24,6 +24,8 @@ struct BedrockLevelInfo {
     BlockPos spawn{0, 64, 0};
     i64 seed = 0;
     i32 generator = 1; // 0 old, 1 infinite, 2 flat, 5 void
+    std::vector<i32> last_opened_version; // level.dat lastOpenedWithVersion, e.g. [1, 21, 50, 0, 0]; empty in very old worlds
+    i32 storage_version = 0;               // level.dat header / StorageVersion
 };
 
 struct BedrockColumn {

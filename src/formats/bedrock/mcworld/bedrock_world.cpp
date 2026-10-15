@@ -93,8 +93,9 @@ using BiomeStorages = std::array<std::array<u32, kSectionVolume>, kOverworldSubc
 struct ColumnAccumulator {
     std::array<i32, 256> highest; // world y of the highest non-air block per (z<<4|x), or INT_MIN
     std::unique_ptr<BiomeStorages> biomes = std::make_unique<BiomeStorages>();
+    u8 chunk_version = kChunkVersion; // the target version's chunk Version byte
 
-    explicit ColumnAccumulator(i32 default_biome) {
+    explicit ColumnAccumulator(i32 default_biome, u8 version = kChunkVersion) : chunk_version(version) {
         highest.fill(std::numeric_limits<i32>::min());
         for (auto& b : *biomes) b.fill(static_cast<u32>(default_biome));
     }
@@ -148,7 +149,7 @@ struct ColumnAccumulator {
             out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::BlockEntity), bew.view());
         }
 
-        const u8 version = kChunkVersion;
+        const u8 version = chunk_version;
         out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::Version), std::span<const u8>(&version, 1));
         std::array<u8, 4> finalized{};
         io::store_le<i32>(finalized.data(), kFinalizedDone);
@@ -217,7 +218,7 @@ Result<std::vector<u8>> write_new_world(const Structure& s, const NewWorldOption
             std::array<u32, kSectionVolume> liquids; // Bridger order
             for (i32 cz = cz0; cz <= cz1; ++cz) {
                 for (i32 cx = cx0; cx <= cx1; ++cx) {
-                    ColumnAccumulator column(o.default_biome);
+                    ColumnAccumulator column(o.default_biome, o.chunk_version);
                     EncodedColumn encoded;
                     for (i32 sy = kOverworldMinSubchunk; sy < kOverworldMinSubchunk + kOverworldSubchunks; ++sy) {
                         const i32 y0 = sy * 16;
@@ -308,13 +309,13 @@ Result<WorldBuilder> WorldBuilder::create(const fs::path& work_dir) {
 }
 
 Result<EncodedColumn> WorldBuilder::encode_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state,
-                                                  i32 default_biome, const StateNbtFn& state_nbt) {
+                                                  i32 default_biome, const StateNbtFn& state_nbt, u8 chunk_version) {
     if (column.source().edition != Edition::Bedrock)
         return make_error(ErrorCode::InvalidArgument, "encode_column needs a Bedrock column");
     if (column.size().x != 16 || column.size().z != 16 || (min_y & 15) != 0)
         return make_error(ErrorCode::InvalidArgument, "encode_column needs a 16-wide column starting on a section boundary");
     EncodedColumn out;
-    ColumnAccumulator acc(default_biome);
+    ColumnAccumulator acc(default_biome, chunk_version);
     auto blocks = std::make_unique<std::array<u32, kSectionVolume>>();
     auto liquids = std::make_unique<std::array<u32, kSectionVolume>>();
     auto biome_tmp = std::make_unique<std::array<u32, kSectionVolume>>();

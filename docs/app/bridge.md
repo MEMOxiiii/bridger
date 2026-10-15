@@ -22,7 +22,7 @@ Unknown types and malformed messages are ignored on both sides.
 | `open_dialog` | `folder` | Show the open-file (or folder) dialog, then open the choice. |
 | `pick_output` | `format` (format name) | Save dialog for that format (folder dialog for `java-world`); answered by `output_picked`. |
 | `pick_into_world` | | Open dialog for a `.mcworld` to place into; answered by `into_world_picked`. |
-| `convert` | `output`, `format`, `level_name`, `air` (`keep`/`replace`), `height` (`fail`/`clip`/`shift`), `clear_entities`, `place_at?`, `into_world?`, `overwrite` | Start a conversion (`convert::convert`) on a worker thread. |
+| `convert` | `output`, `format`, `level_name`, `air` (`keep`/`replace`), `height` (`fail`/`clip`/`shift`), `clear_entities`, `place_at?`, `into_world?`, `overwrite`, `target_version?` | Start a conversion (`convert::convert`) on a worker thread. `target_version`: a name from the chosen target's `versions` (default: the newest). |
 | `cancel_convert` | | Ask the running conversion to stop. Nothing is written when it stops (`ConvertOptions::cancel`). |
 | `reveal` | `path` | Show the file in Explorer. |
 | `pick_client_jar`, `add_pack` | | Dialogs for the textures' client jar / a resource pack. |
@@ -37,7 +37,7 @@ Unknown types and malformed messages are ignored on both sides.
 | `hello` | `version`, `gpu`, `assets`, `settings` | Answer to `ready`. `assets.viewer` is false when the computer has no usable GPU for the 3D preview (`assets.viewer_error` says why); opening and converting still work and `preview` is ignored. `BRIDGER_NO_VIEWER=1` simulates it. `assets.can_download`: textures missing and the user may fetch them from Mojang; `assets.downloaded`: the loaded jar is one Bridger downloaded. `BRIDGER_SKIP_LAUNCHER_JAR=1` (testing) ignores the launcher's jar. |
 | `settings` | `settings`, `assets` | Settings or assets changed. |
 | `loading` | `name`, `step`, `fraction` | Opening progress. |
-| `opened` | `doc`, `settings` | A document is open; the UI shows its file page. `doc`: `kind` (`structure`/`world`), `path`, `name`, `format`, `edition`, `size`, `blocks`, `block_entities`, `entities`, `data_version`, `chunks`, `spawn`, `seed`, `warnings`, `report`, `targets`. |
+| `opened` | `doc`, `settings` | A document is open; the UI shows its file page. `doc`: `kind` (`structure`/`world`), `path`, `name`, `format`, `edition`, `size`, `blocks`, `block_entities`, `entities`, `data_version`, `source_version` {`edition`, `name`, `detail`, `exact`, `text`} (which game version saved it), `chunks`, `spawn`, `seed`, `warnings`, `report`, `targets` (each {`id`, `ext`, `edition`, `description`, `versions`: [{`name`, `checked` (`game`/`data`)}], newest first}). |
 | `preview_ready` | `missing_models` | The 3D model of the open document is built (structures mesh after `opened`; worlds are ready at once and stream on demand). |
 | `open_failed` | `message` | |
 | `stats` | `fps`, `frame_ms`, `sections`, `quads`, `gpu_mb`, `chunks_loaded?`, `chunks_distant?`, `chunks_total?`, `chunks_pending?` | Twice a second. `chunks_distant`: columns shown as distant terrain. `fps` counts rendered frames: an idle viewer renders none. |
@@ -46,7 +46,7 @@ Unknown types and malformed messages are ignored on both sides.
 | `output_picked` | `path` or `null` | Save dialog result. |
 | `into_world_picked` | `path` | |
 | `convert_progress` | `fraction`, `step` | |
-| `convert_done` | `summary` | The `--report` JSON (`convert::summary_to_json`) plus `report` (issues grouped by kind, at most 500 subjects each, largest first), `ms`, `output`. |
+| `convert_done` | `summary` | The `--report` JSON (`convert::summary_to_json`, including `source_version` and `target_version`) plus `report` (issues grouped by kind, at most 500 subjects each, largest first), `ms`, `output`. |
 | `convert_failed` | `message`, `cancelled` | |
 | `toast` | `kind` (`info`/`error`/`success`), `message` | |
 | `textures_progress` | `fraction`, `step` | Texture download progress. |

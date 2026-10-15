@@ -1,0 +1,382 @@
+{
+ "_doc": [
+  "Bedrock versions Bridger can write (docs/versions.md, 'Target versions'); tools/mapgen/build_bedrock_targets.py.",
+  "protocol (level.dat NetworkVersion) and storage_version (level.dat header and StorageVersion): HiveGamesOSS/Chunker",
+  "BedrockDataVersion.java (MIT, consulted, branch main 2026-10-15), cross-checked with PrismarineJS minecraft-data",
+  "bedrock/common/protocolVersions.json. chunk_version (the Version key byte): PocketMine-MP ChunkVersion.php",
+  "(v1_18_30 = 40, v1_21_40 = 41, v1_21_120 = 42) and Chunker's v1_21_40 / v1_21_120 ColumnWriter.getChunkVersion.",
+  "The block palette of each version is the newest file of BedrockBlockPaletteArchive (CC0) not newer than it."
+ ],
+ "targets": [
+  {
+   "version": [
+    1,
+    18,
+    30
+   ],
+   "protocol": 503,
+   "storage_version": 9,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    0
+   ],
+   "protocol": 526,
+   "storage_version": 9,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    10
+   ],
+   "protocol": 534,
+   "storage_version": 9,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    20
+   ],
+   "protocol": 544,
+   "storage_version": 9,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    30
+   ],
+   "protocol": 554,
+   "storage_version": 9,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    40
+   ],
+   "protocol": 557,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    50
+   ],
+   "protocol": 560,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    60
+   ],
+   "protocol": 568,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    70
+   ],
+   "protocol": 575,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    19,
+    80
+   ],
+   "protocol": 582,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    0
+   ],
+   "protocol": 588,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    10
+   ],
+   "protocol": 594,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    30
+   ],
+   "protocol": 618,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    40
+   ],
+   "protocol": 622,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    50
+   ],
+   "protocol": 630,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    60
+   ],
+   "protocol": 649,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    70
+   ],
+   "protocol": 662,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    20,
+    80
+   ],
+   "protocol": 671,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    21,
+    0
+   ],
+   "protocol": 685,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    21,
+    20
+   ],
+   "protocol": 712,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    21,
+    30
+   ],
+   "protocol": 729,
+   "storage_version": 10,
+   "chunk_version": 40
+  },
+  {
+   "version": [
+    1,
+    21,
+    40
+   ],
+   "protocol": 748,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    50
+   ],
+   "protocol": 766,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    60
+   ],
+   "protocol": 776,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    70
+   ],
+   "protocol": 786,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    80
+   ],
+   "protocol": 800,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    90
+   ],
+   "protocol": 818,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    100
+   ],
+   "protocol": 827,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    110
+   ],
+   "protocol": 843,
+   "storage_version": 10,
+   "chunk_version": 41
+  },
+  {
+   "version": [
+    1,
+    21,
+    120
+   ],
+   "protocol": 859,
+   "storage_version": 10,
+   "chunk_version": 42
+  },
+  {
+   "version": [
+    1,
+    21,
+    130
+   ],
+   "protocol": 898,
+   "storage_version": 10,
+   "chunk_version": 42
+  },
+  {
+   "version": [
+    1,
+    26,
+    0
+   ],
+   "protocol": 924,
+   "storage_version": 10,
+   "chunk_version": 42
+  },
+  {
+   "version": [
+    1,
+    26,
+    10
+   ],
+   "protocol": 944,
+   "storage_version": 10,
+   "chunk_version": 42
+  },
+  {
+   "version": [
+    1,
+    26,
+    20
+   ],
+   "protocol": 974,
+   "storage_version": 10,
+   "chunk_version": 42
+  },
+  {
+   "version": [
+    1,
+    26,
+    30
+   ],
+   "protocol": 1001,
+   "storage_version": 10,
+   "chunk_version": 42
+  },
+  {
+   "version": [
+    1,
+    26,
+    40
+   ],
+   "protocol": 2168,
+   "storage_version": 10,
+   "chunk_version": 42
+  },
+  {
+   "version": [
+    1,
+    26,
+    50
+   ],
+   "protocol": 2192,
+   "storage_version": 10,
+   "chunk_version": 42
+  }
+ ]
+}

@@ -256,3 +256,10 @@ palette ids directly; that took it from milliseconds to about 5 µs.
 A distant column averages 42 quads, against about 6500 for a full-detail one, so the ring adds 10 % to the quad
 count for 15 times as many columns. With the cache filled, the distant columns are not decoded at all (4.8 MB of
 cache for this world).
+
+### Target versions (2026-10-16, Machine A, `msvc-release`)
+
+Writing for an older version adds one palette-stage pass per chunk (blocks, biomes, block entities). The Java world
+"New World" (4243 chunks with terrain) converted to `.mcworld`, two alternating rounds: default (26.50) 16.7 s / 16.1 s,
+`--target-version 1.20.80` 16.5 s / 8.8 s. The machine was busy (the same command varied by up to 2x), so the
+measurement only shows that the pass is not a visible cost; no number is claimed for it.

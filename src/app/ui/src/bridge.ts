@@ -8,6 +8,13 @@ export interface Target {
   ext: string
   edition: Edition
   description: string
+  versions: TargetVersion[] // game versions this format can be written for, newest (the default) first
+}
+
+// One game version a conversion can target (docs/versions.md, "Target versions").
+export interface TargetVersion {
+  name: string // "1.21.4", "26.50"
+  checked: 'game' | 'data' // output opened in that game version, or checked against its block data only
 }
 
 export interface Issue {
@@ -30,6 +37,7 @@ export interface Doc {
   block_entities?: number
   entities?: number
   data_version?: number | null
+  source_version?: GameVersion
   chunks?: number
   spawn?: [number, number, number]
   seed?: number | null
@@ -38,6 +46,15 @@ export interface Doc {
   quads?: number
   missing_models?: number
   targets: Target[]
+}
+
+// Which game version saved a file (convert/source_version.hpp).
+export interface GameVersion {
+  edition: Edition
+  name: string // "1.20.1", "26.50", "before 1.13"; empty: not recorded
+  detail: string // how it is known: "DataVersion 3465", "last opened with this version", ...
+  exact: boolean
+  text: string
 }
 
 export interface Assets {
@@ -78,6 +95,8 @@ export interface Summary {
   output: string
   input_format: string
   output_format: string
+  source_version?: string // "Java 1.20.1 (DataVersion 3465)"
+  target_version?: string // "Bedrock 1.21.50"
   exact: boolean
   blocks: number
   chunks: number
@@ -120,6 +139,7 @@ export interface ConvertRequest {
   place_at?: [number, number, number]
   into_world?: string
   overwrite: boolean
+  target_version?: string // default: the newest
 }
 
 export type Outgoing =

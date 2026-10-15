@@ -212,6 +212,9 @@ Result<BedrockWorldReader> BedrockWorldReader::open_unpacked(BedrockWorldReader 
     if (sx && sy && sz) r.impl_->level.spawn = {*sx, *sy, *sz};
     r.impl_->level.seed = c.find("RandomSeed").as_long().value_or(0);
     r.impl_->level.generator = c.find("Generator").as_int().value_or(1);
+    for (const NbtView v : c.find("lastOpenedWithVersion").items())
+        if (const auto n = v.as_int()) r.impl_->level.last_opened_version.push_back(*n);
+    r.impl_->level.storage_version = c.find("StorageVersion").as_int().value_or(io::load_le<i32>(level_bytes.data()));
 
     if (!fs::exists(work_dir / "db" / "CURRENT")) return make_error(ErrorCode::Malformed, "mcworld: no LevelDB database (db/)");
     BRIDGER_TRY(LevelDbStore db, LevelDbStore::open(work_dir / "db", /*create_new=*/false));

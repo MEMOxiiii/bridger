@@ -131,6 +131,11 @@ additions to it are recorded here as required:
   `ui_bundle.*` (the embedded UI zip), `win32/compositor.*`, `win32/webview_host.*`, `win32/shell*`; the UI
   in `src/app/ui/` (`package.json`, `package-lock.json`, `vite.config.ts`, `src/**`); `cmake/NpmInstall.cmake`;
   `docs/app/bridge.md` (message protocol); `docs/adr/0009-hybrid-desktop-ui.md`.
+- Version names and targets: `core/game_versions.{hpp,cpp}`, `convert/source_version.{hpp,cpp}`,
+  `formats/java/upgrade.hpp`, `translate/targets.{hpp,cpp}` (+ internal `java_block_entity_downgrade.*`,
+  `bedrock_block_entity_downgrade.*`), data `src/translate/data/java-targets.nbt` and `bedrock-targets.nbt`, built by
+  `tools/mapgen/build_java_targets.py`, `build_bedrock_targets.py` and `targetgen.cpp` (`bridger_targetgen`) with
+  `tools/mapgen/overrides/bedrock_targets.json`; the UI's `components/VersionPicker.tsx`; `tests/unit/translate/targets_test.cpp`.
 - `src/formats/java/java_upgrade.{hpp,cpp}` (Java block renames since 1.13, old numeric biome ids) and
   `legacy_blocks.{hpp,cpp}` (pre-1.13 block entities and the states 1.13 moved; shared by `.schematic` and old chunks):
   internal to `bridger_formats`.

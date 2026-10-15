@@ -23,6 +23,7 @@ struct ConvertArgs {
     std::string place_at;
     std::string into_world;
     std::string level_name;
+    std::string target_version; // --target-version
     bool clip = false;
     bool shift_to_fit = false;
     bool clear_entities = false;
@@ -31,6 +32,7 @@ struct ConvertArgs {
 };
 
 int run_convert(const ConvertArgs& args);
+int run_versions();
 
 struct RenderArgs {
     std::string input;

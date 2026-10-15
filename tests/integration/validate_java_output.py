@@ -8,7 +8,8 @@ Checks, without Bridger's code:
   .nbt        size/palette/blocks; every block's state index in the palette, pos inside size;
               palette entries use the 26.3 spelling {id, properties}.
   .litematic  regions; BlockStates long enough for volume * max(2, bits); indices in the palette.
-  world       level.dat (Data.DataVersion, spawn.pos), every region chunk: zlib/gzip, Status full,
+  world       level.dat (DataVersion; spawn and generation settings in the layout of that version), every region
+              chunk: DataVersion as level.dat, zlib/gzip, Status full,
               24 sections with block_states/biomes, packed data long enough, indices in palettes,
               block entities inside their chunk.
 Exit code 0 when everything is valid.
@@ -115,9 +116,27 @@ def unpack(longs, bits, count):
 def check_world(path):
     path = Path(path)
     level = load_gzip_nbt(path / "level.dat")["Data"]
-    if "DataVersion" not in level or "spawn" not in level or len(level["spawn"]["pos"]) != 3:
-        fail("level.dat: DataVersion or spawn.pos missing")
-    region_dir = path / "dimensions" / "minecraft" / "overworld" / "region"
+    if "DataVersion" not in level:
+        fail("level.dat: DataVersion missing")
+    dv = int(level["DataVersion"])
+    # The layout follows the version written for (docs/versions.md, "Target versions"):
+    # 1.21.9+ (4554) spawn compound, older SpawnX/Y/Z; 26.1+ (4786) dimensions/ and world_gen_settings.dat,
+    # older region/ and WorldGenSettings in level.dat.
+    if dv >= 4554:
+        if "spawn" not in level or len(level["spawn"]["pos"]) != 3:
+            fail("level.dat: spawn.pos missing")
+    elif not all(k in level for k in ("SpawnX", "SpawnY", "SpawnZ")):
+        fail("level.dat: SpawnX/Y/Z missing")
+    if dv >= 4786:
+        region_dir = path / "dimensions" / "minecraft" / "overworld" / "region"
+    else:
+        wgs = level.get("WorldGenSettings")
+        if wgs is None or "seed" not in wgs or len(wgs["dimensions"]) != 3:
+            fail("level.dat: WorldGenSettings with seed and three dimensions missing")
+        for name, dim in wgs["dimensions"].items():
+            if dim["generator"]["type"] != "minecraft:noise" or "biome_source" not in dim["generator"]:
+                fail(f"level.dat: dimension {name} has no noise generator")
+        region_dir = path / "region"
     chunks = 0
     for rp in sorted(region_dir.glob("r.*.*.mca")):
         rx, rz = (int(v) for v in rp.name.split(".")[1:3])
@@ -138,6 +157,8 @@ def check_world(path):
             c = File.parse(io.BytesIO(raw))
             if str(c["Status"]) not in ("minecraft:full", "full"):
                 fail(f"{rp.name}: chunk {i} is not full")
+            if int(c["DataVersion"]) != dv:
+                fail(f"{rp.name}: chunk {i} DataVersion {int(c['DataVersion'])} differs from level.dat's {dv}")
             if int(c["xPos"]) != rx * 32 + i % 32 or int(c["zPos"]) != rz * 32 + i // 32:
                 fail(f"{rp.name}: chunk {i} has wrong coordinates")
             for sec in c["sections"]:

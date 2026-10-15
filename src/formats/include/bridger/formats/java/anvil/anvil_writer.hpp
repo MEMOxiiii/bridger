@@ -37,6 +37,10 @@ private:
     std::array<std::vector<u8>, 1024> compressed_; // zlib payloads, empty = no chunk
 };
 
+// Java versions whose save format changed (DataVersions, minecraft.wiki "Data version").
+inline constexpr i32 kJava1_21_9 = 4554; // spawn point as a compound
+inline constexpr i32 kJava26_1 = 4786;   // dimensions/ folders and world_gen_settings.dat (26.1 snapshot 6)
+
 struct JavaLevelOptions {
     std::string level_name = "Bridger World";
     BlockPos spawn{0, 64, 0};
@@ -45,9 +49,13 @@ struct JavaLevelOptions {
     std::string version_name; // e.g. "26.3"
     i32 game_type = 1;        // creative
     i64 last_played_ms = 0;
+    // Experimental features to switch on ("update_1_20"): data packs and enabled_features, as Chunker's
+    // JavaLevelWriter.enableExperiments writes them. Needed when the world holds experimental blocks.
+    std::vector<std::string> experiments;
 };
 
-// Gzip-compressed level.dat ({Data: {...}}) and world_gen_settings.dat (seed only).
+// Gzip-compressed level.dat ({Data: {...}}) and, from 26.1, world_gen_settings.dat (seed only). The layout follows
+// data_version: before 26.1 WorldGenSettings is written into level.dat instead, before 1.21.9 the spawn is SpawnX/Y/Z.
 [[nodiscard]] Result<std::vector<u8>> encode_java_level_dat(const JavaLevelOptions& options);
 [[nodiscard]] Result<std::vector<u8>> encode_world_gen_settings(i64 seed, i32 data_version);
 

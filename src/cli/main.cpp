@@ -41,6 +41,7 @@ int main(int argc, char** argv) {
     app.add_flag("-v,--verbose", verbose, "Verbose logging");
 
     auto* formats_cmd = app.add_subcommand("formats", "List known formats and their support status");
+    auto* versions_cmd = app.add_subcommand("versions", "List the game versions Bridger can write (--target-version)");
 
     std::string info_input;
     auto* info_cmd = app.add_subcommand("info", "Show information about a structure or world file");
@@ -57,6 +58,7 @@ int main(int argc, char** argv) {
     convert_cmd->add_option("--place-at", conv.place_at, "World position x,y,z of the structure's corner");
     convert_cmd->add_option("--into-world", conv.into_world, "Place into a copy of an existing .mcworld (needs --place-at)");
     convert_cmd->add_option("--name", conv.level_name, "World name (default: input file name)");
+    convert_cmd->add_option("--target-version", conv.target_version, "Game version to write for (default: the newest; see `bridger versions`)");
     convert_cmd->add_flag("--clip", conv.clip, "Cut parts outside the build height (reported)");
     convert_cmd->add_flag("--shift-to-fit", conv.shift_to_fit, "Move vertically to fit the build height");
     convert_cmd->add_flag("--clear-entities", conv.clear_entities, "Remove entities in the target area (existing worlds)");
@@ -87,6 +89,7 @@ int main(int argc, char** argv) {
         print_formats();
         return kExitOk;
     }
+    if (versions_cmd->parsed()) return bridger::cli::run_versions();
     if (info_cmd->parsed()) return bridger::cli::run_info(info_input);
     if (convert_cmd->parsed()) return bridger::cli::run_convert(conv);
     if (render_cmd->parsed()) return bridger::cli::run_render(rend);

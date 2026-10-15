@@ -5,6 +5,7 @@
 
 #include <bridger/convert/placement.hpp>
 #include <bridger/convert/placement_policy.hpp>
+#include <bridger/convert/source_version.hpp>
 #include <bridger/core/result.hpp>
 #include <bridger/formats/bedrock/mcstructure.hpp>
 #include <bridger/formats/java/legacy_schematic.hpp>
@@ -30,6 +31,9 @@ struct ConvertOptions {
     translate::Fallback fallback = translate::Fallback::Air;
     PlacementPolicy placement;
     std::string level_name; // new worlds; default: the input file name
+    // Game version to write for ("1.20.1", "1.21.50", "26.50"); empty: the newest (the pinned version).
+    // Lists: translate::JavaTargets / BedrockTargets (docs/versions.md, "Target versions").
+    std::string target_version;
     bool overwrite = false; // an existing output is replaced only when asked
     usize threads = 0;      // worker threads for whole worlds (0 = all hardware threads)
     // Called on the converting thread with the overall fraction done (0..1) and the current step.
@@ -51,6 +55,8 @@ struct ConvertSummary {
     usize block_entities = 0;
     std::optional<i32> source_data_version;
     u32 target_data_version = 0; // the pinned Java DataVersion of the mapping data
+    GameVersionInfo source_version; // which game version saved the input
+    std::string target_version;     // what the output was written for: "Java 1.20.1", "Bedrock 1.21.50"
 };
 
 [[nodiscard]] Result<ConvertSummary> convert(const ConvertOptions& options);
@@ -62,6 +68,7 @@ struct ViewStructure {
     Structure java;
     std::vector<std::string> warnings;
     translate::ConversionReport report;
+    GameVersionInfo source_version;
 };
 [[nodiscard]] Result<ViewStructure> load_view_structure(const std::filesystem::path& input);
 

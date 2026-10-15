@@ -8,6 +8,7 @@ export interface ConvertState {
   open: boolean
   phase: ConvertPhase
   target: string | null
+  targetVersion: string | null // null: the newest the target format offers
   output: string | null
   intoWorld: string | null
   fraction: number
@@ -59,7 +60,7 @@ export interface State {
 }
 
 const initialConvert: ConvertState = {
-  open: false, phase: 'setup', target: null, output: null, intoWorld: null, fraction: 0, step: '', summary: null, error: null, cancelled: false,
+  open: false, phase: 'setup', target: null, targetVersion: null, output: null, intoWorld: null, fraction: 0, step: '', summary: null, error: null, cancelled: false,
 }
 
 let state: State = {
