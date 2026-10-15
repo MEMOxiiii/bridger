@@ -166,3 +166,47 @@ camera, which in orbit mode is far from what is shown.
 
 An idle window renders nothing (the app redraws only when the camera, streaming or an animation changes), so
 it uses no GPU time while you read the report.
+
+### Experiment: greedy meshing of full cubes (2026-10-15, Machine A, not adopted)
+
+The build specification asks for binary greedy meshing of full opaque cubes. It was implemented (equal faces of
+single-variant solid cubes with the same ambient occlusion at all four corners merged into one quad with a
+repeating texture; lighting identical to the per-face path) and measured against the per-face mesher, built from
+the same commit and run alternately on the same machine:
+
+| Measurement | Per-face | Greedy |
+|---|---|---|
+| `BM_MeshStructure/0` (synthetic terrain, all threads; medians of 3, two rounds) | 13.6–13.7 ms | 19.2–20.0 ms |
+| `BM_MeshStructure/1` (one thread) | 159–168 ms | 255–281 ms |
+| Quads, synthetic terrain | 274 542 | 238 035 (−13 %) |
+| `BM_RenderFrame` (1080p) | 1.54–1.73 ms | 1.74–1.78 ms |
+| Real Java world "New World", radius 12 (`bridger render`): quads | 2 682 082 | 2 595 565 (−3 %) |
+| same: time to load and draw | 1.76 s | 2.04 s |
+
+(The whole machine was slower than in the Phase 7–8 baselines during these runs; the two columns are comparable
+with each other, not with older tables.) Real worlds barely merge: most surfaces are leaves (cutout), the common
+natural blocks (grass, dirt, stone, sand) use random rotation variants, and smooth lighting differs across every
+bump. Fewer than 4 % of quads disappeared while meshing got slower, so the per-face mesher stays. Greedy merging
+fits distant LOD meshes, which have neither smooth lighting nor random rotations.
+
+### Comparison with Chunker (2026-10-15, Machine A)
+
+[Chunker](https://github.com/HiveGamesOSS/Chunker) 1.21.0 (CLI, `java -jar chunker-cli-1.21.0.jar -i <world> -o <dir>
+-f BEDROCK_R26_50`, Java 26 runtime) against `bridger convert <world> out.mcworld` (`msvc-release`), on the same
+Java 26.3 world ("New World", 16 region files, 50.2 MB; the Nether, the End and the entity regions removed so both
+tools convert the same Overworld terrain). Five rounds, the two tools alternating, wall-clock time of the whole
+process:
+
+| Round | Bridger | Chunker |
+|---|---|---|
+| 1 | 100.4 s | 115.6 s |
+| 2 | 24.4 s | 36.8 s |
+| 3 | 15.1 s | 19.4 s |
+| 4 | 14.8 s | 20.4 s |
+| 5 | 9.7 s | 19.9 s |
+| **Median / best** | **15.1 s / 9.7 s** | **20.4 s / 19.4 s** |
+
+Other programs kept the CPU 40–80 % busy during the runs (round 1 especially), so the absolute times are not
+baselines; the rounds are paired, and Bridger was faster in each. The outputs are not identical work: Bridger also
+re-reads and validates the world and writes it zipped as one `.mcworld` (22.7 MB); Chunker writes a world folder
+(22.9 MB). Chunker's time includes JVM start-up (under a second). Re-run on an idle machine before quoting a ratio.
