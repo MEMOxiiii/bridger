@@ -493,7 +493,7 @@ struct App::Impl {
         if (path->filename() == L"level.dat") path = path->parent_path();
         std::error_code ec;
         if (fs::is_directory(*path, ec) && !convert::is_world_path(*path))
-            return toast("error", "\"" + utf8(path->filename()) + "\" is not a Java world folder: it has no level.dat. Choose the world's own folder (inside .minecraft/saves).");
+            return toast("error", "\"" + utf8(path->filename()) + "\" is not a world folder: it has no level.dat. Choose the world's own folder (in .minecraft/saves, or minecraftWorlds for Bedrock).");
         close_document();
         open_started = std::chrono::steady_clock::now();
         const u64 gen = ++open_generation;

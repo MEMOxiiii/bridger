@@ -4,6 +4,7 @@
 #include <bridger/formats/bedrock/mcstructure.hpp>
 #include <bridger/formats/bedrock/mcworld/bedrock_world.hpp>
 #include <bridger/formats/bedrock/mcworld/chunk_key.hpp>
+#include <bridger/formats/bedrock/mcworld/subchunk_codec.hpp>
 #include <bridger/formats/detect.hpp>
 #include <bridger/formats/bedrock/mcworld/bedrock_world_reader.hpp>
 #include <bridger/formats/java/anvil/anvil_writer.hpp>
@@ -18,6 +19,7 @@
 #include <bridger/platform/atomic_replace.hpp>
 #include <bridger/platform/mapped_file.hpp>
 #include <bridger/platform/paths.hpp>
+#include <bridger/translate/bedrock_upgrade.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -518,11 +520,11 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
 // one region; this thread adds them to the region in slot order, so the output does not
 // depend on the thread count. The world is built in a temp folder next to the destination,
 // validated (every chunk re-read) and renamed into place.
-Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSummary summary, std::span<const u8> mcworld,
-                                             const translate::MappingData& m, u32 air) {
+Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSummary summary, const translate::MappingData& m, u32 air) {
     if (o.into_world) return make_error(ErrorCode::InvalidArgument, "--into-world is not available for whole worlds");
     BRIDGER_TRY(const ScratchDir unpacked, ScratchDir::create("bedrockworld"));
-    BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open(mcworld, unpacked.path()));
+    // A .mcworld or a world folder; either way only a copy is opened.
+    BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(o.input, unpacked.path()));
     if (reader.overworld_chunks().empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld chunks");
     if (reader.has_other_dimensions())
         summary.warnings.push_back("the Nether and the End were not converted: only the Overworld is supported");
@@ -692,22 +694,39 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
 
 } // namespace
 
-// Palette entry {name, states} -> Bedrock state index of the pinned palette.
+// Palette entry -> Bedrock state index of the pinned palette. Entries from older versions ({name, val},
+// numeric ids, or states with an older block version) go through the upgrade schemas first
+// (translate/bedrock_upgrade.hpp); entries at the current version are looked up directly.
+static_assert(translate::kLegacyIdKey == formats::bedrock::kLegacyIdEntryKey);
+
 formats::bedrock::StateLookupFn bedrock_state_lookup(const translate::MappingData& m) {
-    return [&m](io::nbt::NbtCompoundView entry) -> std::optional<u32> {
-        const auto name = entry.find("name").as_string();
-        if (!name) return std::nullopt;
-        std::vector<translate::BedrockProperty> props;
-        for (const io::nbt::NbtEntry& e : entry.find("states").entries()) {
-            translate::BedrockProperty p;
-            p.key = e.name;
-            if (const auto b = e.value.as_byte()) { p.type = translate::NbtValueType::Byte; p.int_value = *b; }
-            else if (const auto i = e.value.as_int()) { p.type = translate::NbtValueType::Int; p.int_value = *i; }
-            else if (const auto s = e.value.as_string()) { p.type = translate::NbtValueType::String; p.str_value = *s; }
-            else return std::nullopt;
-            props.push_back(p);
-        }
-        return m.find_bedrock(*name, props);
+    const translate::BedrockUpgrader* up = translate::BedrockUpgrader::embedded().value_or(nullptr);
+    return [&m, up](io::nbt::NbtCompoundView entry) -> std::optional<u32> {
+        auto direct = [&]() -> std::optional<u32> {
+            const auto name = entry.find("name").as_string();
+            if (!name) return std::nullopt;
+            std::vector<translate::BedrockProperty> props;
+            for (const io::nbt::NbtEntry& e : entry.find("states").entries()) {
+                translate::BedrockProperty p;
+                p.key = e.name;
+                if (const auto b = e.value.as_byte()) { p.type = translate::NbtValueType::Byte; p.int_value = *b; }
+                else if (const auto i = e.value.as_int()) { p.type = translate::NbtValueType::Int; p.int_value = *i; }
+                else if (const auto s = e.value.as_string()) { p.type = translate::NbtValueType::String; p.str_value = *s; }
+                else return std::nullopt;
+                props.push_back(p);
+            }
+            return m.find_bedrock(*name, props);
+        };
+        const bool legacy = static_cast<bool>(entry.find("val")) || static_cast<bool>(entry.find(translate::kLegacyIdKey));
+        const auto version = entry.find("version").as_int();
+        const bool current = version && static_cast<u32>(*version) >= m.bedrock_block_version();
+        if (!legacy && (current || !version))
+            if (const auto r = direct()) return r;
+        if (up == nullptr) return legacy ? std::nullopt : direct();
+        const auto st = up->from_entry(entry);
+        if (!st) return std::nullopt;
+        const auto props = st->properties();
+        return m.find_bedrock(st->name, props);
     };
 }
 
@@ -747,6 +766,17 @@ Result<ViewStructure> load_view_structure(const fs::path& input) {
 Result<ConvertSummary> convert(const ConvertOptions& o) {
     ConvertSummary summary;
     BRIDGER_TRY(summary.output_format, output_format_of(o));
+    if (formats::bedrock::is_bedrock_world_folder(o.input) && (!o.input_format || *o.input_format == FormatId::McWorld)) {
+        summary.input_format = FormatId::McWorld;
+        if (summary.output_format != FormatId::JavaWorld)
+            return make_error(ErrorCode::NotImplemented, "a Bedrock world can only be converted to a Java world so far");
+        BRIDGER_TRY_STATUS(check_output_directory(o));
+        BRIDGER_TRY(const translate::MappingData* mapping, translate::MappingData::embedded());
+        summary.target_data_version = mapping->java_data_version();
+        const auto air = mapping->find_bedrock("minecraft:air", {});
+        if (!air) return make_error(ErrorCode::Malformed, "mapping data lacks air");
+        return convert_bedrock_world(o, std::move(summary), *mapping, *air);
+    }
     if (is_java_world_input(o.input) && (!o.input_format || *o.input_format == FormatId::JavaWorld)) {
         summary.input_format = FormatId::JavaWorld;
         return convert_java_world(o, std::move(summary));
@@ -768,7 +798,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
     if (summary.input_format == FormatId::McWorld) {
         if (summary.output_format != FormatId::JavaWorld)
             return make_error(ErrorCode::NotImplemented, "a Bedrock world can only be converted to a Java world so far");
-        return convert_bedrock_world(o, std::move(summary), input.data(), *mapping, *air);
+        return convert_bedrock_world(o, std::move(summary), *mapping, *air);
     }
 
     const bool src_bedrock = summary.input_format == FormatId::McStructure;

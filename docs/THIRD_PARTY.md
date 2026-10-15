@@ -58,7 +58,7 @@ embedded into the executable (`src/app/ui_bundle.cpp`).
 |---|---|---|---|---|
 | [leveldb-mcpe (Amulet-Team fork)](https://github.com/Amulet-Team/leveldb-mcpe) | `4846fc7` (2024-11-22) | BSD-3-Clause (Google LevelDB authors; Mojang modifications) | yes | Reading/writing Bedrock world databases. Mojang's original `Mojang/leveldb-mcpe` repository is no longer available (HTTP 404, checked 2026-10-11); see `docs/adr/0004-leveldb-mcpe-fork.md` |
 
-## Mapping data (compiled into `src/translate/data/*.brmap`, shipped)
+## Mapping data (compiled into `src/translate/data/*.brmap` and `bedrock-upgrade.nbt`, shipped)
 
 | Component | Version | License | Used for |
 |---|---|---|---|
@@ -66,6 +66,8 @@ embedded into the executable (`src/app/ui_bundle.cpp`).
 | [GeyserMC/Geyser](https://github.com/GeyserMC/Geyser) `block_palette.26_50.nbt` (fetched, SHA-256 pinned) | commit `50a464d7` | MIT (repository) | Bedrock block palette: names, typed states, block version |
 | Minecraft Java 26.3 data generator output (`blocks.json`, `registries.json`, `version.json`) | 26.3 | Mojang; generated locally from the official server jar, never committed or shipped | Java block state list and ids, item and biome registries |
 | [PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data) `data/pc/common/legacy.json` (fetched, SHA-256 pinned) | commit `dd011274` | MIT | Pre-1.13 numeric block/item ids → 1.13 names, for legacy `.schematic` files. Post-1.13 renames are Bridger's own (`tools/mapgen/overrides/legacy_renames.json`) |
+
+| [BedrockBlockUpgradeSchema](https://github.com/opencollab-incubator/BedrockBlockUpgradeSchema) (formerly pmmp), converted to `src/translate/data/bedrock-upgrade.nbt` by `tools/mapgen/build_bedrock_upgrade.py` | commit `4e874a16` | CC0-1.0 | Upgrading block states of old Bedrock worlds and structures (0.9 – 26.40) to the pinned palette |
 
 The `.brmap` blob contains block, item and biome **names and state values** (facts about the game, as GeyserMC
 publishes them). It contains no Mojang code, textures, models or sounds.
@@ -77,6 +79,7 @@ publishes them). It contains no Mojang code, textures, models or sounds.
 | [nbtlib](https://github.com/vberlier/nbtlib) | 2.0.4 | MIT | `tests/data/generate_test_data.py` writes the committed test files with it, so the NBT reader is tested against an independent implementation |
 | [amulet-leveldb](https://pypi.org/project/amulet-leveldb/) | 1.0.7 | Amulet's license | **Test oracle only** in `tests/integration/validate_mcworld.py` (independent reading of written worlds). No code copied, not committed |
 | [HiveGamesOSS/Chunker](https://github.com/HiveGamesOSS/Chunker) | commit `50aaf6d8` | MIT | **Consulted only** for Bedrock format behavior (`docs/formats/bedrock-world.md` cites the files). No code copied |
+| [PocketMine-MP](https://github.com/pmmp/PocketMine-MP) and [ext-chunkutils2](https://github.com/pmmp/ext-chunkutils2) | branch `stable` / `master` | LGPL-3.0 | **Consulted only** for old Bedrock chunk layouts and the upgrade rules (`docs/formats/bedrock-world.md`, "Old worlds"). No code copied |
 | [Litematica](https://github.com/sakura-ryoko/litematica) (branch LTS/26.2) | — | LGPL-3.0 | **Consulted only** for the `.litematic` layout (`docs/formats/litematic.md`). No code copied |
 | [minizip-ng](https://github.com/zlib-ng/minizip-ng) | (see above) | Zlib | also used to write `.mcworld` zips |
 

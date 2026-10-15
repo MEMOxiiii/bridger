@@ -60,7 +60,8 @@ Result<ViewWorld> ViewWorld::open(const fs::path& path) {
     BRIDGER_TRY(m.mapping, translate::MappingData::embedded());
     m.air = m.mapping->find_bedrock("minecraft:air", {}).value_or(0);
     std::error_code ec;
-    if (fs::is_directory(path, ec) || path.filename() == "level.dat") {
+    const bool bedrock_folder = formats::bedrock::is_bedrock_world_folder(path);
+    if (!bedrock_folder && (fs::is_directory(path, ec) || path.filename() == "level.dat")) {
         BRIDGER_TRY(const formats::java::JavaWorld jw, formats::java::open_java_world(path));
         m.info.format = formats::FormatId::JavaWorld;
         m.info.level_name = jw.level.level_name;
@@ -79,11 +80,10 @@ Result<ViewWorld> ViewWorld::open(const fs::path& path) {
             m.regions.push_back(std::move(*r));
         }
     } else {
-        BRIDGER_TRY(const platform::MappedFile file, platform::MappedFile::open(path));
         std::random_device rd;
         m.scratch = fs::temp_directory_path(ec) / std::format("bridger-view-{:08x}{:08x}", rd(), rd());
         fs::create_directories(m.scratch, ec);
-        BRIDGER_TRY(formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open(file.data(), m.scratch));
+        BRIDGER_TRY(formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(path, m.scratch));
         m.info.format = formats::FormatId::McWorld;
         m.info.level_name = reader.level().level_name;
         m.info.spawn = reader.level().spawn;

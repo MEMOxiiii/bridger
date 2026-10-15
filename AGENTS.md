@@ -112,6 +112,7 @@ additions to it are recorded here as required:
 - `formats/java/anvil/`: Java `level.dat` reading lives in `java_world.hpp` (no separate `level_dat.hpp`: it is
   three fields). Bit packing is local to each reader (`chunk_codec.cpp`, `litematic.cpp`), because the two
   formats pack differently; there is no shared `java_bit_packing.hpp`.
+- `fuzz/fuzz_bedrock_subchunk.cpp` (every Bedrock subchunk version, LegacyTerrain, the state upgrader).
 - `fuzz/fuzz_java_structure.cpp` (structure `.nbt`, `.litematic`, legacy `.schematic`), `fuzz/fuzz_mcstructure.cpp`,
   `fuzz/fuzz_anvil_chunk.cpp`; `bench/bench_anvil.cpp` (chunks, Bedrock world reading), `bench/bench_structures.cpp`
   (structure formats). `.github/workflows/release.yml`: builds the portable zip and the GitHub release for a `v*` tag.
@@ -128,6 +129,8 @@ additions to it are recorded here as required:
   `ui_bundle.*` (the embedded UI zip), `win32/compositor.*`, `win32/webview_host.*`, `win32/shell*`; the UI
   in `src/app/ui/` (`package.json`, `package-lock.json`, `vite.config.ts`, `src/**`); `cmake/NpmInstall.cmake`;
   `docs/app/bridge.md` (message protocol); `docs/adr/0009-hybrid-desktop-ui.md`.
+- `translate/bedrock_upgrade.hpp` (+ `.cpp`), `src/translate/data/bedrock-upgrade.nbt` and
+  `tools/mapgen/build_bedrock_upgrade.py`: upgrading block states of old Bedrock worlds (BedrockBlockUpgradeSchema, CC0).
 - `tests/data/javaworld/`: generated Java worlds (`generate_test_data.py`, `generate_java_world`).
 - `formats/java/java_writers.hpp` (+ `.cpp`): the `.schem`/`.nbt`/`.litematic` writers share palette and block
   entity code, so they live in one file instead of one per reader. `formats/java/anvil/anvil_writer.hpp`: chunk,

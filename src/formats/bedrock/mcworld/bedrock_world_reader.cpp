@@ -8,9 +8,11 @@
 #include <bridger/io/nbt/nbt_view.hpp>
 #include <bridger/io/nbt/nbt_writer.hpp>
 #include <bridger/io/zip_archive.hpp>
+#include <bridger/platform/mapped_file.hpp>
 #include <bridger/platform/paths.hpp>
 
 #include <algorithm>
+#include <map>
 #include <fstream>
 #include <unordered_map>
 
@@ -19,11 +21,63 @@ namespace fs = std::filesystem;
 using io::nbt::NbtCompoundView;
 using io::nbt::NbtView;
 
+// Layers of one subchunk in any historical layout (empty: no data).
+struct SubchunkLayers {
+    std::vector<RawSubchunkLayer> layers;
+    bool legacy = false; // numeric ids or 1.2.13 single storage: the legacy extra-data layer applies
+};
+
 namespace {
 
 constexpr u8 kLegacyVersionTag = 0x76; // "v": chunk version before 1.16.100 [1]
 constexpr u8 kEntityTag = 0x32;
 constexpr u8 kData3DTag = 0x2B;
+constexpr u8 kData2DTag = 0x2D;         // heightmap + 2D biomes, before 1.18 [1]
+constexpr u8 kData2DLegacyTag = 0x2E;   // heightmap + 2D biomes with colours, before 1.0 [1]
+constexpr u8 kLegacyTerrainTag = 0x30;  // whole 128-high column of numeric ids, before 1.0 [1]
+constexpr u8 kLegacyExtraDataTag = 0x34; // second block layer of numeric ids, before 1.2.13 [PocketMine-MP]
+
+// Chunk versions (the Version/LegacyVersion byte) from PocketMine-MP's ChunkVersion.php.
+constexpr u8 kChunkV1_0_0 = 3;                // first version with SubChunkPrefix keys
+constexpr u8 kChunkCavesCliffsOffsetFirst = 23; // 1.16.220.50 - 1.16.230.50 experimental worlds stored
+constexpr u8 kChunkCavesCliffsOffsetLast = 26;  // subchunk y at key index y + 4
+
+// LegacyBlockExtraData: i32 count, then (i32 key, u16 value) pairs; value = id | data << 8. The key
+// packs x/z/y in 4/4/8 bits from 1.0 and 4/4/7 bits before (PocketMine-MP LevelDB.php,
+// deserializeExtraDataKey). Returns per-subchunk layers (index = subchunk y from 0).
+std::map<i32, RawSubchunkLayer> read_extra_data(std::span<const u8> d, u8 chunk_version) {
+    std::map<i32, RawSubchunkLayer> out;
+    std::map<i32, std::map<u16, u16>> slots; // subchunk -> value -> palette index
+    if (d.size() < 4) return out;
+    const i32 count = io::load_le<i32>(d.data());
+    for (i32 n = 0; n < count && 4 + static_cast<usize>(n + 1) * 6 <= d.size(); ++n) {
+        const u8* e = d.data() + 4 + static_cast<usize>(n) * 6;
+        const u32 key = io::load_le<u32>(e);
+        const u16 value = io::load_le<u16>(e + 4);
+        u32 x, z, y;
+        if (chunk_version >= kChunkV1_0_0) { x = (key >> 12) & 15; z = (key >> 8) & 15; y = key & 0xFF; }
+        else { x = (key >> 11) & 15; z = (key >> 7) & 15; y = key & 0x7F; }
+        const i32 sy = static_cast<i32>(y >> 4);
+        auto [it, fresh] = out.try_emplace(sy);
+        RawSubchunkLayer& layer = it->second;
+        if (fresh) {
+            layer.indices.fill(0);
+            layer.palette.push_back(legacy_palette_entry(0, 0)); // air
+        }
+        auto& slot = slots[sy];
+        auto [sit, added] = slot.try_emplace(value, static_cast<u16>(layer.palette.size()));
+        if (added) layer.palette.push_back(legacy_palette_entry(static_cast<u8>(value & 0xFF), static_cast<u8>((value >> 8) & 0xF)));
+        layer.indices[((y & 15) << 8) | (z << 4) | x] = sit->second;
+    }
+    return out;
+}
+
+// 2D biomes (index z*16 + x) -> every section of the column.
+void fill_2d_biomes(Structure& col, const std::array<u32, 256>& ids) {
+    std::array<u32, kSectionVolume> values{};
+    for (usize i = 0; i < kSectionVolume; ++i) values[i] = ids[i & 255];
+    for (u32 sy = 0; sy < col.sections_y(); ++sy) col.section(0, sy, 0).ensure_biomes(values[0]).assign(values);
+}
 
 // One biome storage of Data3D (runtime palette of i32 ids), Chunker PaletteUtil.readChunkPalette:
 // bits 0 = no index words and no palette count, one id; bits 127 = no data for this subchunk.
@@ -114,6 +168,40 @@ Result<BedrockWorldReader> BedrockWorldReader::open(std::span<const u8> mcworld,
         if (!out) return make_error(ErrorCode::IoError, "cannot unpack " + rel);
     }
 
+    return open_unpacked(std::move(r), level_bytes);
+}
+
+bool is_bedrock_world_folder(const fs::path& path) {
+    std::error_code ec;
+    const fs::path root = fs::is_directory(path, ec) ? path : path.parent_path();
+    return fs::is_regular_file(root / "level.dat", ec) && fs::is_regular_file(root / "db" / "CURRENT", ec);
+}
+
+Result<BedrockWorldReader> BedrockWorldReader::open_path(const fs::path& input, const fs::path& work_dir) {
+    std::error_code ec;
+    if (!is_bedrock_world_folder(input)) {
+        BRIDGER_TRY(const platform::MappedFile f, platform::MappedFile::open(input));
+        return open(f.data(), work_dir);
+    }
+    // A world folder (as in the game's minecraftWorlds): db/ is copied, because LevelDB writes
+    // (LOCK, LOG, recovery) even when only reading, and the input must never change.
+    const fs::path root = fs::is_directory(input, ec) ? input : input.parent_path();
+    fs::create_directories(work_dir / "db", ec);
+    for (const auto& e : fs::directory_iterator(root / "db", ec)) {
+        if (!e.is_regular_file()) continue;
+        if (e.path().filename() == "LOCK") continue;
+        fs::copy_file(e.path(), work_dir / "db" / e.path().filename(), fs::copy_options::overwrite_existing, ec);
+        if (ec) return make_error(ErrorCode::IoError, "cannot copy the world database: " + ec.message());
+    }
+    if (ec) return make_error(ErrorCode::IoError, "cannot list the world database: " + ec.message());
+    BRIDGER_TRY(const platform::MappedFile level, platform::MappedFile::open(root / "level.dat"));
+    BedrockWorldReader r;
+    r.impl_->dir = work_dir;
+    return open_unpacked(std::move(r), std::vector<u8>(level.data().begin(), level.data().end()));
+}
+
+Result<BedrockWorldReader> BedrockWorldReader::open_unpacked(BedrockWorldReader r, const std::vector<u8>& level_bytes) {
+    const fs::path work_dir = r.impl_->dir;
     // level.dat: i32 storage version, i32 length, little-endian NBT.
     if (level_bytes.size() < 8) return make_error(ErrorCode::Malformed, "level.dat too short");
     BRIDGER_TRY(const io::nbt::NbtDocument ld,
@@ -147,6 +235,39 @@ Result<BedrockWorldReader> BedrockWorldReader::open(std::span<const u8> mcworld,
     return r;
 }
 
+Result<u8> BedrockWorldReader::chunk_version(ChunkPos pos) const {
+    BRIDGER_TRY(const auto v, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, ChunkTag::Version)));
+    if (v && !v->empty()) return (*v)[0];
+    BRIDGER_TRY(const auto legacy, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyVersionTag))));
+    if (legacy && !legacy->empty()) return (*legacy)[0];
+    return u8{40}; // no version key: read as a current chunk
+}
+
+Result<SubchunkLayers> BedrockWorldReader::subchunk_layers(ChunkPos pos, i32 sy, u8 version, const LegacyTerrain* terrain) const {
+    SubchunkLayers out;
+    if (terrain != nullptr) { // pre-1.0: the column holds subchunks 0-7
+        if (sy < 0 || sy >= 8) return out;
+        out.layers.push_back(terrain->subchunks[static_cast<usize>(sy)]);
+        out.legacy = true;
+    } else {
+        const i32 offset = version >= kChunkCavesCliffsOffsetFirst && version <= kChunkCavesCliffsOffsetLast ? 4 : 0;
+        BRIDGER_TRY(const auto value, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, ChunkTag::SubChunkPrefix,
+                                                               static_cast<i8>(sy + offset))));
+        if (!value) return out;
+        BRIDGER_TRY(RawSubchunk sub, decode_subchunk_raw(*value));
+        out.legacy = sub.legacy || sub.version == 1;
+        out.layers = std::move(sub.layers);
+    }
+    if (out.legacy && out.layers.size() == 1 && sy >= 0) {
+        BRIDGER_TRY(const auto extra, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyExtraDataTag))));
+        if (extra) {
+            auto layers = read_extra_data(*extra, version);
+            if (const auto it = layers.find(sy); it != layers.end()) out.layers.push_back(std::move(it->second));
+        }
+    }
+    return out;
+}
+
 Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_ptr<BlockStateRegistry> blocks,
                                                       std::shared_ptr<BiomeRegistry> biomes, u32 bedrock_data_version,
                                                       const StateLookupFn& lookup, u32 air, i32 default_biome) const {
@@ -170,7 +291,9 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
         std::string name = "?";
         if (auto doc = io::nbt::NbtDocument::parse(raw, Endian::Little)) {
             const NbtCompoundView e = doc->root().entries();
-            name = std::string(e.find("name").as_string().value_or("?"));
+            const auto val = e.find("val").as_short();
+            if (const auto id = e.find(kLegacyIdEntryKey).as_int()) name = "legacy id " + std::to_string(*id) + ":" + std::to_string(val.value_or(0));
+            else name = std::string(e.find("name").as_string().value_or("?")) + (val ? ":" + std::to_string(*val) : "");
             if (const auto idx = lookup(e)) v = *idx;
             else out.unknown_blocks[name] += uses;
         } else {
@@ -181,15 +304,22 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
     };
 
     std::array<u32, kSectionVolume> values{};
+    BRIDGER_TRY(const u8 version, chunk_version(pos));
+    BRIDGER_TRY(const auto legacy_terrain, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyTerrainTag))));
+    std::optional<LegacyTerrain> terrain;
+    if (legacy_terrain) {
+        auto t = decode_legacy_terrain(*legacy_terrain);
+        if (t) terrain = std::move(*t);
+        else out.warnings.push_back(where + ": the pre-1.0 terrain could not be read (" + t.error().describe() + "); it was left empty");
+    }
     for (i32 sy = kOverworldMinSubchunk; sy < kOverworldMinSubchunk + kOverworldSubchunks; ++sy) {
-        BRIDGER_TRY(const auto value, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, ChunkTag::SubChunkPrefix, static_cast<i8>(sy))));
-        if (!value) continue;
-        auto sub = decode_subchunk_raw(*value);
+        auto sub = subchunk_layers(pos, sy, version, terrain ? &*terrain : nullptr);
         if (!sub) {
             out.warnings.push_back(where + " subchunk " + std::to_string(sy) + " could not be read (" +
                                    sub.error().describe() + "); it was left empty");
             continue;
         }
+        if (sub->layers.empty()) continue;
         Section& sec = col.section(0, static_cast<u32>(sy - kOverworldMinSubchunk), 0);
         for (usize l = 0; l < sub->layers.size() && l < 2; ++l) {
             const RawSubchunkLayer& layer = sub->layers[l];
@@ -211,6 +341,9 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
 
     // Biomes (Data3D): heightmap (512 bytes), then one storage per subchunk from the bottom.
     BRIDGER_TRY(const auto d3, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData3DTag))));
+    BRIDGER_TRY(const auto d2, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DTag))));
+    BRIDGER_TRY(const auto d2l, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DLegacyTag))));
+    std::array<u32, 256> ids2d{};
     if (d3 && d3->size() >= 512) {
         usize p = 512;
         std::array<u32, kSectionVolume> prev{};
@@ -225,6 +358,19 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
             if (*has) prev = values;
             col.section(0, i, 0).ensure_biomes(prev[0]).assign(prev);
         }
+    } else if (d2 && d2->size() >= 512 + 256) {
+        // Data2D: heightmap (512 bytes), then 256 biome ids, one byte each (two bytes, little-endian,
+        // when the value is 1024 bytes long: 1.21.40.23+ "Old" worlds) [1].
+        const bool wide = d2->size() >= 512 + 512;
+        for (usize i = 0; i < 256; ++i) ids2d[i] = wide ? io::load_le<u16>(d2->data() + 512 + i * 2) : (*d2)[512 + i];
+        fill_2d_biomes(col, ids2d);
+    } else if (d2l && d2l->size() >= 512 + 1024) {
+        // Data2DLegacy: heightmap (512 bytes), then 256 entries of 4 bytes, the biome id first [1].
+        for (usize i = 0; i < 256; ++i) ids2d[i] = (*d2l)[512 + i * 4];
+        fill_2d_biomes(col, ids2d);
+    } else if (terrain) {
+        for (usize i = 0; i < 256; ++i) ids2d[i] = terrain->biomes[i];
+        fill_2d_biomes(col, ids2d);
     }
 
     // Block entities: concatenated LE NBT roots with absolute positions.
@@ -270,9 +416,14 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
 std::optional<std::array<u32, kSectionVolume>> BedrockWorldReader::read_subchunk_blocks(ChunkPos pos, i32 sy,
                                                                                        const StateLookupFn& lookup,
                                                                                        u32 air) const {
-    const auto value = impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, ChunkTag::SubChunkPrefix, static_cast<i8>(sy)));
-    if (!value || !*value) return std::nullopt;
-    auto sub = decode_subchunk_raw(**value);
+    const auto version = chunk_version(pos);
+    if (!version) return std::nullopt;
+    std::optional<LegacyTerrain> terrain;
+    if (sy >= 0 && sy < 8) {
+        if (const auto t = impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyTerrainTag))); t && *t)
+            if (auto d = decode_legacy_terrain(**t)) terrain = std::move(*d);
+    }
+    auto sub = subchunk_layers(pos, sy, *version, terrain ? &*terrain : nullptr);
     if (!sub || sub->layers.empty()) return std::nullopt;
     const RawSubchunkLayer& layer = sub->layers[0];
     std::vector<u32> map(layer.palette.size(), air);

@@ -3,6 +3,16 @@
 All notable changes to Bridger. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow the release plan in `docs/release.md`.
 
+## [Unreleased]
+
+### Added
+
+- Old Bedrock worlds: every LevelDB world from Pocket Edition 0.9 to 26.52 is read, including the pre-1.0
+  `LegacyTerrain` column, numeric-id subchunks (1.0 – 1.2.x), 1.2.13 palettes and 2D biomes. Old block states
+  are upgraded to 26.50 with the BedrockBlockUpgradeSchema data (CC0), so old palettes no longer read as air.
+- Bedrock world folders (from `minecraftWorlds`) open and convert like `.mcworld` files; only a copy of the
+  database is opened.
+
 ## [0.4.2] - 2026-10-15
 
 ### Added

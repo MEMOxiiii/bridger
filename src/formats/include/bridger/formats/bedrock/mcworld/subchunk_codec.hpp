@@ -14,6 +14,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace bridger::formats::bedrock {
@@ -47,8 +48,27 @@ struct RawSubchunkLayer {
 struct RawSubchunk {
     u8 version = 0;
     i8 y_index = 0;
+    bool legacy = false; // pre-1.2.13 numeric ids: palette entries are legacy_palette_entry() compounds
     std::vector<RawSubchunkLayer> layers;
 };
+// Versions 0-9: 0 and 2-7 (numeric ids, 1.0 - 1.2.x), 1 (one storage, 1.2.13), 8 and 9.
 [[nodiscard]] Result<RawSubchunk> decode_subchunk_raw(std::span<const u8> data);
+
+// Numeric block ids (before 1.2.13) have no palette; Bridger stands in a palette entry
+// {"bridger:legacy_id": Int id, "val": Short data}, which the state lookup upgrades
+// (translate/bedrock_upgrade.hpp).
+inline constexpr std::string_view kLegacyIdEntryKey = "bridger:legacy_id";
+[[nodiscard]] std::vector<u8> legacy_palette_entry(u8 id, u8 data);
+// 16 x 16 x 16 ids and data nibbles; bedrock_offset(x, y, z, base) gives the array index.
+[[nodiscard]] RawSubchunkLayer legacy_layer(std::span<const u8> ids, std::span<const u8> data,
+                                            usize (*bedrock_offset)(usize x, usize y, usize z, usize base), usize base);
+
+// The pre-1.0 LegacyTerrain column (key tag 0x30): eight subchunks of numeric ids from y 0, and
+// 2D biome ids (index z*16 + x).
+struct LegacyTerrain {
+    std::array<RawSubchunkLayer, 8> subchunks;
+    std::array<u8, 256> biomes{};
+};
+[[nodiscard]] Result<LegacyTerrain> decode_legacy_terrain(std::span<const u8> value);
 
 } // namespace bridger::formats::bedrock

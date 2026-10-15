@@ -165,7 +165,7 @@ int info_mcstructure(const std::string& name, std::span<const u8> bytes) {
     return kExitOk;
 }
 
-int info_mcworld(const std::string& name, std::span<const u8> bytes) {
+int info_mcworld(const std::string& name, const std::filesystem::path& path) {
     namespace fs = std::filesystem;
     std::error_code ec;
     std::random_device rd;
@@ -178,7 +178,7 @@ int info_mcworld(const std::string& name, std::span<const u8> bytes) {
             fs::remove_all(p, e);
         }
     } cleanup{scratch};
-    auto reader = formats::bedrock::BedrockWorldReader::open(bytes, scratch); // unpacks a copy; the file is only read
+    auto reader = formats::bedrock::BedrockWorldReader::open_path(path, scratch); // opens a copy; the input is only read
     if (!reader) {
         log::error("{}", reader.error().with_file(name).describe());
         return kExitError;
@@ -187,7 +187,7 @@ int info_mcworld(const std::string& name, std::span<const u8> bytes) {
     const auto& chunks = reader->overworld_chunks();
     static constexpr std::string_view kGenerators[] = {"old", "infinite", "flat", "nether", "the end", "void"};
     line("File:", name);
-    line("Format:", "Bedrock world (.mcworld)");
+    line("Format:", formats::bedrock::is_bedrock_world_folder(path) ? "Bedrock world (folder)" : "Bedrock world (.mcworld)");
     line("Level name:", lv.level_name.empty() ? std::string("(none)") : lv.level_name);
     line("Generator:", lv.generator >= 0 && lv.generator < 6 ? std::string(kGenerators[lv.generator]) : std::to_string(lv.generator));
     line("Seed:", std::to_string(lv.seed));
@@ -244,6 +244,7 @@ int run_info(const std::string& input_utf8) {
     }
     {
         std::error_code ec;
+        if (formats::bedrock::is_bedrock_world_folder(*path)) return info_mcworld(input_utf8, *path);
         if (std::filesystem::is_directory(*path, ec) || path->filename() == "level.dat") return info_java_world(input_utf8, *path);
     }
     auto mapped = platform::MappedFile::open(*path);
@@ -263,7 +264,7 @@ int run_info(const std::string& input_utf8) {
     case formats::FormatId::Litematic:
     case formats::FormatId::LegacySchematic: return info_java_structure(input_utf8, bytes, *format);
     case formats::FormatId::McStructure: return info_mcstructure(input_utf8, bytes);
-    case formats::FormatId::McWorld: return info_mcworld(input_utf8, bytes);
+    case formats::FormatId::McWorld: return info_mcworld(input_utf8, *path);
     default:
         log::error("'info' does not support {} files yet", formats::info(*format).name);
         return kExitNotImplemented;

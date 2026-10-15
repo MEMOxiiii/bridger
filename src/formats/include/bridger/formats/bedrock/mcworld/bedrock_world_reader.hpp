@@ -37,9 +37,18 @@ struct BedrockColumn {
     std::vector<std::string> warnings;
 };
 
+struct SubchunkLayers;
+struct LegacyTerrain;
+
+// A Bedrock world folder: level.dat and db/CURRENT (path is the folder or its level.dat).
+[[nodiscard]] bool is_bedrock_world_folder(const std::filesystem::path& path);
+
 class BedrockWorldReader {
 public:
     [[nodiscard]] static Result<BedrockWorldReader> open(std::span<const u8> mcworld, const std::filesystem::path& work_dir);
+    // A .mcworld file or a world folder (level.dat + db/, or its level.dat); a folder's database is
+    // copied into work_dir first, so the input is never opened for writing.
+    [[nodiscard]] static Result<BedrockWorldReader> open_path(const std::filesystem::path& input, const std::filesystem::path& work_dir);
     BedrockWorldReader(BedrockWorldReader&&) noexcept;
     BedrockWorldReader& operator=(BedrockWorldReader&&) noexcept;
     ~BedrockWorldReader();
@@ -62,6 +71,10 @@ public:
 
 private:
     BedrockWorldReader();
+    [[nodiscard]] static Result<BedrockWorldReader> open_unpacked(BedrockWorldReader r, const std::vector<u8>& level_bytes);
+    [[nodiscard]] Result<u8> chunk_version(ChunkPos pos) const;
+    [[nodiscard]] Result<SubchunkLayers> subchunk_layers(ChunkPos pos, i32 subchunk_y, u8 version,
+                                                                const LegacyTerrain* terrain) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

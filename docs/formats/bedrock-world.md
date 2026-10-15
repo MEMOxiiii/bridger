@@ -153,8 +153,8 @@ copy of `db/` is opened.
 - **Chunks:** every key of 9 bytes ending in `Version` (`0x2C`) or the pre-1.16.100 `LegacyVersion` (`0x76`) [1] is
   an Overworld chunk; 13-byte keys belong to other dimensions (reported, not converted). `actorprefix` keys and
   legacy `Entity` keys are counted and reported (entities are not converted yet).
-- **Subchunks** (versions 8 and 9) are decoded with their palette entries kept as raw NBT; each distinct entry is
-  resolved once against the pinned palette. Entries the palette does not know are read as air and reported as
+- **Subchunks** (every version, see "Old worlds") are decoded with their palette entries kept as raw NBT; each
+  distinct entry is upgraded if it is old and resolved once against the pinned palette. Entries the palette does not know are read as air and reported as
   unmapped blocks with their names. Layer 2 is kept as the secondary layer.
 - **Data3D biomes:** after the 512-byte heightmap, one storage per subchunk from the bottom. Header byte
   `bits << 1 | runtime`; **bits 0** means no index words and no palette count, a single id; **bits 127** means no
@@ -163,6 +163,70 @@ copy of `db/` is opened.
 - **Block entities:** concatenated NBT roots with absolute `x/y/z`; they become column-local, and so do
   `pairx`/`pairz`. `isMovable` is dropped.
 - **level.dat:** `LevelName`, `SpawnX/Y/Z`, `RandomSeed`, `Generator` are read (8-byte header skipped).
+
+## Old worlds (reading)
+
+Bridger reads Overworld terrain from every LevelDB world the game has written, from Pocket Edition 0.9 (2014) to
+26.52, as a `.mcworld` or as a world folder from `minecraftWorlds` (its `db/` is copied to a scratch folder first,
+because LevelDB writes lock and log files even when only reading). Pocket Edition before 0.9 (`chunks.dat`) is
+not LevelDB and is not read. Implementation: `bedrock_world_reader.cpp`, `subchunk_codec.cpp`,
+`translate/bedrock_upgrade.cpp`.
+
+**Chunk version** (the byte under `Version` 0x2C, or `LegacyVersion` 0x76 before 1.16.100) [1]; values from
+PocketMine-MP `ChunkVersion.php` [8]:
+
+| Chunk version | Game | Terrain stored as |
+|---|---|---|
+| 0–2 | 0.9.0 – 0.9.5 (to 0.17) | `LegacyTerrain` (0x30): one 16 × 128 × 16 column |
+| 3–7 | 1.0 – 1.2.x | `SubChunkPrefix` version 0 (numeric ids) |
+| 8–22 | 1.2.13 – 1.16.210 | `SubChunkPrefix` version 1 or 8 (palettes) |
+| 23–26 | 1.16.220/230 betas with experimental Caves & Cliffs | as above, but subchunk y is stored at key index **y + 4** [8] |
+| 27–42 | 1.17.30 – 26.x | `SubChunkPrefix` version 8 or 9 |
+
+**`LegacyTerrain`** (0x30), 83 200 bytes [1][8]: 32 768 block ids, 16 384 bytes of data nibbles, 32 768 bytes
+of sky and block light, a 256-byte heightmap, then 256 big-endian u32 biome entries (biome id in the top byte,
+RGB colour below). Index `x*2048 + z*128 + y`. Read as subchunks 0–7.
+
+**`SubChunkPrefix` versions 0 and 2–7** (1.0 – 1.2.x): 4096 block ids, then 2048 bytes of data nibbles, index
+`x*256 + z*16 + y`; light may follow and is ignored. Versions 2–7 were written by a third-party converter that
+put the subchunk height in the version byte; the game reads them like 0 [7][8]. **Version 1** (1.2.13): one
+palette storage with no layer count. **Bits 0** storages (one palette entry, no words, no count) are written by
+other tools, not the game; one with a count of 1 is accepted too [8].
+
+**Nibble arrays**: the data value of an even index is in the low four bits of its byte (PocketMine-MP
+ext-chunkutils2 `SubChunkConverter.h` [8]).
+
+**`LegacyBlockExtraData`** (0x34, before 1.2.13): a second block layer (e.g. snow layered over grass) as i32
+count, then (i32 key, u16 value) pairs with `value = id | data << 8`; the key packs x, z, y in 4/4/8 bits (4/4/7
+before chunk version 3) [8]. Read as layer 2 of subchunks stored as versions 0 or 1, or `LegacyTerrain`.
+
+**2D biomes**: `Data2D` (0x2D, before 1.18): 512-byte heightmap, then 256 biome ids of one byte (two bytes LE
+when the value is 1024 bytes long, 1.21.40+ "Old" worlds) [1]; `Data2DLegacy` (0x2E, before 1.0): heightmap, then
+256 × 4 bytes with the id first [1]; `LegacyTerrain` as above. Index `z*16 + x`; the id fills the whole column.
+
+**Block state upgrades.** Palette entries keep the form of the version that wrote them, and the game upgrades
+them only when a chunk is loaded and saved again, so an old world mixes forms [7]:
+
+| Form | Written by | Upgrade |
+|---|---|---|
+| numeric id + data | before 1.2.13 (no palette) | id → string id (`block_legacy_id_map.json`), then as the next row |
+| `{name, val}` | 1.2.13 – 1.12 | (id, data) → 1.12 state (`id_meta_to_nbt/1.12.0.bin`; unknown data values use data 0, as PocketMine-MP does), then as the next row |
+| `{name, states, version}` | 1.13 – 26.x | every upgrade schema newer than `version`, in order |
+
+The data is BedrockBlockUpgradeSchema [7] (CC0), converted by `tools/mapgen/build_bedrock_upgrade.py` into
+`src/translate/data/bedrock-upgrade.nbt` (little-endian NBT, read with Bridger's own parser). Schema semantics
+follow its README and `nbt_upgrade_schema_schema.json`: a `remappedStates` match replaces the whole state and
+stops; otherwise `renamedIds` or `flattenedProperties`, `addedProperties`, `removedProperties`,
+`renamedProperties` and `remappedPropertyValues` apply, all indexed by the old name and old property names. A
+schema version shared by several schemas is applied again to entries of that version, because Mojang changed
+states without bumping it (PocketMine-MP `BlockStateUpgrader.php` [8]); the four newest schemas (1.21.60 to
+26.50) all carry 1.21.60.33. Entries at the current block version are first looked up as they are and upgraded
+only if that fails (e.g. fences from 26.40, which lack the connection states 26.50 added). Numeric ids are passed
+from the reader to the lookup as `{"bridger:legacy_id": Int, "val": Short}`, a Bridger-only form.
+
+Checked: every pre-1.13 (id, data) pair of the table upgrades to a state of the pinned 26.50 palette (unit test);
+a Bedrock 1.12 world written by Chunker [3] (`BEDROCK_R12`) from a 26.3 Java world converts with no unknown
+blocks.
 
 ## Open questions (verified by the in-game checklist)
 
@@ -189,3 +253,10 @@ chunks without seams, and double chests open as one.
 4. Amulet-Team/leveldb-mcpe (BSD-3-Clause), `mcpe_sample_setup.cpp`: https://github.com/Amulet-Team/leveldb-mcpe
 5. GeyserMC/mappings (MIT), branch `feature/26.3` commit `01ec65e3`: `items.json`, `biomes.json`, `blocks.nbt`
 6. GeyserMC/Geyser (MIT), commit `50a464d7`: `DoubleChestBlockEntityTranslator.java`, `BlockRegistryPopulator.java`
+7. opencollab-incubator/BedrockBlockUpgradeSchema (CC0-1.0, formerly pmmp), commit `4e874a16` (2026-09-18):
+   README, `nbt_upgrade_schema_schema.json`, `nbt_upgrade_schema/*.json`, `0351_1.26.40_to_1.26.50.json`,
+   `block_legacy_id_map.json`, `id_meta_to_nbt/1.12.0.bin`. https://github.com/opencollab-incubator/BedrockBlockUpgradeSchema
+8. pmmp/PocketMine-MP (LGPL-3.0), branch `stable` (checked 2026-10-15), consulted only, no code copied:
+   `src/world/format/io/leveldb/{LevelDB,ChunkVersion,SubChunkVersion,ChunkDataKey}.php`,
+   `src/data/bedrock/block/upgrade/*.php`; pmmp/ext-chunkutils2 `lib/SubChunkConverter.h` (index and nibble order).
+   Tomcc's "Beta 1.2.13 format" gist (by a Mojang developer, linked from [1]) for subchunk versions 0, 1 and 8.
