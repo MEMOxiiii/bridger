@@ -1,8 +1,9 @@
 # Java world (Anvil)
 
-Editions/versions covered: Java Edition worlds saved by **1.18 or newer** (chunk DataVersion ≥ 2860), read
-for the Overworld. Pinned target: Java 26.3 (DataVersion 5023, `docs/versions.md`). Older chunk layouts are
-refused with a message asking the user to open and save the world in a newer version first.
+Editions/versions covered: Java Edition worlds from **Beta 1.3 (McRegion) to 26.3**, read for the Overworld;
+blocks and biomes of older versions are upgraded to the pinned target, Java 26.3 (DataVersion 5023,
+`docs/versions.md`). See "Old worlds" for everything before 1.18. Alpha worlds (before Beta 1.3) are refused
+with a message asking the user to open them once in a later version, which converts them.
 
 Code: `src/formats/java/anvil/` (`region_file`, `chunk_codec`, `java_world`), conversion in
 `src/convert/pipeline.cpp` (`convert_java_world`).
@@ -71,11 +72,95 @@ two longs** (the 1.16+ rule). Index order `y * 256 + z * 16 + x`. Palette entrie
 (0 bits and no `data` for a single entry), same packing, index `y * 16 + z * 4 + x` in cells. Bridger expands
 the cells to per-block biomes.
 
-Pre-1.18 chunks (a `Level` compound, or DataVersion < 2860) return `UnsupportedVersion`.
-(The old "Palette entries spelled `{id, properties}`" remark below refers to the same codec.)
+Chunks with a `Level` compound are read as described under "Old worlds"; a chunk with a DataVersion below 2860
+and no `Level` compound is malformed.
 
 The column becomes a 16 × height × 16 Java structure whose local (0,0,0) is world `(x*16, yPos*16, z*16)`.
 Sections not listed are air. `keepPacked` and the position tags are dropped from block entities.
+
+## Old worlds
+
+Every layout since McRegion is read (`chunk_codec.cpp`, `java_world.cpp`; data and rules in
+`java/java_upgrade.cpp` and `java/legacy_blocks.cpp`). The layout is recognised from the chunk itself, not from
+version numbers: a `Level` compound means pre-1.18; inside it a section `Palette` means 1.13 – 1.17, a section
+`Blocks` array means 1.2 – 1.12, and `Level.Blocks` (no sections) means McRegion.
+
+| Versions | Files | Chunk | Blocks | Biomes |
+|---|---|---|---|---|
+| Alpha (before Beta 1.3) | `<base36>/<base36>/c.<x>.<z>.dat` | — | — | refused (`UnsupportedVersion`) |
+| Beta 1.3 – 1.1 | `region/r.<x>.<z>.mcr` (same container as `.mca`) | `Level` | `Level.Blocks` (32 768) + `Data`, index `x*2048 + z*128 + y`, 128 high | none (plains) |
+| 1.2 – 1.12 | `region/*.mca` | `Level` | per section `Blocks` (4096) + `Data` + optional `Add`, index `y*256 + z*16 + x` | `Biomes` 256 bytes |
+| 1.13 – 1.14 | `region/*.mca` | `Level` | per section `Palette` + `BlockStates` | `Biomes` 256 ints |
+| 1.15 – 1.17 | `region/*.mca` | `Level` | same | `Biomes` 1024 ints |
+| 1.18 + | `region/*.mca` (26.1+: `dimensions/…`) | root | `sections[].block_states` | `sections[].biomes` |
+
+Sources: [1][2][5]; McRegion and Anvil index orders [6]; nibble order, the 1.13 packing and the biome arrays
+from Chunker's Java readers [7] (`JavaChunkReader`, `PaletteUtil`, `v1_13`/`v1_15` `ColumnReader`), checked with
+worlds Chunker wrote (below).
+
+- **Nibble arrays** (`Data`, `Add`): the value of an even index is in the low four bits; id = `Blocks[i] |
+  Add[i] << 8`.
+- **`BlockStates` before 20w17a** (1.13 – 1.15) is one run of `bits`-bit fields that **spans** long boundaries;
+  from 20w17a (1.16) entries never span. Bits are `max(4, ceil(log2(palette size)))` in both. The two are told
+  apart by the array length (`4096 * bits / 64` vs `ceil(4096 / floor(64 / bits))`); for 4, 8 and 16 bits they
+  are the same array.
+- **Biomes**: 1024 ints are 4 × 4 × 4 cells, index `(y/4)*16 + (z/4)*4 + x/4` for y 0–255; 256 entries are
+  per column, index `z*16 + x`. Ids are the numeric biome ids of 1.17 (PrismarineJS minecraft-data
+  `pc/1.17/biomes.json` [8]); 1.18 renamed eleven of them (`mountains` → `windswept_hills`, …) [5] and removed 26
+  variants without naming a successor; Bridger merges each into its base biome (`desert_hills` → `desert`, …)
+  and warns. `-1`/`255` (not generated) read as plains, as the game fills them.
+- **Generation status**: `Level.Status` `full` (1.14+), `postprocessed`/`fullchunk` (1.13); without `Status`,
+  `TerrainPopulated` (absent = populated). Only finished chunks are converted, as for 1.18+.
+- **Sections** with `Y` outside 0–15 (1.14+ keeps light-only sections at −1 and 16) are skipped. Columns are 256
+  (McRegion: 128) high from y 0.
+- **McRegion**: when a world has `.mca` files its `.mcr` files are ignored (1.2 left them next to the converted
+  ones).
+
+**Numeric ids (before 1.13)** go through the same legacy table as `.schematic` files
+(`docs/formats/legacy-schematic.md`: minecraft-data `legacy.json` plus Bridger's renames, with the same
+nearest-data-value fallback). 1.13 moved some state out of block entities or across blocks; Bridger restores it
+after reading the column (`fix_legacy_blocks`), after the rules of the 1.13 flattening as Chunker documents them
+[7] (`JavaLegacy*PreTransformHandler`, `JavaLegacy*BlockEntityHandler`):
+
+| Block | 1.12 storage | Restored |
+|---|---|---|
+| doors | lower half: facing, open; upper half: hinge, powered | both halves get all four |
+| tall plants (sunflower … peony) | upper half: data 8, no plant | the plant of the lower half |
+| beds | block entity `color` (dye index) | `<colour>_bed` |
+| flower pots | block entity `Item` (string; int before 1.8) + `Data` | `potted_<plant>`; the block entity is dropped |
+| skulls | block entity `SkullType` (0–5) + `Rot` | `<type>_skull`/`_head` (wall variants keep facing) |
+| banners | block entity `Base` (dye damage: 0 black … 15 white) | `<colour>_banner` |
+| note blocks | block entity `note` | `note_block[note]`; the block entity is dropped |
+
+Pre-1.11 block entity ids (`Chest`, `Trap`, `MobSpawner`, …) are namespaced, and item stacks with numeric ids
+are renamed with the legacy item table (as for `.schematic`).
+
+**State renames since 1.13** apply to every palette (old chunks, 1.18+ chunks, and `.schem`/`.nbt`/`.litematic`
+files). They were found by comparing the block lists of every release from 1.13 to 26.1 (minecraft-data [8])
+with the pinned 26.3 report; each is safe for any DataVersion because the old name or value no longer exists,
+except `stone_slab`, which is renamed only below DataVersion 1902 (18w43a):
+
+| Change | Version |
+|---|---|
+| `sign` → `oak_sign`, `wall_sign` → `oak_wall_sign`; `stone_slab` → `smooth_stone_slab` | 1.14 (19w02a, 18w43a) |
+| wall sides `true`/`false` → `low`/`none` | 1.16 (20w06a) |
+| `jigsaw[facing]` → `orientation` (`<f>_up`, `up_north`, `down_north`) | 1.16 (20w13a) |
+| `grass_path` → `dirt_path`; `cauldron[level=1..3]` → `water_cauldron`, `level=0` dropped | 1.17 (20w45a) |
+| `grass` → `short_grass` | 1.20.3 (23w40a) |
+| `creaking_heart[active]` / `[creaking]` → `creaking_heart_state` | 1.21.5 (25w02a) |
+| `chain` → `iron_chain` | 1.21.9 |
+
+Properties added since a block's version take their 26.3 default (`MappingData::find_java_state`).
+
+**Below y 0.** Pre-1.18 columns start at y 0. Converted chunks have nothing below it (as in the source), while
+chunks the source did not have are generated by the target game with today's terrain, which does not match
+pre-1.18 terrain at the edges. (The games themselves regenerate below y 0 when they upgrade an old world; that
+is not reproduced.)
+
+**Checked:** worlds written by Chunker [7] as `JAVA_1_8_8`, `JAVA_1_12_2` and `JAVA_1_16_5` from a 26.3 world
+convert with every chunk read and no unknown block; a 3D render of the 1.12 world matches the original except
+for blocks 1.12 does not have. Generated test worlds (`tests/data/javaworld/v1_16`, `v1_12`, `mcregion`, `alpha`,
+written by nbtlib) cover both packings, each biome array, every restored state and the refusal of Alpha worlds.
 
 ## Conversion to `.mcworld`
 
@@ -145,3 +230,12 @@ Code: `src/formats/java/anvil/anvil_writer.cpp`, pipeline `convert_bedrock_world
 2. minecraft.wiki, "Chunk format" — <https://minecraft.wiki/w/Chunk_format>
 3. minecraft.wiki, "Java Edition level format" — <https://minecraft.wiki/w/Java_Edition_level_format>
 4. minecraft.wiki, "Java Edition 26.1 Snapshot 6" (save-format changes) — <https://minecraft.wiki/w/Java_Edition_26.1_Snapshot_6>
+5. minecraft.wiki, "Java Edition 1.18" (biome renames and removals) and "Data version" — <https://minecraft.wiki/w/Java_Edition_1.18>,
+   <https://minecraft.wiki/w/Data_version> (checked 2026-10-15)
+6. minecraft.wiki, "Anvil file format" (McRegion/Anvil index order, `Add`) — <https://minecraft.wiki/w/Anvil_file_format>
+7. HiveGamesOSS/Chunker (MIT), branch `main` (checked 2026-10-15), consulted only, no code copied:
+   `java/base/reader/JavaChunkReader.java`, `java/util/PaletteUtil.java`, `java/v1_13/reader/{ChunkReader,ColumnReader}.java`,
+   `java/v1_15/reader/ColumnReader.java`, `java/base/reader/pretransform/legacy/handlers/*`,
+   `java/base/resolver/blockentity/legacy/handlers/*`. The Chunker CLI 1.21.0 wrote the old test worlds.
+8. PrismarineJS/minecraft-data (MIT): `data/pc/<version>/blocks.json` (1.13 – 26.1) and `data/pc/1.17/biomes.json`
+   (commit `21951b85`) — <https://github.com/PrismarineJS/minecraft-data>

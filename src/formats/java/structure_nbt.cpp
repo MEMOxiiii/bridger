@@ -1,5 +1,6 @@
 // Java structure (.nbt) reader. Format and sources: docs/formats/structure-nbt.md.
 
+#include "java_upgrade.hpp"
 #include "nbt_helpers.hpp"
 
 #include <bridger/formats/java/structure_nbt.hpp>
@@ -39,8 +40,8 @@ Result<StructureFile> read_structure_nbt(std::span<const u8> file_bytes, std::sh
     std::vector<StateId> palette;
     for (const NbtView entry : palette_view.items()) {
         if (palette.size() >= opt.max_palette_size) return make_error(ErrorCode::LimitExceeded, "structure nbt: palette too large");
-        BRIDGER_TRY(const BlockState state, detail::state_from_compound(entry.entries()));
-        palette.push_back(blocks->intern(state));
+        BRIDGER_TRY(BlockState state, detail::state_from_compound(entry.entries()));
+        palette.push_back(blocks->intern(detail::upgraded(std::move(state), out.data_version.value_or(0))));
     }
 
     const SourceVersion source{Edition::Java, static_cast<u32>(out.data_version.value_or(0))};

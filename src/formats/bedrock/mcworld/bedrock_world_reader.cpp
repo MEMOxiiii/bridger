@@ -305,7 +305,11 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
 
     std::array<u32, kSectionVolume> values{};
     BRIDGER_TRY(const u8 version, chunk_version(pos));
-    BRIDGER_TRY(const auto legacy_terrain, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyTerrainTag))));
+    // LegacyTerrain exists only in chunks older than 1.0 (no lookup for newer ones).
+    std::optional<std::vector<u8>> legacy_terrain;
+    if (version < kChunkV1_0_0) {
+        BRIDGER_TRY(legacy_terrain, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyTerrainTag))));
+    }
     std::optional<LegacyTerrain> terrain;
     if (legacy_terrain) {
         auto t = decode_legacy_terrain(*legacy_terrain);
@@ -341,8 +345,14 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
 
     // Biomes (Data3D): heightmap (512 bytes), then one storage per subchunk from the bottom.
     BRIDGER_TRY(const auto d3, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData3DTag))));
-    BRIDGER_TRY(const auto d2, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DTag))));
-    BRIDGER_TRY(const auto d2l, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DLegacyTag))));
+    // 2D biomes (before 1.18) are looked up only when there is no Data3D.
+    std::optional<std::vector<u8>> d2, d2l;
+    if (!d3) {
+        BRIDGER_TRY(d2, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DTag))));
+    }
+    if (!d3 && !d2) {
+        BRIDGER_TRY(d2l, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DLegacyTag))));
+    }
     std::array<u32, 256> ids2d{};
     if (d3 && d3->size() >= 512) {
         usize p = 512;
@@ -419,7 +429,7 @@ std::optional<std::array<u32, kSectionVolume>> BedrockWorldReader::read_subchunk
     const auto version = chunk_version(pos);
     if (!version) return std::nullopt;
     std::optional<LegacyTerrain> terrain;
-    if (sy >= 0 && sy < 8) {
+    if (sy >= 0 && sy < 8 && *version < kChunkV1_0_0) {
         if (const auto t = impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyTerrainTag))); t && *t)
             if (auto d = decode_legacy_terrain(**t)) terrain = std::move(*d);
     }

@@ -103,7 +103,8 @@ std::optional<ViewColumn> ViewWorld::load(ChunkPos pos) const {
         const auto& region = m.regions[it->second.first];
         auto raw = region.read_chunk(it->second.second % 32, it->second.second / 32);
         if (!raw || !*raw) return std::nullopt;
-        auto chunk = formats::java::decode_chunk(**raw, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>());
+        const formats::java::LegacyTables legacy = legacy_tables(*m.mapping);
+        auto chunk = formats::java::decode_chunk(**raw, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), {}, &legacy);
         if (!chunk || !chunk->full) return std::nullopt;
         return ViewColumn{chunk->pos, chunk->min_y, std::move(chunk->column)};
     }

@@ -1,5 +1,6 @@
 // Legacy .schematic reader. Format and sources: docs/formats/legacy-schematic.md.
 
+#include "legacy_blocks.hpp"
 #include "nbt_helpers.hpp"
 
 #include <bridger/formats/java/legacy_schematic.hpp>
@@ -13,33 +14,7 @@ namespace bridger::formats::java {
 
 using io::nbt::NbtCompoundView;
 using io::nbt::NbtView;
-using io::nbt::NbtWriter;
 using io::nbt::TagType;
-
-namespace {
-
-// Pre-1.11 block entity ids -> namespaced ids (minecraft.wiki "Block entity format", history:
-// 16w32a renamed them). Files from 1.11-1.12 already use the namespaced form.
-std::string normalize_block_entity_id(std::string_view id) {
-    static const std::map<std::string_view, std::string_view> kLegacy{
-        {"Chest", "minecraft:chest"},           {"Trap", "minecraft:dispenser"},       {"Dropper", "minecraft:dropper"},
-        {"Furnace", "minecraft:furnace"},       {"Hopper", "minecraft:hopper"},        {"Sign", "minecraft:sign"},
-        {"Cauldron", "minecraft:brewing_stand"}, {"EnchantTable", "minecraft:enchanting_table"},
-        {"EnderChest", "minecraft:ender_chest"}, {"Beacon", "minecraft:beacon"},       {"Skull", "minecraft:skull"},
-        {"FlowerPot", "minecraft:flower_pot"},  {"Banner", "minecraft:banner"},        {"Bed", "minecraft:bed"},
-        {"MobSpawner", "minecraft:mob_spawner"}, {"Music", "minecraft:noteblock"},     {"RecordPlayer", "minecraft:jukebox"},
-        {"Comparator", "minecraft:comparator"}, {"Control", "minecraft:command_block"}, {"Piston", "minecraft:piston"},
-        {"Airportal", "minecraft:end_portal"},  {"EndGateway", "minecraft:end_gateway"}, {"Structure", "minecraft:structure_block"}};
-    if (const auto it = kLegacy.find(id); it != kLegacy.end()) return std::string(it->second);
-    if (id.find(':') == std::string_view::npos) return "minecraft:" + std::string(id);
-    return std::string(id);
-}
-
-constexpr std::array<std::string_view, 16> kDyeColors{"white", "orange", "magenta", "light_blue", "yellow", "lime",
-                                                      "pink", "gray", "light_gray", "cyan", "purple", "blue",
-                                                      "brown", "green", "red", "black"};
-
-} // namespace
 
 Result<StructureFile> read_legacy_schematic(std::span<const u8> file_bytes, std::shared_ptr<BlockStateRegistry> blocks,
                                             std::shared_ptr<BiomeRegistry> biomes, const LegacyTables& tables,
@@ -113,74 +88,18 @@ Result<StructureFile> read_legacy_schematic(std::span<const u8> file_bytes, std:
     if (unknown > 0)
         out.warnings.push_back(std::to_string(unknown) + " legacy block id(s) are unknown; they are reported as unmapped");
 
-    // Block entities, rewritten into the modern Java form the translator expects.
+    // Block entities, rewritten into the modern Java form the translator expects; then the states
+    // pre-1.13 kept in them or split across two blocks (legacy_blocks.hpp).
     for (const NbtView entry : root.find("TileEntities").items()) {
         const NbtCompoundView c = entry.entries();
         const auto p = detail::xyz(c);
-        const auto id_raw = c.find("id").as_string();
-        if (!p || !id_raw) { out.warnings.push_back("a block entity without id/x/y/z was not imported"); continue; }
-        BlockEntity be;
-        be.pos = {(*p)[0], (*p)[1], (*p)[2]};
-        if (!s.contains(be.pos)) { out.warnings.push_back("a block entity outside the schematic was not imported"); continue; }
-        BRIDGER_TRY(const std::string raw_id, detail::utf8(*id_raw));
-        be.id = normalize_block_entity_id(raw_id);
-
-        // Bed color lived in the block entity (1.12); since 1.13 it is the block itself.
-        if (be.id == "minecraft:bed") {
-            if (const auto color = c.find("color").as_int(); color && *color >= 0 && *color < 16) {
-                const BlockState& old = blocks->get(s.block(be.pos));
-                if (old.id().ends_with("_bed"))
-                    s.set_block(be.pos, blocks->intern(BlockState("minecraft:" + std::string(kDyeColors[static_cast<usize>(*color)]) + "_bed",
-                                                                  old.properties())));
-            }
-        }
-        if (be.id == "minecraft:flower_pot" || be.id == "minecraft:skull" || be.id == "minecraft:banner")
-            out.warnings.push_back("legacy " + be.id + " data (contents/type/patterns) at " + std::to_string(be.pos.x) + "," +
-                                   std::to_string(be.pos.y) + "," + std::to_string(be.pos.z) + " is not converted");
-
-        NbtWriter wr(Endian::Big);
-        wr.begin_root_compound();
-        for (const io::nbt::NbtEntry& e : c) {
-            if (e.name == "id" || e.name == "x" || e.name == "y" || e.name == "z" || e.name == "Items") continue;
-            wr.write_view(e.name, e.value);
-        }
-        // Items: {id: Short|String, Count: Byte, Damage: Short, Slot: Byte} -> {id: String, count: Int, Slot: Byte}.
-        if (const NbtView items = c.find("Items", TagType::List)) {
-            std::vector<std::tuple<i8, std::string, i32>> converted;
-            for (const NbtView item : items.items()) {
-                const NbtCompoundView ic = item.entries();
-                const i8 slot = ic.find("Slot").as_byte().value_or(0);
-                const i32 count = ic.find("Count").as_byte().value_or(1);
-                const u16 damage = static_cast<u16>(ic.find("Damage").as_short().value_or(0));
-                std::optional<std::string> name;
-                if (const auto num = ic.find("id").as_short()) name = tables.item(static_cast<u16>(*num), damage);
-                else if (const auto str = ic.find("id").as_string()) {
-                    BRIDGER_TRY(std::string sid, detail::utf8(*str));
-                    if (sid.find(':') == std::string::npos) sid = "minecraft:" + sid;
-                    // String ids (1.8-1.12) with a damage value cannot be flattened without a name table.
-                    if (damage != 0) out.warnings.push_back("item " + sid + " with damage " + std::to_string(damage) +
-                                                            " kept without its variant");
-                    name = sid;
-                }
-                if (!name) { out.warnings.push_back("an item with an unknown legacy id was not imported"); continue; }
-                if (ic.find("tag")) out.warnings.push_back("item data (enchantments, names) of " + *name + " not converted");
-                converted.emplace_back(slot, *name, count);
-            }
-            wr.begin_list("Items", converted.empty() ? TagType::End : TagType::Compound, converted.size());
-            for (const auto& [slot, name, count] : converted) {
-                wr.begin_compound();
-                wr.write_byte("Slot", slot);
-                wr.write_string("id", name);
-                wr.write_int("count", count);
-                wr.end_compound();
-            }
-            wr.end_list();
-        }
-        wr.end_compound();
-        BRIDGER_TRY(std::vector<u8> bytes, std::move(wr).finish());
-        be.data = RawNbt{std::move(bytes), Endian::Big};
-        s.block_entities.push_back(std::move(be));
+        if (!p) { out.warnings.push_back("a block entity without id/x/y/z was not imported"); continue; }
+        const BlockPos pos{(*p)[0], (*p)[1], (*p)[2]};
+        if (!s.contains(pos)) { out.warnings.push_back("a block entity outside the schematic was not imported"); continue; }
+        BRIDGER_TRY(std::optional<BlockEntity> be, detail::legacy_block_entity(c, pos, tables, out.warnings));
+        if (be) s.block_entities.push_back(std::move(*be));
     }
+    detail::fix_legacy_blocks(s, out.warnings);
 
     for (const NbtView entry : root.find("Entities").items()) {
         const NbtCompoundView c = entry.entries();

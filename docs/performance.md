@@ -210,3 +210,25 @@ Other programs kept the CPU 40–80 % busy during the runs (round 1 especially),
 baselines; the rounds are paired, and Bridger was faster in each. The outputs are not identical work: Bridger also
 re-reads and validates the world and writes it zipped as one `.mcworld` (22.7 MB); Chunker writes a world folder
 (22.9 MB). Chunker's time includes JVM start-up (under a second). Re-run on an idle machine before quoting a ratio.
+
+### Old-version reading: A/B against the previous release (2026-10-15, Machine A)
+
+Reading old worlds added work to shared paths: every Java palette entry passes a rename check, legacy
+`.schematic` files and pre-1.13 chunks get a pass that restores door halves and block-entity states, and the
+Bedrock reader reads each chunk's version byte. Commit `8e454ee` (before) and the new code were built with
+`msvc-release` and run alternately, medians of 3 repetitions (5 for the last row), two rounds:
+
+| Benchmark | Before | After |
+|---|---|---|
+| `BM_ChunkDecode` | 1.08–1.31 ms | 1.06–1.32 ms |
+| `BM_ChunkDecodeTranslateWrite` | 2.45–2.63 ms | 2.43–3.32 ms |
+| `BM_BedrockWorldRead` | 389–432 ms | 393–394 ms |
+| `BM_StructureNbtRead` | 393–403 ms | 401–410 ms |
+| `BM_LitematicRead` | 38.0–39.4 ms | 38.9–40.8 ms |
+| `BM_SchemRead/1` | 63.4–92.4 ms | 81.4–93.6 ms |
+| `BM_LegacySchematicRead` (three more rounds) | 39.8–50.8 ms | 44.8–53.7 ms |
+
+Other programs kept the machine busy, and the same binary varied by about ±15 % between rounds; within that,
+no benchmark changed. The rename check returns early unless the block name is one of the ten that changed, the
+restoring pass skips sections whose palette has no upper door or plant half, and the Bedrock reader looks up
+legacy keys (`LegacyTerrain`, 2D biomes, legacy extra data) only for chunks old enough to have them.

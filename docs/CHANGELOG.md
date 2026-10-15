@@ -12,6 +12,16 @@ versions follow the release plan in `docs/release.md`.
   are upgraded to 26.50 with the BedrockBlockUpgradeSchema data (CC0), so old palettes no longer read as air.
 - Bedrock world folders (from `minecraftWorlds`) open and convert like `.mcworld` files; only a copy of the
   database is opened.
+- Old Java worlds: every layout since McRegion (Beta 1.3) is read: 1.13 – 1.17 palettes (both packings), 1.2 – 1.12
+  numeric ids (`Blocks`/`Data`/`Add`) and McRegion columns, with numeric biome ids. Renamed blocks and biomes are
+  upgraded to 26.3 (in `.schem`, `.nbt` and `.litematic` files too), and the states 1.13 moved out of block
+  entities (doors, tall plants, beds, flower pots, skulls, banners, note blocks) are restored. Alpha worlds get a
+  message explaining how to convert them first.
+
+### Changed
+
+- Legacy `.schematic` files: flower pot contents, skull types and banner colours are converted now, and door
+  halves are combined.
 
 ## [0.4.2] - 2026-10-15
 

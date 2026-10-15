@@ -769,11 +769,169 @@ def generate_java_world():
                  {(3, 30): (2, nbt_bytes(cm, "", "big"), False)})
     write_raw(modern / "dimensions" / "minecraft" / "the_end" / "region" / "r.0.0.mca", b"")
 
-    # Old (pre-1.18) chunk layout: rejected with a clear message.
-    old = Compound({"DataVersion": Int(2586), "Level": Compound({"xPos": Int(0), "zPos": Int(0)})})
-    write_region(ROOT / "javaworld" / "old_layout" / "region" / "r.0.0.mca", {(0, 0): (2, nbt_bytes(old, "", "big"), False)})
-    write_gzip(ROOT / "javaworld" / "old_layout" / "level.dat",
-               nbt_bytes(Compound({"Data": Compound({"LevelName": String("Old"), "DataVersion": Int(2586)})}), "", "big"))
+
+
+def pack_spanning(indices, bits):
+    """Anvil 1.13 - 20w16a packing: one run of bits-bit fields, spanning long boundaries, LSB first."""
+    longs = [0] * ((len(indices) * bits + 63) // 64)
+    for i, v in enumerate(indices):
+        bit = i * bits
+        longs[bit // 64] |= (v << (bit % 64)) & ((1 << 64) - 1)
+        if bit % 64 + bits > 64:
+            longs[bit // 64 + 1] |= v >> (64 - bit % 64)
+    return LongArray([l - (1 << 64) if l >= (1 << 63) else l for l in longs])
+
+
+def nibbles(values):
+    """Nibble array: even index in the low four bits."""
+    out = bytearray((len(values) + 1) // 2)
+    for i, v in enumerate(values):
+        out[i >> 1] |= (v & 15) << ((i & 1) * 4)
+    return byte_array(out)
+
+
+def generate_old_java_worlds():
+    """Java worlds in the layouts before 1.18 (docs/formats/anvil.md, "Old worlds")."""
+    # 1.13 - 1.17: a "Level" compound with palette sections. 20 palette entries need 5 bits, where
+    # the spanning (1.13 - 20w16a) and non-spanning (20w17a+) layouts differ in length.
+    filler = ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks",
+              "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:bricks", "minecraft:bookshelf",
+              "minecraft:glass", "minecraft:sand", "minecraft:gravel", "minecraft:iron_block", "minecraft:gold_block"]
+    pal16 = ["minecraft:air", "minecraft:stone", "minecraft:grass_block[snowy=false]", "minecraft:grass",
+             "minecraft:cobblestone_wall[east=true,north=false,south=false,up=true,waterlogged=false,west=false]",
+             "minecraft:chest[facing=north,type=single,waterlogged=false]", "minecraft:grass_path"] + filler
+    pal13 = ["minecraft:air", "minecraft:stone", "minecraft:sign[rotation=4,waterlogged=false]",
+             "minecraft:stone_slab[type=bottom,waterlogged=false]", "minecraft:cauldron[level=2]",
+             "minecraft:wall_sign[facing=north,waterlogged=false]", "minecraft:cobblestone"] + filler
+    assert len(pal16) == 20 and len(pal13) == 20
+
+    def palette_section(y, palette, idx, spanning):
+        data = pack_spanning(idx, 5) if spanning else pack_anvil(idx, 5)
+        return Compound({"Y": Byte(y), "Palette": List[Compound]([anvil_state(p) for p in palette]), "BlockStates": data,
+                         "BlockLight": byte_array(bytes(2048)), "SkyLight": byte_array(bytes(2048))})
+
+    idx = [0] * 4096
+    for z in range(16):
+        for x in range(16):
+            idx[(0 << 8) | (z << 4) | x] = 1      # y 0: stone
+            idx[(1 << 8) | (z << 4) | x] = 2      # y 1: grass block
+    idx[(2 << 8) | (2 << 4) | 2] = 3              # (2, 2, 2) grass -> short_grass
+    idx[(2 << 8) | (4 << 4) | 4] = 4              # (4, 2, 4) wall with boolean sides
+    idx[(2 << 8) | (6 << 4) | 6] = 5              # (6, 2, 6) chest
+    idx[(2 << 8) | (8 << 4) | 8] = 6              # (8, 2, 8) grass_path -> dirt_path
+    for i in range(13):
+        idx[(3 << 8) | i] = 7 + i                 # y 3, z 0: one of each filler block
+    biomes1024 = [17 if (i & 3) >= 2 else 3 for i in range(1024)]  # x >= 8: desert_hills (merged), else mountains
+    chest = Compound({"id": String("minecraft:chest"), "x": Int(6), "y": Int(2), "z": Int(6),
+                      "Items": List[Compound]([Compound({"Slot": Byte(0), "id": String("minecraft:diamond"), "Count": Byte(3)})])})
+    c116 = Compound({"DataVersion": Int(2586), "Level": Compound({
+        "xPos": Int(0), "zPos": Int(0), "Status": String("full"),
+        "Sections": List[Compound]([Compound({"Y": Byte(-1), "SkyLight": byte_array(bytes(2048))}),
+                                    palette_section(0, pal16, idx, spanning=False)]),
+        "Biomes": IntArray(biomes1024), "TileEntities": List[Compound]([chest])})})
+
+    idx13 = [0] * 4096
+    for z in range(16):
+        for x in range(16):
+            idx13[(0 << 8) | (z << 4) | x] = 6    # y 0: cobblestone
+    idx13[(1 << 8) | (1 << 4) | 1] = 2            # (1, 1, 1) sign -> oak_sign
+    idx13[(1 << 8) | (3 << 4) | 3] = 3            # (3, 1, 3) stone_slab -> smooth_stone_slab (before 18w43a)
+    idx13[(1 << 8) | (5 << 4) | 5] = 4            # (5, 1, 5) cauldron[level=2] -> water_cauldron
+    idx13[(1 << 8) | (7 << 4) | 7] = 5            # (7, 1, 7) wall_sign -> oak_wall_sign
+    for i in range(13):
+        idx13[(2 << 8) | i] = 7 + i
+    c113 = Compound({"DataVersion": Int(1631), "Level": Compound({
+        "xPos": Int(1), "zPos": Int(0), "Status": String("postprocessed"),
+        "Sections": List[Compound]([palette_section(0, pal13, idx13, spanning=True)]),
+        "Biomes": IntArray([12] * 256), "TileEntities": List[Compound]([])})})  # snowy_tundra -> snowy_plains
+    partial = Compound({"DataVersion": Int(2586), "Level": Compound({
+        "xPos": Int(2), "zPos": Int(0), "Status": String("features"),
+        "Sections": List[Compound]([palette_section(0, pal16, idx, spanning=False)])})})
+    w = ROOT / "javaworld" / "v1_16"
+    write_region(w / "region" / "r.0.0.mca", {(0, 0): (2, nbt_bytes(c116, "", "big"), False),
+                                              (1, 0): (2, nbt_bytes(c113, "", "big"), False),
+                                              (2, 0): (2, nbt_bytes(partial, "", "big"), False)})
+    write_gzip(w / "level.dat", nbt_bytes(Compound({"Data": Compound({
+        "LevelName": String("Old 1.16"), "DataVersion": Int(2586), "version": Int(19133),
+        "Version": Compound({"Name": String("1.16.5"), "Id": Int(2586)}),
+        "SpawnX": Int(8), "SpawnY": Int(64), "SpawnZ": Int(8),
+        "WorldGenSettings": Compound({"seed": Long(1616)})})}), "", "big"))
+
+    # 1.2 - 1.12: numeric ids in Blocks/Data/Add (YZX), 256 biome bytes, pre-1.11 block entity ids,
+    # and the states 1.13 moved out of block entities or across two blocks.
+    blocks, data = [0] * 4096, [0] * 4096
+
+    def put(x, y, z, block, d=0):
+        blocks[(y << 8) | (z << 4) | x] = block
+        data[(y << 8) | (z << 4) | x] = d
+
+    for z in range(16):
+        for x in range(16):
+            put(x, 0, z, 1)                       # stone
+    put(1, 1, 1, 35, 14)                          # red wool
+    put(3, 1, 3, 64, 1)                           # oak door, lower half: facing south, closed
+    put(3, 2, 3, 64, 9)                           # upper half: hinge right
+    put(5, 1, 5, 175, 4)                          # rose bush, lower half
+    put(5, 2, 5, 175, 10)                         # upper half (data 8 + 2: says nothing about the plant)
+    put(7, 1, 7, 26, 0)                           # bed foot, facing south; colour in the block entity
+    put(9, 1, 9, 140, 0)                          # flower pot; contents in the block entity
+    put(11, 1, 11, 144, 1)                        # floor skull; type and rotation in the block entity
+    put(13, 1, 13, 176, 0)                        # standing banner; colour in the block entity
+    put(2, 1, 9, 25, 0)                           # note block; pitch in the block entity
+    put(4, 1, 9, 54, 2)                           # chest facing north
+    tes = [
+        Compound({"id": String("minecraft:bed"), "x": Int(7), "y": Int(1), "z": Int(7), "color": Int(11)}),
+        Compound({"id": String("FlowerPot"), "x": Int(9), "y": Int(1), "z": Int(9), "Item": String("minecraft:red_flower"), "Data": Int(2)}),
+        Compound({"id": String("Skull"), "x": Int(11), "y": Int(1), "z": Int(11), "SkullType": Byte(4), "Rot": Byte(6)}),
+        Compound({"id": String("minecraft:banner"), "x": Int(13), "y": Int(1), "z": Int(13), "Base": Int(1)}),
+        Compound({"id": String("minecraft:noteblock"), "x": Int(2), "y": Int(1), "z": Int(9), "note": Byte(12)}),
+        Compound({"id": String("Chest"), "x": Int(4), "y": Int(1), "z": Int(9), "Items": List[Compound]([
+            Compound({"Slot": Byte(0), "id": Short(264), "Count": Byte(5), "Damage": Short(0)})])}),
+    ]
+    biomes = [17 if x == 0 else 4 for z in range(16) for x in range(16)]  # forest; column x=0 desert_hills
+    c112 = Compound({"DataVersion": Int(1343), "Level": Compound({
+        "xPos": Int(0), "zPos": Int(0), "TerrainPopulated": Byte(1), "LightPopulated": Byte(1),
+        "Sections": List[Compound]([Compound({"Y": Byte(0), "Blocks": byte_array(bytes(blocks)), "Data": nibbles(data),
+                                              "Add": byte_array(bytes(2048)), "BlockLight": byte_array(bytes(2048)),
+                                              "SkyLight": byte_array(bytes(2048))})]),
+        "Biomes": byte_array(bytes(biomes)), "TileEntities": List[Compound](tes),
+        "Entities": List[Compound]([Compound({"id": String("Pig"), "Pos": List[Double]([Double(1.5), Double(1.0), Double(1.5)])})])})})
+    c112_unpopulated = Compound({"Level": Compound({"xPos": Int(1), "zPos": Int(0), "TerrainPopulated": Byte(0),
+                                                    "Sections": List[Compound]([])})})
+    w = ROOT / "javaworld" / "v1_12"
+    write_region(w / "region" / "r.0.0.mca", {(0, 0): (2, nbt_bytes(c112, "", "big"), False),
+                                              (1, 0): (2, nbt_bytes(c112_unpopulated, "", "big"), False)})
+    # 1.2 kept the McRegion files next to the converted ones: they must be ignored.
+    write_raw(w / "region" / "r.0.0.mcr", b"")
+    write_gzip(w / "level.dat", nbt_bytes(Compound({"Data": Compound({
+        "LevelName": String("Old 1.12"), "version": Int(19133), "RandomSeed": Long(1212),
+        "SpawnX": Int(0), "SpawnY": Int(64), "SpawnZ": Int(0)})}), "", "big"))
+
+    # McRegion (Beta 1.3 - 1.1): one 16 x 128 x 16 column per chunk, index x*2048 + z*128 + y.
+    col_blocks, col_data = [0] * 32768, [0] * 32768
+    for x in range(16):
+        for z in range(16):
+            for y in range(4):
+                col_blocks[(x << 11) | (z << 7) | y] = 1
+    col_blocks[(2 << 11) | (3 << 7) | 64] = 5
+    col_blocks[(2 << 11) | (3 << 7) | 65] = 35
+    col_data[(2 << 11) | (3 << 7) | 65] = 4        # yellow wool
+    col_blocks[(15 << 11) | (15 << 7) | 127] = 89  # glowstone at the top
+    beta = Compound({"Level": Compound({
+        "xPos": Int(-1), "zPos": Int(2), "TerrainPopulated": Byte(1), "Blocks": byte_array(bytes(col_blocks)),
+        "Data": nibbles(col_data), "SkyLight": byte_array(bytes(16384)), "BlockLight": byte_array(bytes(16384)),
+        "HeightMap": byte_array(bytes(256)), "TileEntities": List[Compound]([]), "Entities": List[Compound]([])})})
+    w = ROOT / "javaworld" / "mcregion"
+    write_region(w / "region" / "r.-1.0.mcr", {(31, 2): (2, nbt_bytes(beta, "", "big"), False)})
+    write_gzip(w / "level.dat", nbt_bytes(Compound({"Data": Compound({
+        "LevelName": String("Beta"), "version": Int(19132), "RandomSeed": Long(42),
+        "SpawnX": Int(0), "SpawnY": Int(70), "SpawnZ": Int(0)})}), "", "big"))
+
+    # Alpha (before Beta 1.3): one file per chunk; refused with a message to convert it in-game first.
+    alpha = ROOT / "javaworld" / "alpha"
+    write_gzip(alpha / "level.dat", nbt_bytes(Compound({"Data": Compound({"LevelName": String("Alpha"),
+                                                                           "RandomSeed": Long(1)})}), "", "big"))
+    write_gzip(alpha / "0" / "0" / "c.0.0.dat", nbt_bytes(Compound({"Level": Compound({"xPos": Int(0), "zPos": Int(0)})}), "", "big"))
 
 
 if __name__ == "__main__":
@@ -784,4 +942,5 @@ if __name__ == "__main__":
     generate_litematic()
     generate_legacy_schematic()
     generate_java_world()
+    generate_old_java_worlds()
     print("test data written")

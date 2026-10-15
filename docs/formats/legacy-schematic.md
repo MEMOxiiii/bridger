@@ -35,9 +35,10 @@ are reported as unmapped. `WEOffsetX/Y/Z` (WorldEdit) become the paste offset.
 Pre-1.11 ids (`Chest`, `Sign`, …) are normalized to namespaced ids. Item stacks
 `{id: Short|String, Count: Byte, Damage: Short}` become `{id: String, count: Int}`; numeric ids go through the
 legacy item table; string ids with a non-zero damage cannot be flattened without a name table and are kept
-with a warning; item `tag` data is reported as not converted. Bed colors (block entity `color` in 1.12) become
-the colored bed block. Legacy flower pot contents, skull types and banner patterns are not converted (one warning
-per block entity).
+with a warning; item `tag` data is reported as not converted. The state that 1.13 moved out of block entities or
+across two blocks (door halves, tall plants, bed colours, flower pot contents, skull types and rotation, banner
+base colours, note block pitches) is restored as for old Java worlds (`docs/formats/anvil.md`, "Old worlds";
+shared code in `src/formats/java/legacy_blocks.cpp`). Banner patterns stay in the block entity.
 
 ## Limits we enforce on input
 

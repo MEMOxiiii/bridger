@@ -12,6 +12,7 @@
 #include <bridger/formats/java/anvil/region_file.hpp>
 #include <bridger/io/nbt/nbt_view.hpp>
 #include <bridger/io/zip_archive.hpp>
+#include <bridger/translate/mapping_data.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -108,7 +109,8 @@ TEST_CASE("Chunks with {id, properties} palettes, partial status and old layouts
     CHECK(negative.pos == ChunkPos{-1, 0});
     CHECK(block_at(negative, 0, -16, 0) == "minecraft:emerald_block");
 
-    const auto old = java::decode_chunk(chunk_bytes("old_layout/region/r.0.0.mca", 0, 0), std::make_shared<BlockStateRegistry>(),
+    // Numeric ids (before 1.13) cannot be read without the legacy table.
+    const auto old = java::decode_chunk(chunk_bytes("v1_12/region/r.0.0.mca", 0, 0), std::make_shared<BlockStateRegistry>(),
                                         std::make_shared<BiomeRegistry>());
     REQUIRE_FALSE(old);
     CHECK(old.error().code() == ErrorCode::UnsupportedVersion);
@@ -242,14 +244,137 @@ TEST_CASE("World conversion output does not depend on the thread count", "[anvil
     CHECK(one.second == many.second);
 }
 
-TEST_CASE("A pre-1.18 Java world is refused with a clear message", "[anvil][convert]") {
+TEST_CASE("An Alpha world (before Beta 1.3) is refused with a clear message", "[anvil][convert][old]") {
+    const auto w = java::open_java_world(test::data_path("javaworld/alpha"));
+    REQUIRE_FALSE(w);
+    CHECK(w.error().code() == ErrorCode::UnsupportedVersion);
     test::TempDir dir;
     convert::ConvertOptions o;
-    o.input = test::data_path("javaworld/old_layout");
+    o.input = test::data_path("javaworld/alpha");
     o.output = dir.path / "old.mcworld";
-    const auto summary = convert::convert(o);
-    REQUIRE_FALSE(summary);
+    REQUIRE_FALSE(convert::convert(o));
     CHECK_FALSE(std::filesystem::exists(o.output));
+}
+
+namespace {
+
+java::JavaChunk decode_old(const std::vector<u8>& bytes) {
+    static const translate::MappingData* m = *translate::MappingData::embedded();
+    static const java::LegacyTables legacy = convert::legacy_tables(*m);
+    auto c = java::decode_chunk(bytes, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), {}, &legacy);
+    REQUIRE(c);
+    return std::move(*c);
+}
+
+std::string biome_at(const java::JavaChunk& c, i32 x, i32 world_y, i32 z) {
+    const auto b = c.column.biome({x, world_y - c.min_y, z});
+    return b ? std::string(c.column.biome_registry().name(*b)) : std::string("<none>");
+}
+
+const BlockEntity* be_at(const java::JavaChunk& c, BlockPos p) {
+    for (const BlockEntity& be : c.column.block_entities)
+        if (be.pos == p) return &be;
+    return nullptr;
+}
+
+bool has_warning(const java::JavaChunk& c, std::string_view text) {
+    return std::any_of(c.warnings.begin(), c.warnings.end(), [&](const std::string& w) { return w.find(text) != std::string::npos; });
+}
+
+} // namespace
+
+TEST_CASE("1.13 - 1.17 chunks: both palette packings, old names and numeric biomes", "[anvil][old]") {
+    const auto c116 = decode_old(chunk_bytes("v1_16/region/r.0.0.mca", 0, 0));
+    CHECK(c116.full);
+    CHECK(c116.min_y == 0);
+    CHECK(block_at(c116, 0, 0, 0) == "minecraft:stone");
+    CHECK(block_at(c116, 2, 2, 2) == "minecraft:short_grass");
+    CHECK(block_at(c116, 4, 2, 4) == "minecraft:cobblestone_wall[east=low,north=none,south=none,up=true,waterlogged=false,west=none]");
+    CHECK(block_at(c116, 8, 2, 8) == "minecraft:dirt_path");
+    CHECK(block_at(c116, 12, 3, 0) == "minecraft:gold_block"); // last palette entry: every 5-bit index decoded
+    CHECK(biome_at(c116, 0, 0, 0) == "minecraft:windswept_hills");
+    CHECK(biome_at(c116, 12, 200, 0) == "minecraft:desert"); // desert_hills, merged in 1.18
+    CHECK(has_warning(c116, "merged"));
+    REQUIRE(be_at(c116, {6, 2, 6}));
+
+    const auto c113 = decode_old(chunk_bytes("v1_16/region/r.0.0.mca", 1, 0));
+    CHECK(c113.pos == ChunkPos{1, 0});
+    CHECK(c113.full); // "postprocessed"
+    CHECK(block_at(c113, 1, 1, 1) == "minecraft:oak_sign[rotation=4,waterlogged=false]");
+    CHECK(block_at(c113, 3, 1, 3) == "minecraft:smooth_stone_slab[type=bottom,waterlogged=false]");
+    CHECK(block_at(c113, 5, 1, 5) == "minecraft:water_cauldron[level=2]");
+    CHECK(block_at(c113, 7, 1, 7) == "minecraft:oak_wall_sign[facing=north,waterlogged=false]");
+    CHECK(block_at(c113, 12, 2, 0) == "minecraft:gold_block"); // spanning packing
+    CHECK(block_at(c113, 0, 2, 0) == "minecraft:oak_planks");
+    CHECK(biome_at(c113, 5, 30, 5) == "minecraft:snowy_plains");
+
+    CHECK_FALSE(decode_old(chunk_bytes("v1_16/region/r.0.0.mca", 2, 0)).full);
+}
+
+TEST_CASE("1.2 - 1.12 chunks: numeric ids and the states 1.13 moved", "[anvil][old]") {
+    const auto c = decode_old(chunk_bytes("v1_12/region/r.0.0.mca", 0, 0));
+    CHECK(c.full);
+    CHECK(block_at(c, 0, 0, 0) == "minecraft:stone");
+    CHECK(block_at(c, 1, 1, 1) == "minecraft:red_wool");
+    CHECK(block_at(c, 3, 1, 3) == "minecraft:oak_door[facing=south,half=lower,hinge=right,open=false,powered=false]");
+    CHECK(block_at(c, 3, 2, 3) == "minecraft:oak_door[facing=south,half=upper,hinge=right,open=false,powered=false]");
+    CHECK(block_at(c, 5, 2, 5) == "minecraft:rose_bush[half=upper]");
+    CHECK(block_at(c, 7, 1, 7) == "minecraft:blue_bed[facing=south,occupied=false,part=foot]");
+    CHECK(block_at(c, 9, 1, 9) == "minecraft:potted_allium");
+    CHECK(block_at(c, 11, 1, 11) == "minecraft:creeper_head[powered=false,rotation=6]");
+    CHECK(block_at(c, 13, 1, 13) == "minecraft:red_banner[rotation=0]");
+    CHECK(block_at(c, 2, 1, 9) == "minecraft:note_block[instrument=harp,note=12,powered=false]");
+    CHECK(biome_at(c, 0, 0, 0) == "minecraft:desert");
+    CHECK(biome_at(c, 5, 0, 5) == "minecraft:forest");
+    // Flower pots and note blocks have no block entity since 1.13; old ids are namespaced.
+    CHECK_FALSE(be_at(c, {9, 1, 9}));
+    CHECK_FALSE(be_at(c, {2, 1, 9}));
+    const BlockEntity* chest = be_at(c, {4, 1, 9});
+    REQUIRE(chest);
+    CHECK(chest->id == "minecraft:chest");
+    const auto doc = io::nbt::NbtDocument::parse(chest->data.bytes, chest->data.endian);
+    REQUIRE(doc);
+    const auto item = doc->root().entries().find("Items").items().at(0).entries();
+    CHECK(item.find("id").as_string() == "minecraft:diamond");
+    CHECK(item.find("count").as_int() == 5);
+    CHECK(has_warning(c, "entities"));
+
+    CHECK_FALSE(decode_old(chunk_bytes("v1_12/region/r.0.0.mca", 1, 0)).full); // TerrainPopulated 0
+}
+
+TEST_CASE("McRegion worlds (Beta 1.3 - 1.1) read their 128-high columns", "[anvil][old]") {
+    const auto w = java::open_java_world(test::data_path("javaworld/mcregion"));
+    REQUIRE(w);
+    REQUIRE(w->overworld_regions.size() == 1);
+    CHECK(w->level.seed == 42);
+    const auto c = decode_old(chunk_bytes("mcregion/region/r.-1.0.mcr", 31, 2));
+    CHECK(c.pos == ChunkPos{-1, 2});
+    CHECK(c.column.size().y == 128);
+    CHECK(block_at(c, 0, 3, 0) == "minecraft:stone");
+    CHECK(block_at(c, 2, 64, 3) == "minecraft:oak_planks");
+    CHECK(block_at(c, 2, 65, 3) == "minecraft:yellow_wool");
+    CHECK(block_at(c, 15, 127, 15) == "minecraft:glowstone");
+    CHECK(block_at(c, 0, 4, 0) == "minecraft:air");
+
+    // A 1.2+ world that still has its old .mcr files reads only the .mca ones.
+    const auto w12 = java::open_java_world(test::data_path("javaworld/v1_12"));
+    REQUIRE(w12);
+    REQUIRE(w12->overworld_regions.size() == 1);
+    CHECK(w12->overworld_regions[0].extension() == ".mca");
+}
+
+TEST_CASE("Old Java worlds convert to Bedrock", "[anvil][convert][old]") {
+    for (const char* name : {"v1_16", "v1_12", "mcregion"}) {
+        INFO(name);
+        test::TempDir dir;
+        convert::ConvertOptions o;
+        o.input = test::data_path(std::string("javaworld/") + name);
+        o.output = dir.path / "out.mcworld";
+        const auto summary = convert::convert(o);
+        REQUIRE(summary);
+        CHECK(std::filesystem::exists(o.output));
+        CHECK(summary->blocks > 0);
+    }
 }
 
 TEST_CASE("A chunk whose yPos does not fit a section byte is refused", "[anvil][fuzz]") {

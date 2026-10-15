@@ -13,7 +13,7 @@ constexpr usize kSector = 4096;
 
 Result<RegionFile> RegionFile::open(const std::filesystem::path& path) {
     BRIDGER_TRY(const std::string name, platform::path_to_utf8(path.filename()));
-    static const std::regex kName(R"(r\.(-?\d+)\.(-?\d+)\.mca)");
+    static const std::regex kName(R"(r\.(-?\d+)\.(-?\d+)\.mc[ar])"); // .mcr: McRegion (Beta 1.3 - 1.1), same container
     std::smatch m;
     if (!std::regex_match(name, m, kName)) return make_error(ErrorCode::InvalidArgument, "not a region file name: " + name);
     RegionFile r;

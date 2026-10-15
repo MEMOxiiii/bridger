@@ -54,7 +54,12 @@ people's worlds.
   `.schematic` with `AddBlocks`, unknown ids, an old-style chest and a 1.12 bed.
 - `tests/data/javaworld/basic/`: a Java world (level.dat + two region files) with zlib, gzip, uncompressed and
   external (`.mcc`) chunks, both palette spellings, a waterlogged block, biomes, a block entity, negative chunk
-  coordinates, a partially generated chunk and a Nether folder; `old_layout/` holds a pre-1.18 chunk.
+  coordinates, a partially generated chunk and a Nether folder.
+- `tests/data/javaworld/v1_16/`, `v1_12/`, `mcregion/`, `alpha/`: worlds in the layouts before 1.18 (1.13 spanning and
+  1.16 packed palettes with 256- and 1024-entry biome arrays; 1.12 numeric ids with every state 1.13 moved; a McRegion
+  column; an Alpha chunk file, refused). Old Bedrock layouts (LegacyTerrain, subchunk versions 0, 1 and 8 with old
+  states, the experimental key offset, 2D biomes, legacy extra data) are written key by key by
+  `tests/unit/formats/old_bedrock_test.cpp`.
 
 **Independent validation of Java output:** `tests/integration/validate_java_output.py` re-reads written `.schem`,
 `.nbt`, `.litematic` files and Java world folders with nbtlib (palette indices, packed arrays, chunk coordinates,

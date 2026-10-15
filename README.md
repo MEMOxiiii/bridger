@@ -97,13 +97,16 @@ pass `--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
 | `.schematic` (MCEdit legacy) | Java | ✓ | — |
 | `.litematic` | Java | ✓ | ✓ |
 | Structure `.nbt` | Java | ✓ | ✓ |
-| Java world (Anvil, 1.18+ layout, Overworld) | Java | ✓ | ✓ |
+| Java world (Overworld; reads Beta 1.3 – 26.3, writes 26.3) | Java | ✓ | ✓ |
 | `.mcstructure` | Bedrock | ✓ | ✓ |
-| `.mcworld` (new world; reading: Overworld) | Bedrock | ✓ | ✓ |
+| `.mcworld` or world folder (Overworld; reads Pocket Edition 0.9 – 26.52, writes 26.52) | Bedrock | ✓ | ✓ |
 | `.mcworld` (place into a copy of an existing world) | Bedrock | — | ✓ |
 
-✓ means golden tests, a fuzz target, a benchmark and a recorded in-game check all pass. Game versions: exactly
-**Java Edition 26.3** and **Bedrock Edition 26.52** ([docs/versions.md](docs/versions.md)).
+✓ means golden tests, a fuzz target, a benchmark and a recorded in-game check all pass. Bridger writes exactly
+**Java Edition 26.3** and **Bedrock Edition 26.52** ([docs/versions.md](docs/versions.md)). It reads worlds and
+structures saved by older versions and upgrades their blocks and biomes: Java worlds back to Beta 1.3 (McRegion,
+numeric ids, every palette layout) and Bedrock worlds back to Pocket Edition 0.9
+([anvil.md](docs/formats/anvil.md#old-worlds), [bedrock-world.md](docs/formats/bedrock-world.md#old-worlds-reading)).
 
 ## Performance
 
@@ -118,11 +121,12 @@ Measured on an Intel i7-13620H laptop (`msvc-release`); the full table, machine 
 | A synthetic 4096-chunk Java world → `.mcworld` (16 threads, incl. validation) | 9.2 s |
 | 3D preview: a real Java world at render distance 20 (1257 chunks, 7.6 M quads; RTX 4060 Laptop) | 2.3–3.0 s, then 60 fps (vsync) |
 
-These measure Bridger alone; no comparison with other tools has been measured yet.
+Against [Chunker](https://github.com/HiveGamesOSS/Chunker) 1.21.0 converting the same Java world to Bedrock, Bridger was faster in each of five paired runs; the machine was busy, so no ratio is claimed yet ([details](docs/performance.md#comparison-with-chunker-2026-10-15-machine-a)).
 
 ## Known limitations
 
-- Worlds: only the Overworld, in both directions; Java worlds saved by Java 1.18 or newer.
+- Worlds: only the Overworld, in both directions. Java Alpha worlds (before Beta 1.3) and Pocket Edition worlds
+  before 0.9 are not read. Worlds from before 1.18 have nothing below y 0 after conversion.
 - Entities (armor stands, item frames, mobs) are not written yet; item components (enchantments, names) and sign
   text formatting are dropped. All of it is listed in the report.
 - Bedrock-only blocks have no Java equivalent: they are replaced and reported.

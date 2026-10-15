@@ -1,6 +1,7 @@
 // Litematica reader. Format and sources: docs/formats/litematic.md (behavior of
 // Litematica's LitematicaSchematic / LitematicaBlockStateContainer / LitematicaBitArray).
 
+#include "java_upgrade.hpp"
 #include "nbt_helpers.hpp"
 
 #include <bridger/formats/java/litematic.hpp>
@@ -91,8 +92,8 @@ Result<StructureFile> read_litematic(std::span<const u8> file_bytes, std::shared
         std::vector<StateId> palette;
         for (const NbtView entry : r.tag.find("BlockStatePalette").items()) {
             if (palette.size() >= opt.max_palette_size) return make_error(ErrorCode::LimitExceeded, "litematic: palette too large");
-            BRIDGER_TRY(const BlockState state, detail::state_from_compound(entry.entries()));
-            palette.push_back(blocks->intern(state));
+            BRIDGER_TRY(BlockState state, detail::state_from_compound(entry.entries()));
+            palette.push_back(blocks->intern(detail::upgraded(std::move(state), out.data_version.value_or(0))));
         }
         if (palette.empty()) return bad("region '" + r.name + "' has an empty palette");
         const auto data = r.tag.find("BlockStates").as_long_array();

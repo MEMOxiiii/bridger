@@ -2,6 +2,8 @@
 // docs/formats/sponge-schem.md, which cites the specification and WorldEdit's
 // observed behavior.
 
+#include "java_upgrade.hpp"
+
 #include <bridger/formats/java/sponge_schem.hpp>
 #include <bridger/io/nbt/mutf8.hpp>
 #include <bridger/io/nbt/nbt_view.hpp>
@@ -232,9 +234,9 @@ Result<SchemFile> read_sponge_schem(std::span<const u8> file_bytes, std::shared_
     BlockStateRegistry& registry = structure.block_registry();
     BRIDGER_TRY(const std::vector<u32> palette,
                 read_palette(*palette_view.as_compound(), opt,
-                             [&registry](const std::string& name) -> Result<u32> {
-                                 BRIDGER_TRY(const BlockState state, BlockState::parse(name));
-                                 return registry.intern(state);
+                             [&registry, dv = info.data_version.value_or(0)](const std::string& name) -> Result<u32> {
+                                 BRIDGER_TRY(BlockState state, BlockState::parse(name));
+                                 return registry.intern(detail::upgraded(std::move(state), dv)); // older DataVersions
                              },
                              "block"));
     info.palette_size = static_cast<usize>(std::count_if(palette.begin(), palette.end(), [](u32 v) { return v != kInvalidId; }));

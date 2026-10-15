@@ -1,10 +1,14 @@
-// Fuzz target: the Java chunk decoder (1.18+ sections) on raw chunk NBT, as stored in a
-// region file after decompression. Accepted chunks are re-encoded with Bridger's writer and
-// decoded again: every block must survive the round trip.
+// Fuzz target: the Java chunk decoder (every layout: 1.18+ sections, the pre-1.18 Level compound,
+// numeric ids, McRegion columns) on raw chunk NBT, as stored in a region file after
+// decompression. Accepted chunks are re-encoded with Bridger's writer (always the 1.18+ layout)
+// and decoded again: every block must survive the round trip.
 
 #include <bridger/formats/java/anvil/anvil_writer.hpp>
+#include <bridger/convert/pipeline.hpp>
 #include <bridger/formats/java/anvil/chunk_codec.hpp>
+#include <bridger/translate/mapping_data.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -15,8 +19,9 @@ using namespace bridger::formats::java;
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
     bridger::io::nbt::NbtLimits limits;
     limits.max_tags = 1u << 18;
+    static const LegacyTables legacy = bridger::convert::legacy_tables(*bridger::translate::MappingData::embedded().value());
     auto chunk = decode_chunk(std::span<const u8>(data, size), std::make_shared<BlockStateRegistry>(),
-                              std::make_shared<BiomeRegistry>(), limits);
+                              std::make_shared<BiomeRegistry>(), limits, &legacy);
     if (!chunk) return 0;
     const Structure& s = chunk->column;
     if (s.size().x != 16 || s.size().z != 16) std::abort();
@@ -29,7 +34,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     for (const BlockEntity& be : s.block_entities)
         if (!s.contains(be.pos)) std::abort();
 
-    const auto encoded = encode_chunk(s, chunk->pos, chunk->min_y, chunk->data_version);
+    const auto encoded = encode_chunk(s, chunk->pos, chunk->min_y, std::max(chunk->data_version, kFirstFlatteningChunkDataVersion));
     if (!encoded) return 0; // e.g. a block entity whose data cannot be re-parsed
     auto again = decode_chunk(*encoded, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), limits);
     if (!again || again->column.size() != s.size()) std::abort();

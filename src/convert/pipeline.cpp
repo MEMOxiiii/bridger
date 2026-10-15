@@ -179,10 +179,16 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     summary.source_data_version = world.level.data_version;
     const auto air = mapping->find_bedrock("minecraft:air", {});
     if (!air) return make_error(ErrorCode::Malformed, "mapping data lacks air");
-    if (world.level.data_version && static_cast<u32>(*world.level.data_version) != mapping->java_data_version())
-        summary.warnings.push_back(std::format("world DataVersion {} differs from the pinned Java version's {} ({})",
-                                               *world.level.data_version, mapping->java_data_version(),
-                                               mapping->java_version()));
+    if (!world.level.data_version)
+        summary.warnings.push_back(std::format("the world was saved before Java 1.9 (no DataVersion); its blocks and biomes were "
+                                               "upgraded to Java {}", mapping->java_version()));
+    else if (static_cast<u32>(*world.level.data_version) < mapping->java_data_version())
+        summary.warnings.push_back(std::format("the world was saved by an older Java version (DataVersion {}); its blocks and biomes "
+                                               "were upgraded to Java {}", *world.level.data_version, mapping->java_version()));
+    else if (static_cast<u32>(*world.level.data_version) != mapping->java_data_version())
+        summary.warnings.push_back(std::format("world DataVersion {} is newer than the pinned Java version's {} ({}); unknown "
+                                               "blocks are reported",
+                                               *world.level.data_version, mapping->java_data_version(), mapping->java_version()));
     if (world.has_nether) summary.warnings.push_back("the Nether was not converted: only the Overworld is supported");
     if (world.has_end) summary.warnings.push_back("the End was not converted: only the Overworld is supported");
     if (world.has_entity_regions) summary.warnings.push_back("entities (entities/*.mca) were not converted: entities are not written yet");
@@ -198,6 +204,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     };
     BedrockStateNbt state_nbt(*mapping);
     state_nbt.prepare_all(); // read-only afterwards: shared by the worker threads without locks
+    const formats::java::LegacyTables legacy = legacy_tables(*mapping); // pre-1.13 chunks (numeric ids)
     const auto state_fn = state_nbt.fn();
     translate::TranslateOptions topt;
     topt.fallback = o.fallback;
@@ -243,7 +250,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
                 auto raw = region->read_chunk(lx, lz);
                 if (!raw) return fail(std::move(raw).error());
                 auto chunk = formats::java::decode_chunk(**raw, std::make_shared<BlockStateRegistry>(),
-                                                         std::make_shared<BiomeRegistry>());
+                                                         std::make_shared<BiomeRegistry>(), {}, &legacy);
                 if (!chunk) return fail(std::move(chunk).error());
                 if (!chunk->full) {
                     r.kind = ChunkResult::Kind::Partial;
@@ -697,6 +704,17 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
 // Palette entry -> Bedrock state index of the pinned palette. Entries from older versions ({name, val},
 // numeric ids, or states with an older block version) go through the upgrade schemas first
 // (translate/bedrock_upgrade.hpp); entries at the current version are looked up directly.
+formats::java::LegacyTables legacy_tables(const translate::MappingData& m) {
+    return {[&m](u16 id, u8 data) -> std::optional<std::string> {
+                if (const auto st = m.legacy_block(id, data)) return m.java_state_string(*st);
+                return std::nullopt;
+            },
+            [&m](u16 id, u16 damage) -> std::optional<std::string> {
+                if (const auto i = m.legacy_item(id, damage)) return std::string(*i);
+                return std::nullopt;
+            }};
+}
+
 static_assert(translate::kLegacyIdKey == formats::bedrock::kLegacyIdEntryKey);
 
 formats::bedrock::StateLookupFn bedrock_state_lookup(const translate::MappingData& m) {
@@ -747,15 +765,7 @@ Result<ViewStructure> load_view_structure(const fs::path& input) {
     }
     if (!is_java_structure(v.format))
         return make_error(ErrorCode::NotImplemented, std::string(formats::info(v.format).name) + " cannot be opened as a structure");
-    const formats::java::LegacyTables legacy{
-        [m](u16 id, u8 data) -> std::optional<std::string> {
-            if (const auto st = m->legacy_block(id, data)) return m->java_state_string(*st);
-            return std::nullopt;
-        },
-        [m](u16 id, u16 damage) -> std::optional<std::string> {
-            if (const auto i = m->legacy_item(id, damage)) return std::string(*i);
-            return std::nullopt;
-        }};
+    const formats::java::LegacyTables legacy = legacy_tables(*m);
     auto f = formats::read_java_structure(file.data(), v.format, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), &legacy);
     if (!f) return tl::unexpected(std::move(f).error().with_file(name));
     v.warnings = f->warnings;
@@ -825,15 +835,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
         source = std::move(file->structure);
         summary.blocks = count_non_air(source, *air);
     } else {
-        const formats::java::LegacyTables legacy{
-            [mapping](u16 id, u8 data) -> std::optional<std::string> {
-                if (const auto st = mapping->legacy_block(id, data)) return mapping->java_state_string(*st);
-                return std::nullopt;
-            },
-            [mapping](u16 id, u16 damage) -> std::optional<std::string> {
-                if (const auto i = mapping->legacy_item(id, damage)) return std::string(*i);
-                return std::nullopt;
-            }};
+        const formats::java::LegacyTables legacy = legacy_tables(*mapping);
         auto file = formats::read_java_structure(input.data(), summary.input_format, std::make_shared<BlockStateRegistry>(),
                                                  std::make_shared<BiomeRegistry>(), &legacy);
         if (!file) return tl::unexpected(std::move(file).error().with_file(input_name));
@@ -841,7 +843,7 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
         summary.source_data_version = file->data_version;
         if (file->data_version && static_cast<u32>(*file->data_version) != mapping->java_data_version() && out_bedrock)
             summary.warnings.push_back(std::format(
-                "source DataVersion {} differs from the pinned Java version's {} ({}); blocks are matched by name, and states "
+                "source DataVersion {} differs from the pinned Java version's {} ({}); renamed blocks are upgraded, and states "
                 "unknown to Java {} are reported",
                 *file->data_version, mapping->java_data_version(), mapping->java_version(), mapping->java_version()));
         source = std::move(file->structure);

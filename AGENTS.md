@@ -129,6 +129,9 @@ additions to it are recorded here as required:
   `ui_bundle.*` (the embedded UI zip), `win32/compositor.*`, `win32/webview_host.*`, `win32/shell*`; the UI
   in `src/app/ui/` (`package.json`, `package-lock.json`, `vite.config.ts`, `src/**`); `cmake/NpmInstall.cmake`;
   `docs/app/bridge.md` (message protocol); `docs/adr/0009-hybrid-desktop-ui.md`.
+- `src/formats/java/java_upgrade.{hpp,cpp}` (Java block renames since 1.13, old numeric biome ids) and
+  `legacy_blocks.{hpp,cpp}` (pre-1.13 block entities and the states 1.13 moved; shared by `.schematic` and old chunks):
+  internal to `bridger_formats`.
 - `translate/bedrock_upgrade.hpp` (+ `.cpp`), `src/translate/data/bedrock-upgrade.nbt` and
   `tools/mapgen/build_bedrock_upgrade.py`: upgrading block states of old Bedrock worlds (BedrockBlockUpgradeSchema, CC0).
 - `tests/data/javaworld/`: generated Java worlds (`generate_test_data.py`, `generate_java_world`).

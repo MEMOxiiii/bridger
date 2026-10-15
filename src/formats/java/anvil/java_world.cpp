@@ -48,13 +48,33 @@ Result<JavaWorld> open_java_world(const fs::path& path) {
     const fs::path modern = w.root / "dimensions" / "minecraft";
     w.modern_layout = fs::is_directory(modern / "overworld", ec);
     const fs::path overworld = w.modern_layout ? modern / "overworld" : w.root;
+    // Anvil (.mca, 1.2+); McRegion (.mcr, Beta 1.3 - 1.1) only when there is no Anvil file, because
+    // 1.2 kept the .mcr files next to the converted ones.
+    std::vector<fs::path> mcr;
     if (fs::is_directory(overworld / "region", ec)) {
         for (const auto& e : fs::directory_iterator(overworld / "region", ec)) {
             if (!e.is_regular_file()) continue;
             BRIDGER_TRY(const std::string name, platform::path_to_utf8(e.path().filename()));
-            if (name.starts_with("r.") && name.ends_with(".mca")) w.overworld_regions.push_back(e.path());
+            if (!name.starts_with("r.")) continue;
+            if (name.ends_with(".mca")) w.overworld_regions.push_back(e.path());
+            else if (name.ends_with(".mcr")) mcr.push_back(e.path());
         }
         if (ec) return make_error(ErrorCode::IoError, "cannot list region/: " + ec.message());
+    }
+    if (w.overworld_regions.empty()) w.overworld_regions = std::move(mcr);
+    // Alpha (before Beta 1.3) kept one file per chunk, c.<x>.<z>.dat in base-36 folders; any later
+    // version converts it to McRegion when it opens the world.
+    if (w.overworld_regions.empty() && !w.modern_layout) {
+        for (auto it = fs::recursive_directory_iterator(w.root, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (ec) break;
+            if (it.depth() >= 2) it.disable_recursion_pending();
+            if (it.depth() != 2 || !it->is_regular_file()) continue;
+            const auto name = platform::path_to_utf8(it->path().filename());
+            if (name && name->starts_with("c.") && name->ends_with(".dat"))
+                return make_error(ErrorCode::UnsupportedVersion,
+                                  "this world uses the Alpha format (before Beta 1.3); open it once in Java Beta 1.3 or newer, "
+                                  "which converts it, then convert that copy");
+        }
     }
     std::sort(w.overworld_regions.begin(), w.overworld_regions.end());
     w.has_nether = fs::is_directory(w.root / "DIM-1" / "region", ec) || fs::is_directory(modern / "the_nether" / "region", ec);
