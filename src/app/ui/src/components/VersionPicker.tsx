@@ -22,6 +22,7 @@ export function VersionPicker({
   onChange: (v: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [up, setUp] = useState(false) // not enough room below: open above the button
   const [active, setActive] = useState(0)
   const root = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLUListElement>(null)
@@ -39,6 +40,12 @@ export function VersionPicker({
 
   useEffect(() => {
     if (!open) return
+    // The list is at most 320 px; the convert panel scrolls, so measure against the panel, not the window.
+    const button = root.current?.getBoundingClientRect()
+    const panel = root.current?.closest('.scroll')?.getBoundingClientRect()
+    const bottom = panel ? Math.min(panel.bottom, window.innerHeight) : window.innerHeight
+    const top = panel ? Math.max(panel.top, 0) : 0
+    if (button) setUp(bottom - button.bottom < 336 && button.top - top > bottom - button.bottom)
     setActive(Math.max(0, versions.findIndex((v) => v.name === value)))
     const close = (e: MouseEvent) => root.current && !root.current.contains(e.target as Node) && setOpen(false)
     window.addEventListener('mousedown', close)
@@ -89,7 +96,7 @@ export function VersionPicker({
   if (!current) return null
   let index = -1
   return (
-    <div className={`version-picker version-picker--${edition} ${open ? 'is-open' : ''}`} ref={root} onKeyDown={onKey}>
+    <div className={`version-picker version-picker--${edition} ${open ? 'is-open' : ''} ${up ? 'opens-up' : ''}`} ref={root} onKeyDown={onKey}>
       <button className="version-button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span className="version-button-edition">{edition === 'java' ? 'Java' : 'Bedrock'}</span>
         <span className="version-button-name mono">{current.name}</span>

@@ -2728,6 +2728,11 @@ html.preview .app.screen-preview {
   box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-2);
 }
 
+.version-picker.opens-up .version-list {
+  top: auto;
+  bottom: calc(100% + var(--space-2));
+}
+
 .version-list ul {
   margin: 0;
   padding: 0;
