@@ -1,7 +1,9 @@
 #include <bridger/render/mesher.hpp>
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
+#include <tuple>
 
 namespace bridger::render {
 namespace {
@@ -205,6 +207,167 @@ void mesh_section(const std::array<const BakedBlock*, kPaddedVolume>& blocks, gl
                     emit_quad(dst, p, q.uv, q.texture, colors, cutout, ao[0] + ao[2] > ao[1] + ao[3]);
                 }
             }
+}
+
+// ---- Distant terrain (LOD) ------------------------------------------------------------------------
+
+namespace {
+
+bool lod_visible(const BakedBlock* b) {
+    return b != nullptr && !(b->layer == RenderLayer::Invisible && b->fluid == Fluid::None) && b->map_color != 0;
+}
+
+u32 lod_color(const BakedBlock& b) {
+    glm::vec3 c(static_cast<float>(b.map_color & 0xFF) / 255.0f, static_cast<float>((b.map_color >> 8) & 0xFF) / 255.0f,
+                static_cast<float>((b.map_color >> 16) & 0xFF) / 255.0f);
+    if (b.fluid == Fluid::Water || b.map_tinted) c *= tint_color(b.fluid == Fluid::Water ? Tint::Water : b.tint);
+    return pack_color(c);
+}
+
+} // namespace
+
+ColumnSummary summarize_column(const ColumnBlockFn& at, int min_y, int height) {
+    ColumnSummary s;
+    s.top.fill(ColumnSummary::kNoTop);
+    s.color.fill(0);
+    for (int z = 0; z < 16; ++z)
+        for (int x = 0; x < 16; ++x)
+            for (int y = min_y + height - 1; y >= min_y; --y) {
+                const BakedBlock* b = at(x, y, z);
+                if (!lod_visible(b)) continue;
+                const usize i = static_cast<usize>(z * 16 + x);
+                s.top[i] = static_cast<i16>(y);
+                s.color[i] = lod_color(*b);
+                break;
+            }
+    return s;
+}
+
+ColumnSummary summarize_column(const Structure& column, std::span<const BakedBlock* const> table, int min_y) {
+    ColumnSummary s;
+    s.top.fill(ColumnSummary::kNoTop);
+    s.color.fill(0);
+    auto visible = [&](u32 id) -> const BakedBlock* { return id < table.size() && lod_visible(table[id]) ? table[id] : nullptr; };
+    usize remaining = 256;
+    for (int sy = static_cast<int>(column.sections_y()) - 1; sy >= 0 && remaining > 0; --sy) {
+        const PaletteLayer& layer = column.section(0, static_cast<u32>(sy), 0).blocks();
+        const auto palette = layer.palette();
+        if (std::none_of(palette.begin(), palette.end(), [&](u32 id) { return visible(id) != nullptr; })) continue;
+        for (int ly = 15; ly >= 0 && remaining > 0; --ly)
+            for (int z = 0; z < 16; ++z)
+                for (int x = 0; x < 16; ++x) {
+                    const usize i = static_cast<usize>(z * 16 + x);
+                    if (s.top[i] != ColumnSummary::kNoTop) continue;
+                    const BakedBlock* b = visible(layer.get(section_index(x, ly, z)));
+                    if (b == nullptr) continue;
+                    s.top[i] = static_cast<i16>(min_y + sy * 16 + ly);
+                    s.color[i] = lod_color(*b);
+                    --remaining;
+                }
+    }
+    return s;
+}
+
+void mesh_lod(const ColumnSummary& c, const std::array<const ColumnSummary*, 4>& around, glm::ivec3 origin, int step, u16 white,
+              std::map<int, SectionMesh>& out) {
+    // Cells of step x step blocks: the highest block of the cell and its colour.
+    const int n = 16 / step;
+    auto cell = [&](const ColumnSummary& s, int cx, int cz, i16& top, u32& col) {
+        top = ColumnSummary::kNoTop;
+        col = 0;
+        for (int dz = 0; dz < step; ++dz)
+            for (int dx = 0; dx < step; ++dx) {
+                const usize i = static_cast<usize>((cz * step + dz) * 16 + cx * step + dx);
+                if (s.top[i] > top) { top = s.top[i]; col = s.color[i]; }
+            }
+    };
+    std::vector<i16> tops(static_cast<usize>(n * n));
+    std::vector<u32> cols(tops.size());
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x) cell(c, x, z, tops[static_cast<usize>(z * n + x)], cols[static_cast<usize>(z * n + x)]);
+
+    auto shade = [](u32 col, float f) {
+        const glm::vec3 v(static_cast<float>(col & 0xFF) / 255.0f, static_cast<float>((col >> 8) & 0xFF) / 255.0f,
+                          static_cast<float>((col >> 16) & 0xFF) / 255.0f);
+        return pack_color(v * f);
+    };
+    static constexpr std::array<glm::vec2, 4> kUv{glm::vec2(0, 0), glm::vec2(1, 0), glm::vec2(1, 1), glm::vec2(0, 1)};
+    // Positions in each section's own frame: (x, y - section base, z).
+    auto quad = [&](std::array<glm::vec3, 4> p, u32 col, int section_y_world) {
+        const int sy = static_cast<int>(std::floor(static_cast<float>(section_y_world - origin.y) / 16.0f));
+        const float base = static_cast<float>(origin.y + sy * 16);
+        for (auto& v : p) v.y -= base;
+        emit_quad(out[sy].solid, p, kUv, white, {col, col, col, col}, false, false);
+    };
+
+    // Tops, merged greedily: runs along x of equal height and colour, grown along z.
+    std::vector<u8> done(tops.size(), 0);
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x) {
+            const usize i = static_cast<usize>(z * n + x);
+            if (done[i] || tops[i] == ColumnSummary::kNoTop) continue;
+            auto same = [&](int xx, int zz) {
+                const usize j = static_cast<usize>(zz * n + xx);
+                return !done[j] && tops[j] == tops[i] && cols[j] == cols[i];
+            };
+            int w = 1;
+            while (x + w < n && same(x + w, z)) ++w;
+            int h = 1;
+            for (bool grow = true; grow && z + h < n;) {
+                for (int xx = x; xx < x + w; ++xx)
+                    if (!same(xx, z + h)) { grow = false; break; }
+                if (grow) ++h;
+            }
+            for (int zz = z; zz < z + h; ++zz)
+                for (int xx = x; xx < x + w; ++xx) done[static_cast<usize>(zz * n + xx)] = 1;
+            const float y = static_cast<float>(tops[i] + 1);
+            const float x0 = static_cast<float>(x * step), x1 = static_cast<float>((x + w) * step);
+            const float z0 = static_cast<float>(z * step), z1 = static_cast<float>((z + h) * step);
+            quad({glm::vec3(x0, y, z0), glm::vec3(x0, y, z1), glm::vec3(x1, y, z1), glm::vec3(x1, y, z0)}, shade(cols[i], kFaceShade[1]), tops[i]);
+        }
+
+    // Sides: down to the neighbouring cell's top; at the column border the neighbour column's cell,
+    // or a skirt of 8 blocks when it is not loaded (hides cracks against full-detail columns).
+    auto neighbour_top = [&](int x, int z) -> int {
+        if (x >= 0 && x < n && z >= 0 && z < n) return tops[static_cast<usize>(z * n + x)];
+        const ColumnSummary* s = x >= n ? around[0] : x < 0 ? around[1] : z >= n ? around[2] : around[3];
+        if (s == nullptr) return INT_MIN;
+        i16 t;
+        u32 col;
+        cell(*s, (x + n) % n, (z + n) % n, t, col);
+        return t;
+    };
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x) {
+            const int top = tops[static_cast<usize>(z * n + x)];
+            if (top == ColumnSummary::kNoTop) continue;
+            const u32 col = cols[static_cast<usize>(z * n + x)];
+            const float x0 = static_cast<float>(x * step), x1 = static_cast<float>((x + 1) * step);
+            const float z0 = static_cast<float>(z * step), z1 = static_cast<float>((z + 1) * step);
+            // face index (kFaceShade): 2 north (-z), 3 south (+z), 4 west (-x), 5 east (+x)
+            const std::array<std::tuple<int, int, int>, 4> sides{{{x + 1, z, 5}, {x - 1, z, 4}, {x, z + 1, 3}, {x, z - 1, 2}}};
+            for (const auto& [nx, nz, face] : sides) {
+                int low = neighbour_top(nx, nz);
+                if (low == INT_MIN) low = top - 8;
+                if (low >= top) continue;
+                const u32 sc = shade(col, kFaceShade[static_cast<usize>(face)]);
+                // Split at section boundaries so every quad lies inside its section's culling box.
+                for (int y0 = low + 1; y0 <= top;) {
+                    const int section_base = origin.y + static_cast<int>(std::floor(static_cast<float>(y0 - origin.y) / 16.0f)) * 16;
+                    const int y1 = std::min(top + 1, section_base + 16);
+                    const float a = static_cast<float>(y0), b = static_cast<float>(y1);
+                    std::array<glm::vec3, 4> p;
+                    switch (face) {
+                    case 5: p = {glm::vec3(x1, a, z0), glm::vec3(x1, b, z0), glm::vec3(x1, b, z1), glm::vec3(x1, a, z1)}; break;
+                    case 4: p = {glm::vec3(x0, a, z1), glm::vec3(x0, b, z1), glm::vec3(x0, b, z0), glm::vec3(x0, a, z0)}; break;
+                    case 3: p = {glm::vec3(x1, a, z1), glm::vec3(x1, b, z1), glm::vec3(x0, b, z1), glm::vec3(x0, a, z1)}; break;
+                    default: p = {glm::vec3(x0, a, z0), glm::vec3(x0, b, z0), glm::vec3(x1, b, z0), glm::vec3(x1, a, z0)}; break;
+                    }
+                    quad(p, sc, y0);
+                    y0 = y1;
+                }
+            }
+        }
 }
 
 } // namespace bridger::render

@@ -123,6 +123,8 @@ additions to it are recorded here as required:
   `entity_models.*`, `external_image.hpp` + `win32/external_image_win32.cpp` (+ `posix/` stub), `vma_impl.cpp`,
   `stb_impl.cpp`; shaders `chunk.*`, `line.*`. `convert/view_world.hpp`: worlds opened for viewing.
   `src/cli/commands/render.cpp`: `bridger render`. `docs/formats/assets.md`. `bench/bench_render.cpp`.
+- `render/lod_cache.hpp` (+ `.cpp`): the distant terrain cache (`docs/formats/assets.md`, "Distant terrain");
+  `tests/unit/render/lod_test.cpp`.
 - `platform/net.hpp` + `win32/net_win32.cpp` (HTTPS via WinHTTP, SHA-1 via BCrypt) and `render/asset_download.hpp`
   (the client jar download on request; `docs/safety.md`, "Network access").
 - Phase 8 (`app`): `viewer.*` (camera controller, OS-free, unit-tested from `tests/unit/app/`), `settings.*`,

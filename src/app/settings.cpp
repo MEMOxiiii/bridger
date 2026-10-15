@@ -38,6 +38,7 @@ Settings load_settings() {
     }
     if (auto it = j.find("client_jar"); it != j.end() && it->is_string()) s.client_jar = it->get<std::string>();
     if (auto it = j.find("render_distance"); it != j.end() && it->is_number_integer()) s.render_distance = std::clamp(it->get<int>(), 2, 48);
+    if (auto it = j.find("distant_terrain"); it != j.end() && it->is_number_integer()) s.distant_terrain = std::clamp(it->get<int>(), 0, 96);
     for (const char* key : {"packs", "recent"}) {
         auto& out = std::string_view(key) == "packs" ? s.packs : s.recent;
         if (auto it = j.find(key); it != j.end() && it->is_array())
@@ -53,7 +54,8 @@ void save_settings(const Settings& s) {
     if (!path) return;
     std::error_code ec;
     std::filesystem::create_directories(path->parent_path(), ec);
-    const nlohmann::json j = {{"client_jar", s.client_jar}, {"packs", s.packs}, {"render_distance", s.render_distance}, {"recent", s.recent}};
+    const nlohmann::json j = {{"client_jar", s.client_jar}, {"packs", s.packs}, {"render_distance", s.render_distance},
+                              {"distant_terrain", s.distant_terrain}, {"recent", s.recent}};
     std::ofstream out(*path, std::ios::binary | std::ios::trunc);
     out << j.dump(2);
     if (!out) log::warn("settings: could not write {}", platform::path_to_utf8(*path).value_or("settings.json"));

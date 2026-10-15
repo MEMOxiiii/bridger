@@ -3,7 +3,7 @@
 import type { Doc, Incoming, Outgoing, Settings } from './bridge'
 import { setConvert, setState } from './store'
 
-const settings: Settings = { client_jar: '', packs: [], render_distance: 12, recent: ['C:\\Builds\\castle.schem', 'C:\\Builds\\village.mcstructure'] }
+const settings: Settings = { client_jar: '', packs: [], render_distance: 12, distant_terrain: 32, recent: ['C:\\Builds\\castle.schem', 'C:\\Builds\\village.mcstructure'] }
 
 const doc: Doc = {
   kind: 'structure',

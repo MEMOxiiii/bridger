@@ -15,6 +15,7 @@
 #include <bridger/render/asset_download.hpp>
 #include <bridger/render/renderer.hpp>
 #include <bridger/render/scene.hpp>
+#include <bridger/render/lod_cache.hpp>
 #include <bridger/render/streaming.hpp>
 #include <bridger/translate/mapping_data.hpp>
 
@@ -133,6 +134,7 @@ struct Document {
     glm::dvec3 lo{0.0}, hi{1.0};
     std::unique_ptr<convert::ViewWorld> view_world;
     std::unique_ptr<render::StreamingScene> streaming;
+    std::shared_ptr<render::LodCache> distant_cache;
 };
 
 const SDL_DialogFileFilter kOpenFilters[] = {
@@ -190,6 +192,7 @@ struct App::Impl {
     std::atomic<bool> download_cancel{false};
     bool downloading = false;
     bool using_downloaded_jar = false;
+    std::vector<fs::path> asset_paths; // client jar + resource packs of `models` (distant terrain cache key)
     // Time to first frame (docs/performance.md): from open() to the first frame showing the document,
     // and for worlds until every chunk in the render distance is on screen.
     std::chrono::steady_clock::time_point open_started;
@@ -244,7 +247,8 @@ struct App::Impl {
     }
 
     json settings_json() const {
-        return {{"client_jar", settings.client_jar}, {"packs", settings.packs}, {"render_distance", settings.render_distance}, {"recent", settings.recent}};
+        return {{"client_jar", settings.client_jar}, {"packs", settings.packs}, {"render_distance", settings.render_distance},
+                {"distant_terrain", settings.distant_terrain}, {"recent", settings.recent}};
     }
 
     void send_hello() {
@@ -381,6 +385,9 @@ struct App::Impl {
         }
         if (m.contains("render_distance") && m["render_distance"].is_number_integer())
             settings.render_distance = std::clamp(m["render_distance"].get<int>(), 2, 48);
+        if (m.contains("distant_terrain") && m["distant_terrain"].is_number_integer())
+            settings.distant_terrain = std::clamp(m["distant_terrain"].get<int>(), 0, 96);
+        apply_view_distance();
         settings_changed(assets_changed);
     }
 
@@ -431,6 +438,7 @@ struct App::Impl {
         assets_jar = utf8(packs.front());
         for (const auto& p : settings.packs)
             if (auto pp = platform::path_from_utf8(p)) packs.push_back(*pp);
+        asset_paths = packs;
         auto assets = render::AssetSource::open(packs);
         if (!assets) {
             assets_error = assets.error().describe();
@@ -442,6 +450,51 @@ struct App::Impl {
             return;
         }
         models = std::make_unique<render::BlockModels>(std::move(*bm));
+    }
+
+    // ---- Distant terrain ---------------------------------------------------------------------
+
+    // The distant terrain cache of a world (render/lod_cache.hpp): one folder per world, its last save
+    // and the resource packs, so a cached column is never stale. The 8 most recently used are kept.
+    std::shared_ptr<render::LodCache> distant_cache(const fs::path& world) {
+        const auto base = platform::local_app_data_dir();
+        if (!base) return nullptr;
+        u64 h = 0xcbf29ce484222325ull;
+        auto mix = [&h](std::string_view bytes) {
+            for (const char c : bytes) h = (h ^ static_cast<u8>(c)) * 0x100000001b3ull;
+            h = (h ^ 0xFF) * 0x100000001b3ull;
+        };
+        std::error_code ec;
+        auto stamp = [&](const fs::path& p) {
+            mix(utf8(p));
+            mix(std::to_string(fs::is_regular_file(p, ec) ? fs::file_size(p, ec) : 0));
+            mix(std::to_string(fs::last_write_time(p, ec).time_since_epoch().count()));
+        };
+        stamp(fs::is_directory(world, ec) ? world / "level.dat" : world); // saving a world rewrites level.dat
+        for (const fs::path& a : asset_paths) stamp(a);
+        mix(BRIDGER_VERSION_STRING);
+        const fs::path root = *base / "Bridger" / "cache" / "distant";
+        const fs::path dir = root / std::format("{:016x}", h);
+        fs::create_directories(dir, ec);
+        fs::last_write_time(dir, fs::file_time_type::clock::now(), ec);
+        std::vector<std::pair<fs::file_time_type, fs::path>> all;
+        for (const auto& e : fs::directory_iterator(root, ec))
+            if (e.is_directory(ec)) all.emplace_back(e.last_write_time(ec), e.path());
+        std::sort(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        for (usize i = 8; i < all.size(); ++i)
+            if (all[i].second != dir) fs::remove_all(all[i].second, ec); // only Bridger's own cache folders
+        return std::make_shared<render::LodCache>(dir);
+    }
+
+    // Render distance and distant terrain of the open world: streaming radii and fog.
+    void apply_view_distance() {
+        if (!has_doc || !doc.world) return;
+        const int far = settings.distant_terrain > settings.render_distance ? settings.distant_terrain : settings.render_distance;
+        if (doc.streaming) doc.streaming->set_distant_terrain(far > settings.render_distance ? far : 0, doc.distant_cache);
+        const double r = far * 16.0;
+        frame.fog_start = static_cast<float>(r * (far > settings.render_distance ? 0.7 : 0.8));
+        frame.fog_end = static_cast<float>(r);
+        dirty = true;
     }
 
     // ---- Opening ---------------------------------------------------------------------------
@@ -598,7 +651,6 @@ struct App::Impl {
         doc.view_world = std::make_unique<convert::ViewWorld>(std::move(w));
         has_doc = true;
         const BlockPos sp = info.spawn;
-        const double r = settings.render_distance * 16.0;
         // Frame a modest area around the spawn (framing the whole render distance would put the camera
         // hundreds of blocks away, often inside a mountain).
         doc.lo = glm::dvec3(sp.x - 32, sp.y - 16, sp.z - 32);
@@ -613,11 +665,10 @@ struct App::Impl {
                     return render::LoadedColumn{c->pos, c->min_y, std::move(c->column)};
                 },
                 vw->chunks());
+            if (auto p = platform::path_from_utf8(path)) doc.distant_cache = distant_cache(*p);
         }
         viewer.frame(doc.lo, doc.hi, aspect());
-        frame.fog_start = static_cast<float>(r * 0.8);
-        frame.fog_end = static_cast<float>(r * 1.0);
-        dirty = true;
+        apply_view_distance();
         settings.add_recent(path);
         save_settings(settings);
         send({{"type", "opened"},
@@ -908,6 +959,7 @@ struct App::Impl {
         if (doc.streaming) {
             const auto st = doc.streaming->stats();
             j["chunks_loaded"] = st.loaded;
+            j["chunks_distant"] = st.distant;
             j["chunks_total"] = st.available;
             j["chunks_pending"] = st.queued + st.in_flight;
         }

@@ -10,6 +10,7 @@
 #include <bridger/render/image_io.hpp>
 #include <bridger/render/renderer.hpp>
 #include <bridger/render/scene.hpp>
+#include <bridger/render/lod_cache.hpp>
 #include <bridger/render/streaming.hpp>
 #include <bridger/translate/mapping_data.hpp>
 
@@ -97,8 +98,18 @@ int run_render(const RenderArgs& a) {
             if (!c) return std::nullopt;
             return render::LoadedColumn{c->pos, c->min_y, std::move(c->column)};
         }, view_world->chunks());
+        if (a.distant > a.radius) {
+            std::shared_ptr<render::LodCache> cache;
+            if (!a.lod_cache.empty()) {
+                auto dir = platform::path_from_utf8(a.lod_cache);
+                if (!dir) return fail(dir.error());
+                cache = std::make_shared<render::LodCache>(*dir);
+            }
+            scene->set_distant_terrain(a.distant, std::move(cache));
+        }
         cam.position = glm::dvec3(sp.x, sp.y, sp.z);
         scene->load_all(cam, *renderer, a.radius);
+        if (const auto st = scene->flush_cache(); !st) log::warn("distant terrain cache: {}", st.error().describe());
         const float r = static_cast<float>(a.radius) * 16.0f;
         const auto hr = scene->height_range();
         const float top = hr ? static_cast<float>(hr->second) : static_cast<float>(sp.y + 16);
@@ -111,14 +122,18 @@ int run_render(const RenderArgs& a) {
         }
         settings.fog_start = r * 1.1f;
         settings.fog_end = r * 1.6f;
+        if (a.distant > a.radius) {
+            settings.fog_start = static_cast<float>(a.distant) * 16.0f * 0.75f;
+            settings.fog_end = static_cast<float>(a.distant) * 16.0f;
+        }
         if (a.map) {
             settings.map_mode = true;
             settings.map_half_extent = r * 0.9f;
             cam.position = glm::dvec3(sp.x, 0, sp.z);
         }
         const auto st = scene->stats();
-        summary = std::format("{} world '{}': {} of {} chunks loaded, {} quads", formats::info(view_world->info().format).name,
-                              view_world->info().level_name, st.loaded, st.available, st.quads);
+        summary = std::format("{} world '{}': {} of {} chunks loaded, {} distant, {} quads", formats::info(view_world->info().format).name,
+                              view_world->info().level_name, st.loaded, st.available, st.distant, st.quads);
     } else {
         render::SceneStats stats;
         auto sections = render::mesh_structure(view->java, *models, {0, 0, 0}, 0, &stats);

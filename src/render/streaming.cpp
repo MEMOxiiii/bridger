@@ -1,6 +1,7 @@
 #include <bridger/render/streaming.hpp>
 
 #include <bridger/core/parallel.hpp>
+#include <bridger/render/lod_cache.hpp>
 #include <bridger/render/mesher.hpp>
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -26,13 +28,21 @@ struct Column {
 struct Job {
     ChunkPos pos;
     bool remesh = false;
+    bool lod = false; // distant terrain: summary + LOD mesh
+    int step = 2;     // LOD cell size in blocks
 };
 
 struct Result {
     ChunkPos pos;
     std::vector<std::pair<glm::ivec3, SectionMesh>> sections;
     bool missing = false; // the column does not exist
+    bool lod = false;
 };
+
+// LOD meshes use one vertical frame for every world: sections from y -64 (the lowest build limit).
+constexpr int kLodBaseY = -64;
+
+ColumnSummary summarize(const Column& c) { return summarize_column(c.data.column, c.table, c.data.min_y); }
 
 bool is_air(const std::string& id) {
     return id == "minecraft:air" || id == "minecraft:cave_air" || id == "minecraft:void_air" || id == "minecraft:structure_void";
@@ -51,7 +61,12 @@ struct StreamingScene::Impl {
     mutable std::mutex lock; // columns, queue, results, scheduled
     std::condition_variable work_cv;
     std::deque<Job> queue;
+    std::deque<Job> lod_queue; // taken only when `queue` is empty
     std::unordered_map<u64, std::shared_ptr<const Column>> columns;
+    std::unordered_map<u64, std::shared_ptr<const ColumnSummary>> summaries; // distant terrain, also of full columns
+    std::unordered_set<u64> lod_scheduled;
+    int lod_radius = 0;
+    std::shared_ptr<LodCache> cache;
     std::unordered_set<u64> scheduled; // queued or in flight (loads)
     std::unordered_set<u64> absent;    // listed but not loadable (partly generated, unreadable): not retried
     std::vector<Result> results;
@@ -62,6 +77,7 @@ struct StreamingScene::Impl {
     // Render-thread state.
     std::unordered_map<u64, std::vector<glm::ivec3>> uploaded; // column -> section origins on the GPU
     std::unordered_map<u64, u64> column_quads;
+    std::unordered_set<u64> lod_shown; // columns whose uploaded sections are LOD meshes
     int min_y = INT32_MAX, max_y = INT32_MIN;
     usize uploaded_textures = 0; // texture layers on the GPU (baking adds layers as new blocks appear)
 
@@ -79,6 +95,58 @@ struct StreamingScene::Impl {
         }
         work_cv.notify_all();
         for (std::thread& t : workers) t.join();
+        if (cache) (void)cache->flush();
+    }
+
+    // Bakes the column's states (under the models lock) into its lookup table.
+    void bake_table(Column& c) {
+        const BlockStateRegistry& reg = c.data.column.block_registry();
+        c.table.assign(reg.size(), nullptr);
+        std::lock_guard g(models_lock);
+        for (StateId id = 0; id < reg.size(); ++id)
+            if (!is_air(reg.get(id).id())) c.table[id] = &models.bake(reg.get(id));
+    }
+
+    // Distant terrain job: the summary (memory, cache, or loading the column), then its LOD mesh.
+    void run_lod(const Job& job, Result& r) {
+        r.lod = true;
+        const u64 k = key_of(job.pos);
+        std::shared_ptr<const ColumnSummary> sum;
+        {
+            std::lock_guard g(lock);
+            if (const auto it = summaries.find(k); it != summaries.end()) sum = it->second;
+        }
+        if (!sum && cache)
+            if (auto c = cache->get(job.pos)) sum = std::make_shared<const ColumnSummary>(*c);
+        if (!sum) {
+            auto loaded = loader(job.pos);
+            if (!loaded) {
+                r.missing = true;
+                std::lock_guard g(lock);
+                absent.insert(k);
+                return;
+            }
+            Column c;
+            c.data = std::move(*loaded);
+            bake_table(c);
+            sum = std::make_shared<const ColumnSummary>(summarize(c));
+            if (cache) cache->put(job.pos, *sum);
+        }
+        std::array<std::shared_ptr<const ColumnSummary>, 4> around;
+        {
+            std::lock_guard g(lock);
+            summaries[k] = sum;
+            const std::array<ChunkPos, 4> d{ChunkPos{1, 0}, ChunkPos{-1, 0}, ChunkPos{0, 1}, ChunkPos{0, -1}};
+            for (usize i = 0; i < 4; ++i)
+                if (const auto it = summaries.find(key_of({job.pos.x + d[i].x, job.pos.z + d[i].z})); it != summaries.end())
+                    around[i] = it->second;
+        }
+        const glm::ivec3 origin(job.pos.x * 16, kLodBaseY, job.pos.z * 16);
+        std::map<int, SectionMesh> meshes;
+        mesh_lod(*sum, {around[0].get(), around[1].get(), around[2].get(), around[3].get()}, origin, job.step, models.white_texture(),
+                 meshes);
+        for (auto& [sy, m] : meshes)
+            if (!m.empty()) r.sections.emplace_back(glm::ivec3(origin.x, kLodBaseY + sy * 16, origin.z), std::move(m));
     }
 
     std::shared_ptr<const Column> find(ChunkPos p) const {
@@ -137,14 +205,23 @@ struct StreamingScene::Impl {
             Job job;
             {
                 std::unique_lock g(lock);
-                work_cv.wait(g, [&] { return stop || !queue.empty(); });
+                work_cv.wait(g, [&] { return stop || !queue.empty() || !lod_queue.empty(); });
                 if (stop) return;
-                job = queue.front();
-                queue.pop_front();
+                std::deque<Job>& q = queue.empty() ? lod_queue : queue;
+                job = q.front();
+                q.pop_front();
                 ++in_flight;
             }
             Result r;
             r.pos = job.pos;
+            if (job.lod) {
+                run_lod(job, r);
+                std::lock_guard g(lock);
+                lod_scheduled.erase(key_of(job.pos));
+                --in_flight;
+                results.push_back(std::move(r));
+                continue;
+            }
             std::shared_ptr<const Column> col;
             if (job.remesh) {
                 std::lock_guard g(lock);
@@ -152,16 +229,17 @@ struct StreamingScene::Impl {
             } else if (auto loaded = loader(job.pos)) {
                 auto c = std::make_shared<Column>();
                 c->data = std::move(*loaded);
-                const BlockStateRegistry& reg = c->data.column.block_registry();
-                c->table.assign(reg.size(), nullptr);
-                {
-                    std::lock_guard g(models_lock);
-                    for (StateId id = 0; id < reg.size(); ++id)
-                        if (!is_air(reg.get(id).id())) c->table[id] = &models.bake(reg.get(id));
+                bake_table(*c);
+                // Its summary too, so distant terrain next to it and later views of it are free.
+                std::shared_ptr<const ColumnSummary> sum;
+                if (lod_radius > 0 || cache) {
+                    sum = std::make_shared<const ColumnSummary>(summarize(*c));
+                    if (cache) cache->put(job.pos, *sum);
                 }
                 col = c;
                 std::lock_guard g(lock);
                 columns[key_of(job.pos)] = c;
+                if (sum) summaries[key_of(job.pos)] = sum;
                 // Neighbours meshed before this column existed get their border faces fixed.
                 for (const ChunkPos d : {ChunkPos{1, 0}, ChunkPos{-1, 0}, ChunkPos{0, 1}, ChunkPos{0, -1}}) {
                     const ChunkPos n{job.pos.x + d.x, job.pos.z + d.z};
@@ -204,6 +282,29 @@ struct StreamingScene::Impl {
                 queue.push_back({p, false});
             }
             if (!want.empty()) work_cv.notify_all();
+            // Distant terrain between the radius and the LOD radius: cells of 2 blocks, 4 beyond twice
+            // the radius.
+            const int lr = lod_radius;
+            if (lr > radius) {
+                std::vector<std::pair<int, ChunkPos>> far_want;
+                for (int dz = -lr; dz <= lr; ++dz)
+                    for (int dx = -lr; dx <= lr; ++dx) {
+                        const int d2 = dx * dx + dz * dz;
+                        if (d2 <= radius * radius || d2 > lr * lr) continue;
+                        const ChunkPos p{ccx + dx, ccz + dz};
+                        const u64 k = key_of(p);
+                        if (!available.contains(k) || columns.contains(k) || scheduled.contains(k) || lod_scheduled.contains(k) ||
+                            lod_shown.contains(k) || absent.contains(k))
+                            continue;
+                        far_want.emplace_back(d2, p);
+                    }
+                std::sort(far_want.begin(), far_want.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+                for (const auto& [d2, p] : far_want) {
+                    lod_scheduled.insert(key_of(p));
+                    lod_queue.push_back({p, false, true, d2 <= 4 * radius * radius ? 2 : 4});
+                }
+                if (!far_want.empty()) work_cv.notify_all();
+            }
             // Take finished results within the budget.
             const usize n = std::min(budget, results.size());
             ready.assign(std::make_move_iterator(results.begin()), std::make_move_iterator(results.begin() + static_cast<std::ptrdiff_t>(n)));
@@ -224,13 +325,35 @@ struct StreamingScene::Impl {
                     ++it;
                 }
             }
-            busy = !queue.empty() || in_flight > 0 || !results.empty();
+            // Unload distant terrain beyond the LOD radius (summaries stay in the cache on disk).
+            const int lod_far = std::max(lr, radius) + 2;
+            for (auto it = lod_shown.begin(); it != lod_shown.end();) {
+                const ChunkPos p = ChunkPos::unpack(*it);
+                const int dx = p.x - ccx, dz = p.z - ccz;
+                if (lr <= radius || dx * dx + dz * dz > lod_far * lod_far) {
+                    if (const auto u = uploaded.find(*it); u != uploaded.end()) {
+                        for (const glm::ivec3& o : u->second) renderer.remove_section(o);
+                        uploaded.erase(u);
+                    }
+                    column_quads.erase(*it);
+                    it = lod_shown.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (auto it = summaries.begin(); it != summaries.end();) {
+                const ChunkPos p = ChunkPos::unpack(it->first);
+                const int dx = p.x - ccx, dz = p.z - ccz;
+                if (dx * dx + dz * dz > lod_far * lod_far && !columns.contains(it->first)) it = summaries.erase(it);
+                else ++it;
+            }
+            busy = !queue.empty() || !lod_queue.empty() || in_flight > 0 || !results.empty();
         }
         for (Result& r : ready) {
             const u64 k = key_of(r.pos);
             {
                 std::lock_guard g(lock);
-                if (!columns.contains(k)) continue; // unloaded meanwhile (or missing)
+                if (r.lod ? (r.missing || columns.contains(k)) : !columns.contains(k)) continue; // full detail won, or unloaded
             }
             auto& prev = uploaded[k];
             std::vector<glm::ivec3> now;
@@ -239,9 +362,13 @@ struct StreamingScene::Impl {
                 (void)renderer.upload_section(origin, mesh);
                 now.push_back(origin);
                 quads += (mesh.solid.size() + mesh.cutout.size() + mesh.translucent.size()) / 4;
-                min_y = std::min(min_y, origin.y);
-                max_y = std::max(max_y, origin.y + 16);
+                if (!r.lod) {
+                    min_y = std::min(min_y, origin.y);
+                    max_y = std::max(max_y, origin.y + 16);
+                }
             }
+            if (r.lod) lod_shown.insert(k);
+            else lod_shown.erase(k);
             for (const glm::ivec3& o : prev)
                 if (std::find(now.begin(), now.end(), o) == now.end()) renderer.remove_section(o);
             prev = std::move(now);
@@ -270,12 +397,28 @@ void StreamingScene::load_all(const Camera& camera, Renderer& renderer, int radi
     while (impl_->update(camera, renderer, radius_chunks, 1u << 20)) std::this_thread::sleep_for(std::chrono::milliseconds(2));
 }
 
+void StreamingScene::set_distant_terrain(int lod_radius_chunks, std::shared_ptr<LodCache> cache) {
+    std::lock_guard g(impl_->lock);
+    impl_->lod_radius = std::max(0, lod_radius_chunks);
+    impl_->cache = std::move(cache);
+}
+
+Status StreamingScene::flush_cache() {
+    std::shared_ptr<LodCache> c;
+    {
+        std::lock_guard g(impl_->lock);
+        c = impl_->cache;
+    }
+    return c ? c->flush() : Status{};
+}
+
 StreamingStats StreamingScene::stats() const {
     StreamingStats s;
     std::lock_guard g(impl_->lock);
     s.available = impl_->available_count;
-    s.loaded = impl_->uploaded.size();
-    s.queued = impl_->queue.size();
+    s.distant = impl_->lod_shown.size();
+    s.loaded = impl_->uploaded.size() - s.distant;
+    s.queued = impl_->queue.size() + impl_->lod_queue.size();
     s.in_flight = impl_->in_flight;
     for (const auto& [k, q] : impl_->column_quads) s.quads += q;
     return s;

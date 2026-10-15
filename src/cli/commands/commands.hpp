@@ -40,6 +40,8 @@ struct RenderArgs {
     float pitch = -28.0f;
     float zoom = 1.0f;                // > 1 moves the camera closer
     int radius = 8;                   // worlds: chunks around the spawn
+    int distant = 0;                  // worlds: distant terrain (LOD) out to this many chunks
+    std::string lod_cache;            // worlds: folder for the distant terrain cache
     bool map = false;                 // top-down orthographic
     std::string slice;                // hide blocks at and above this y
     std::vector<std::string> packs;   // extra resource packs (highest priority last)

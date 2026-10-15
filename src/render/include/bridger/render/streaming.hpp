@@ -6,6 +6,7 @@
 // columns that are far away. Sections at a column border are meshed again when the neighbouring
 // column arrives, so faces between loaded columns are culled correctly.
 
+#include <bridger/core/result.hpp>
 #include <bridger/core/structure.hpp>
 #include <bridger/render/block_models.hpp>
 #include <bridger/render/camera.hpp>
@@ -18,6 +19,8 @@
 
 namespace bridger::render {
 
+class LodCache;
+
 struct LoadedColumn {
     ChunkPos pos;
     i32 min_y = -64;
@@ -29,7 +32,8 @@ using ColumnLoader = std::function<std::optional<LoadedColumn>(ChunkPos)>;
 
 struct StreamingStats {
     usize available = 0;   // columns in the world
-    usize loaded = 0;      // columns resident (meshed)
+    usize loaded = 0;      // columns resident at full detail
+    usize distant = 0;     // columns shown as distant terrain (LOD)
     usize queued = 0;      // waiting for a worker
     usize in_flight = 0;   // being loaded or meshed
     u64 quads = 0;
@@ -50,6 +54,12 @@ public:
 
     // Blocks until every column within the radius is loaded and uploaded (screenshots, tests).
     void load_all(const Camera& camera, Renderer& renderer, int radius_chunks);
+
+    // Distant terrain: columns between the radius passed to update() and `lod_radius_chunks` are
+    // shown as LOD meshes (mesher.hpp, mesh_lod), from summaries kept in memory and in `cache`
+    // (optional). 0 turns it off.
+    void set_distant_terrain(int lod_radius_chunks, std::shared_ptr<LodCache> cache = {});
+    [[nodiscard]] Status flush_cache();
 
     [[nodiscard]] StreamingStats stats() const;
     // Height range of the loaded columns' non-air blocks (for framing a camera); nullopt if none.

@@ -232,3 +232,27 @@ Other programs kept the machine busy, and the same binary varied by about ±15 %
 no benchmark changed. The rename check returns early unless the block name is one of the ten that changed, the
 restoring pass skips sections whose palette has no upper door or plant half, and the Bedrock reader looks up
 legacy keys (`LegacyTerrain`, 2D biomes, legacy extra data) only for chunks old enough to have them.
+
+### Distant terrain (LOD) and its cache (2026-10-15, Machine A, `msvc-release`)
+
+| Measurement | Result |
+|---|---|
+| `BM_LodColumn` (summarize a loaded 16 × 384 × 16 column + LOD mesh at 2-block cells; 194 quads) | 48.9 µs |
+| `BM_LodMeshOnly` (the mesh alone) | 42.2 µs |
+| first version of the summary (block by block through a callback, from the top of the column) | 1.1–2.7 ms per column |
+
+The summary now walks the column's sections from the top, skips sections whose palette draws nothing, and reads
+palette ids directly; that took it from milliseconds to about 5 µs.
+
+`bridger render` of the Java world "New World" (7649 chunks) at radius 8 around the spawn, one run each:
+
+| Setting | Columns | Quads | Time (load + draw) |
+|---|---|---|---|
+| radius 8 | 197 | 1 281 312 | 1.27 s |
+| + distant terrain to 32 chunks, empty cache | 197 + 2918 distant | 1 404 912 | 1.55 s |
+| + distant terrain to 32 chunks, cache filled | 197 + 2918 distant | 1 404 912 | 1.21 s |
+| + distant terrain to 64 chunks (every chunk the world has) | 197 + 4046 distant | 1 424 753 | 1.69 s |
+
+A distant column averages 42 quads, against about 6500 for a full-detail one, so the ring adds 10 % to the quad
+count for 15 times as many columns. With the cache filled, the distant columns are not decoded at all (4.8 MB of
+cache for this world).

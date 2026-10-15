@@ -28,7 +28,7 @@ Unknown types and malformed messages are ignored on both sides.
 | `pick_client_jar`, `add_pack` | | Dialogs for the textures' client jar / a resource pack. |
 | `download_textures` | | Download the client jar from Mojang (only offered when `assets.can_download`); answered by `textures_progress`, then `textures_done` or `textures_failed`. |
 | `cancel_textures` | | Stop the download; nothing is saved. |
-| `settings` | `client_jar?`, `packs?`, `render_distance?` | Change and save settings (`%APPDATA%/Bridger/settings.json`). |
+| `settings` | `client_jar?`, `packs?`, `render_distance?`, `distant_terrain?` | Change and save settings (`%APPDATA%/Bridger/settings.json`). `distant_terrain`: simplified terrain out to this many chunks (0–96; not above `render_distance` = off). |
 
 ## App → UI
 
@@ -40,7 +40,7 @@ Unknown types and malformed messages are ignored on both sides.
 | `opened` | `doc`, `settings` | A document is open; the UI shows its file page. `doc`: `kind` (`structure`/`world`), `path`, `name`, `format`, `edition`, `size`, `blocks`, `block_entities`, `entities`, `data_version`, `chunks`, `spawn`, `seed`, `warnings`, `report`, `targets`. |
 | `preview_ready` | `missing_models` | The 3D model of the open document is built (structures mesh after `opened`; worlds are ready at once and stream on demand). |
 | `open_failed` | `message` | |
-| `stats` | `fps`, `frame_ms`, `sections`, `quads`, `gpu_mb`, `chunks_loaded?`, `chunks_total?`, `chunks_pending?` | Twice a second. `fps` counts rendered frames: an idle viewer renders none. |
+| `stats` | `fps`, `frame_ms`, `sections`, `quads`, `gpu_mb`, `chunks_loaded?`, `chunks_distant?`, `chunks_total?`, `chunks_pending?` | Twice a second. `chunks_distant`: columns shown as distant terrain. `fps` counts rendered frames: an idle viewer renders none. |
 | `fly` | `on` | Fly mode changed. |
 | `drop` | `state` (`enter`/`leave`) | Files dragged over the window (the app opens what is dropped). |
 | `output_picked` | `path` or `null` | Save dialog result. |

@@ -33,5 +33,7 @@ namespace bridger::platform {
 // The user's roaming application-data folder (%APPDATA% on Windows), where the Minecraft
 // launcher keeps ".minecraft". nullopt if the OS does not report one.
 [[nodiscard]] std::optional<std::filesystem::path> roaming_app_data_dir();
+// The user's local (not roaming) application-data folder (%LOCALAPPDATA%), for caches.
+[[nodiscard]] std::optional<std::filesystem::path> local_app_data_dir();
 
 } // namespace bridger::platform

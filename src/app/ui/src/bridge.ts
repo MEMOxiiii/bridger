@@ -57,6 +57,7 @@ export interface Settings {
   client_jar: string
   packs: string[]
   render_distance: number
+  distant_terrain: number
   recent: string[]
 }
 
@@ -67,6 +68,7 @@ export interface Stats {
   quads: number
   gpu_mb: number
   chunks_loaded?: number
+  chunks_distant?: number
   chunks_total?: number
   chunks_pending?: number
 }
@@ -142,7 +144,7 @@ export type Outgoing =
   | { type: 'download_textures' }
   | { type: 'cancel_textures' }
   | { type: 'add_pack' }
-  | { type: 'settings'; client_jar?: string; packs?: string[]; render_distance?: number }
+  | { type: 'settings'; client_jar?: string; packs?: string[]; render_distance?: number; distant_terrain?: number }
 
 interface WebView {
   postMessage(message: unknown): void

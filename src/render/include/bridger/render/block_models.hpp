@@ -52,7 +52,8 @@ struct BakedBlock {
     bool fluid_only = false;         // water/lava block itself (no model)
     std::array<bool, 6> occludes{};  // the face is fully covered by an opaque surface
     bool cull_same = false;          // faces against the same state are hidden (glass, ice)
-    u32 map_color = 0;               // average top colour (RGBA) for the 2D map
+    u32 map_color = 0;               // average top colour (RGBA), for distant terrain (LOD)
+    bool map_tinted = false;         // the top face takes `tint` (grass, leaves)
 };
 
 class BlockModels {
@@ -72,6 +73,8 @@ public:
     [[nodiscard]] const std::vector<u32>& texture_pixels() const noexcept; // texture_count * 256 RGBA
     // The layer for a texture path such as "block/stone" (loading it if needed).
     u16 texture(std::string_view name);
+    // A plain white layer: distant terrain (LOD) is coloured by its vertex colours only.
+    [[nodiscard]] u16 white_texture() const noexcept;
 
     // Diagnostics: blocks whose blockstate file or models could not be read.
     [[nodiscard]] const std::vector<std::string>& missing() const noexcept;

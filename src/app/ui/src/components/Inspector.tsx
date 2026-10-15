@@ -213,6 +213,32 @@ function ViewTab({ doc }: { doc: Doc }) {
           />
         </div>
       )}
+      {doc.kind === 'world' && settings && (
+        <div className="field">
+          <div className="field-label">
+            <span>Distant terrain</span>
+            <span className="mono muted">
+              {settings.distant_terrain > settings.render_distance ? `${settings.distant_terrain} chunks` : 'Off'}
+            </span>
+          </div>
+          <input
+            type="range"
+            className="range"
+            min={0}
+            max={96}
+            step={8}
+            value={settings.distant_terrain}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              setState({ settings: { ...settings, distant_terrain: v } })
+              send({ type: 'settings', distant_terrain: v })
+            }}
+            aria-label="Distant terrain in chunks"
+            style={{ '--fill': `${(settings.distant_terrain / 96) * 100}%` } as React.CSSProperties}
+          />
+          <p className="field-hint">Simplified land beyond the render distance. Cached, so it is instant next time.</p>
+        </div>
+      )}
       <div className="help">
         <div className="overline">Controls</div>
         <dl>

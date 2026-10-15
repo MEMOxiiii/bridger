@@ -165,3 +165,52 @@ void BM_RenderFrame(benchmark::State& state) {
 BENCHMARK(BM_RenderFrame)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 } // namespace
+
+// Distant terrain: summarize a loaded 16 x 384 x 16 column of rolling hills (no assets needed), then
+// build its LOD mesh at 2-block cells; what one distant column costs a streaming worker after loading.
+void BM_LodColumn(benchmark::State& state) {
+    render::BakedBlock stone, grass;
+    stone.layer = grass.layer = render::RenderLayer::Solid;
+    stone.map_color = 0xFF808080u;
+    grass.map_color = 0xFF7F7F7Fu;
+    grass.tint = render::Tint::Grass;
+    grass.map_tinted = true;
+    auto blocks = std::make_shared<BlockStateRegistry>();
+    const StateId sid = blocks->intern(BlockState("minecraft:stone", {})), gid = blocks->intern(BlockState("minecraft:grass_block", {}));
+    auto column = Structure::create(blocks, std::make_shared<BiomeRegistry>(), Extent{16, 384, 16}, {Edition::Java, 0}).value();
+    for (int z = 0; z < 16; ++z)
+        for (int x = 0; x < 16; ++x) {
+            const int h = 64 + static_cast<int>(6.0 * std::sin(x * 0.4) + 4.0 * std::cos(z * 0.3));
+            for (int y = -64; y <= h; ++y) column.set_block({x, y + 64, z}, y == h ? gid : sid);
+        }
+    std::vector<const render::BakedBlock*> table(blocks->size(), nullptr);
+    table[sid] = &stone;
+    table[gid] = &grass;
+    const render::ColumnSummary hills = render::summarize_column(column, table, -64);
+    usize quads = 0;
+    for (auto _ : state) {
+        const render::ColumnSummary s = render::summarize_column(column, table, -64);
+        std::map<int, render::SectionMesh> out;
+        render::mesh_lod(s, {&hills, &hills, &hills, &hills}, {0, -64, 0}, 2, 3, out);
+        quads = 0;
+        for (const auto& [y, m] : out) quads += m.solid.size() / 4;
+        benchmark::DoNotOptimize(out);
+    }
+    state.counters["quads"] = static_cast<double>(quads);
+}
+BENCHMARK(BM_LodColumn)->Unit(benchmark::kMicrosecond);
+
+void BM_LodMeshOnly(benchmark::State& state) {
+    render::ColumnSummary s;
+    for (int z = 0; z < 16; ++z)
+        for (int x = 0; x < 16; ++x) {
+            s.top[static_cast<usize>(z * 16 + x)] = static_cast<i16>(64 + static_cast<int>(6.0 * std::sin(x * 0.4) + 4.0 * std::cos(z * 0.3)));
+            s.color[static_cast<usize>(z * 16 + x)] = 0xFF30A030u;
+        }
+    for (auto _ : state) {
+        std::map<int, render::SectionMesh> out;
+        render::mesh_lod(s, {&s, &s, &s, &s}, {0, -64, 0}, 2, 3, out);
+        benchmark::DoNotOptimize(out);
+    }
+}
+BENCHMARK(BM_LodMeshOnly)->Unit(benchmark::kMicrosecond);

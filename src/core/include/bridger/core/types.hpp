@@ -53,6 +53,9 @@ struct ChunkPos {
     [[nodiscard]] constexpr u64 packed() const noexcept {
         return (static_cast<u64>(static_cast<u32>(x)) << 32) | static_cast<u64>(static_cast<u32>(z));
     }
+    [[nodiscard]] static constexpr ChunkPos unpack(u64 key) noexcept {
+        return {static_cast<i32>(static_cast<u32>(key >> 32)), static_cast<i32>(static_cast<u32>(key))};
+    }
 };
 
 // Section position (16x16x16 blocks). y is the section index, not the block y.

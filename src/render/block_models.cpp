@@ -138,6 +138,7 @@ struct BlockModels::Impl {
     std::unordered_map<std::string, std::unique_ptr<BakedBlock>> baked; // canonical state -> baked
     std::vector<std::string> missing;
     u16 missing_texture = 0;
+    u16 white_texture = 0;
 
     const json* load_json(std::unordered_map<std::string, json>& cache, const std::string& key, const std::string& path) {
         auto it = cache.find(key);
@@ -541,6 +542,7 @@ struct BlockModels::Impl {
         for (const BakedQuad& q : b->variants[0].quads)
             if (q.normal_face == 1) {
                 b->map_color = textures[q.texture].average;
+                b->map_tinted = q.tint_index >= 0;
                 break;
             }
         if (b->map_color == 0 && !b->variants[0].quads.empty()) b->map_color = textures[b->variants[0].quads[0].texture].average;
@@ -608,6 +610,10 @@ Result<BlockModels> BlockModels::create(std::shared_ptr<const AssetSource> asset
             m.impl_->texture_index["minecraft:" + std::string(fluids[i].first)] = m.impl_->add_texture(t);
         }
     }
+    Texture white;
+    white.rgba.fill(0xFFFFFFFFu);
+    white.average = 0xFFFFFFFFu;
+    m.impl_->white_texture = m.impl_->add_texture(white);
     return m;
 }
 
@@ -621,6 +627,7 @@ const BakedBlock& BlockModels::bake(const BlockState& state) {
 usize BlockModels::texture_count() const noexcept { return impl_->textures.size(); }
 const std::vector<u32>& BlockModels::texture_pixels() const noexcept { return impl_->pixels; }
 u16 BlockModels::texture(std::string_view name) { return impl_->texture(name); }
+u16 BlockModels::white_texture() const noexcept { return impl_->white_texture; }
 const std::vector<std::string>& BlockModels::missing() const noexcept { return impl_->missing; }
 
 glm::vec3 tint_color(Tint tint, u8 power) noexcept {

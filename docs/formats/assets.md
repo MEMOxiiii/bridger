@@ -79,3 +79,24 @@ phase).
 Water and lava (and waterlogged blocks) are meshed by the mesher, not from models: height from the `level`
 property (source and falling = full), top face lowered to 14/16, faces hidden against the same fluid and
 against occluding neighbours. Textures `block/water_still` and `block/lava_still` (first frame).
+
+## Distant terrain (LOD)
+
+Beyond the render distance, the viewer can show simplified terrain out to a second distance (app setting
+"Distant terrain", `bridger render --distant N`). Code: `render/mesher.cpp` (`summarize_column`, `mesh_lod`),
+`render/streaming.cpp`, `render/lod_cache.cpp`. Bridger's own design; no game format is involved.
+
+- **Summary**: per column, the top visible block of each x,z and its colour: the average of the block's up-face
+  texture (`BakedBlock::map_color`), tinted for grass, foliage and water with the same plains colours as the mesher.
+  1.5 KB per column. Full-detail columns produce their summary too, so the ring next to them needs no extra loading.
+- **Mesh**: cells of 2 × 2 blocks (4 × 4 beyond twice the render distance); each cell is a box from its highest block
+  down to the lower of its neighbours, with the game's face shading. Equal tops (same height and colour) are merged
+  greedily, which works here because LOD has no smooth lighting and no random texture rotation (see
+  `docs/performance.md`, greedy meshing experiment). Where a neighbour column is not summarized yet, sides drop
+  8 blocks as a skirt, which hides cracks. Sides are split at 16-block boundaries so each quad stays inside its
+  section's culling box. One plain white texture layer; colour comes from the vertices.
+- **Cache**: summaries are kept on disk in `%LOCALAPPDATA%/Bridger/cache/distant/<key>/r.<x>.<z>.blod` (layout in
+  `lod_cache.hpp`; FNV-1a checksum; a damaged file is ignored and rewritten). The key hashes the world path, the size
+  and time of its `level.dat` (or `.mcworld` file), the client jar and resource packs, and Bridger's version, so an
+  entry is never stale; the 8 most recently used worlds are kept. The cache is written atomically when the view
+  closes.

@@ -168,7 +168,9 @@ export function Hud() {
       <span>{stats.quads >= 1e6 ? `${(stats.quads / 1e6).toFixed(1)}M` : stats.quads >= 1e4 ? `${Math.round(stats.quads / 1000)}k` : stats.quads.toLocaleString()} quads</span>
       {stats.chunks_total !== undefined && (
         <span className={loading ? 'hud-loading' : undefined}>
-          {stats.chunks_loaded?.toLocaleString()} chunks{loading ? ' …' : ''}
+          {stats.chunks_loaded?.toLocaleString()} chunks
+          {stats.chunks_distant ? ` + ${stats.chunks_distant.toLocaleString()} far` : ''}
+          {loading ? ' …' : ''}
         </span>
       )}
     </div>

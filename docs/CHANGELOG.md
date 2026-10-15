@@ -18,6 +18,10 @@ versions follow the release plan in `docs/release.md`.
   entities (doors, tall plants, beds, flower pots, skulls, banners, note blocks) are restored. Alpha worlds get a
   message explaining how to convert them first.
 
+- Distant terrain in the 3D preview: simplified land beyond the render distance (default 32 chunks; Settings,
+  "Distant terrain"; `bridger render --distant N`), cached on disk so reopening a world shows it without decoding
+  those chunks again.
+
 ### Changed
 
 - Legacy `.schematic` files: flower pot contents, skull types and banner colours are converted now, and door

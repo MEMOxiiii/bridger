@@ -62,9 +62,11 @@ Result<std::filesystem::path> to_long_path(const std::filesystem::path& path) {
     return std::filesystem::path(LR"(\\?\)" + a);
 }
 
-std::optional<std::filesystem::path> roaming_app_data_dir() {
+namespace {
+
+std::optional<std::filesystem::path> known_folder(const KNOWNFOLDERID& id) {
     PWSTR raw = nullptr;
-    if (FAILED(::SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &raw))) {
+    if (FAILED(::SHGetKnownFolderPath(id, 0, nullptr, &raw))) {
         ::CoTaskMemFree(raw);
         return std::nullopt;
     }
@@ -72,5 +74,10 @@ std::optional<std::filesystem::path> roaming_app_data_dir() {
     ::CoTaskMemFree(raw);
     return p;
 }
+
+} // namespace
+
+std::optional<std::filesystem::path> roaming_app_data_dir() { return known_folder(FOLDERID_RoamingAppData); }
+std::optional<std::filesystem::path> local_app_data_dir() { return known_folder(FOLDERID_LocalAppData); }
 
 } // namespace bridger::platform

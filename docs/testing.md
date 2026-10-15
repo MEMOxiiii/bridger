@@ -163,6 +163,8 @@ Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3
 | 11 | Settings: rename the client jar folder → the app reports the textures missing but still converts; choose the jar → textures return. Add a resource pack → its textures show. |
 | 12 | Windows "Animation effects" off (reduced motion): no slide or float animations, everything still works. |
 | 13 | Resize, maximise and move the window between monitors with different scaling: the UI and the 3D view stay sharp and aligned. |
+| 14 | Distant terrain (Settings → View, default 32 chunks): simplified land continues past the render distance up to the fog; the HUD counts "+ N far"; moving the slider to Off removes it. Closing and reopening the same world shows the distant land at once (cache). |
+| 15 | Old worlds open and convert: a Bedrock world folder from `minecraftWorlds` (the folder itself, not a `.mcworld`), a Java world from before 1.13; the original folders are unchanged afterwards. |
 
 ### Procedure
 

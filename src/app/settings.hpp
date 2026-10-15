@@ -16,6 +16,7 @@ struct Settings {
     std::string client_jar;          // UTF-8 path; empty = the launcher's jar of the pinned version
     std::vector<std::string> packs;  // resource packs (zip or folder), lowest priority first
     int render_distance = 12;        // chunks around the camera (worlds)
+    int distant_terrain = 32;        // simplified terrain out to this many chunks; <= render_distance: off
     std::vector<std::string> recent; // most recent first
 
     static constexpr usize kMaxRecent = 6;

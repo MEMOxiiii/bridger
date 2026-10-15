@@ -73,6 +73,8 @@ int main(int argc, char** argv) {
     render_cmd->add_option("--zoom", rend.zoom, "Camera zoom (> 1 is closer)")->capture_default_str();
     render_cmd->add_flag("--map", rend.map, "Top-down map view");
     render_cmd->add_option("--radius", rend.radius, "Worlds: chunks to load around the spawn")->capture_default_str();
+    render_cmd->add_option("--distant", rend.distant, "Worlds: show distant terrain (simplified) out to this many chunks");
+    render_cmd->add_option("--lod-cache", rend.lod_cache, "Worlds: folder that caches distant terrain between runs");
     render_cmd->add_option("--slice", rend.slice, "Hide blocks at and above this y");
     render_cmd->add_option("--pack", rend.packs, "Resource pack (zip or folder); repeatable, last wins");
     render_cmd->add_option("--client-jar", rend.client_jar, "Minecraft client jar (default: from the launcher)");
