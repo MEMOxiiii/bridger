@@ -118,10 +118,12 @@ private:
 };
 
 // Rewrites a Bedrock-domain structure (pinned state indices in its block layers) for `target`: Nearest states
-// become their substitute (LossyBlock), Missing ones become `fallback` (UnmappedBlock), newer biomes the closest
-// the target has (UnmappedBiome), and block entities take the target's form (signs before 1.19.80, item names,
-// the Block tag of items). No-op for the pinned target. Returns the number of blocks changed.
+// become their substitute (LossyBlock); Missing ones (the target lacks the block) are kept as they are and written
+// with their own spelling, so the game shows its "unknown" placeholder, which keeps the block for newer versions
+// (reported as LossyBlock); newer biomes become the closest the target has (UnmappedBiome); block entities take the
+// target's form (signs before 1.19.80, item names, the Block tag of items). No-op for the pinned target. Returns the
+// number of blocks changed.
 [[nodiscard]] Result<u64> rewrite_for_bedrock_target(Structure& bedrock, const BedrockTargets& targets, const BedrockTarget& target,
-                                                    const MappingData& mapping, BedrockStateIndex fallback, ConversionReport& report);
+                                                    const MappingData& mapping, ConversionReport& report);
 
 } // namespace bridger::translate

@@ -61,10 +61,29 @@ target reproduces the pinned palette exactly (0 missing, 0 respelled).
 **Blocks.** A state is written as the target spells it (renamed blocks such as `short_grass` → `grass` before
 1.20.3, `iron_chain` → `chain` before 1.21.9; Bedrock respellings such as `red_wool` → `wool[color=red]` before
 1.19.70). Properties the target lacks are dropped and properties it has take its default; that is reported as lossy
-unless the dropped value was the default. Blocks the target does not have become the fallback block and are
-reported. On Bedrock, a missing state of a block the target has becomes the same block's closest state (e.g. fence
-connections and the stairs' corner shape, which 26.50 started saving and older versions compute; those are not
-reported).
+unless the dropped value was the default. On Bedrock, a missing state of a block the target has becomes the same
+block's closest state (e.g. fence connections and the stairs' corner shape, which 26.50 started saving and older
+versions compute; those are not reported).
+
+**Blocks newer than the target** (the maintainer's choice, 2026-10-16), always reported:
+
+- *Bedrock* keeps them: the state is written with its own name and the pinned block version, with its block entity.
+  The older game shows its "unknown" placeholder block there and keeps the saved data, so the block comes back when
+  the world is opened in a newer version (minecraft.wiki "Unknown"; ⚠ checked in game, `docs/testing.md`).
+- *Java* has no such placeholder (an unknown block is lost on load), so the block becomes the closest block the
+  target has, from a reviewed table (`substitute_once` in `translate/targets.cpp`): e.g. cherry and pale oak →
+  birch, mangrove → jungle, mud bricks → bricks, tuff bricks → stone bricks, crafter → dropper, chiseled bookshelf →
+  bookshelf, copper bulb → redstone lamp; a few with no sensible stand-in (hanging signs, petals, leaf litter, heavy
+  core) become air. Up to four steps are followed (e.g. a 26.x block → a 1.21 block → a 1.20 block). Block entities
+  follow where the stand-in has the same kind (crafter → dropper, copper chest → chest, sculk shrieker → sculk
+  sensor); others are removed with the block. Only a block with no entry becomes the fallback block.
+
+**Same edition.** A world or file can also be converted to another version of its own edition, up or down: a
+`.mcworld` (or Bedrock world folder) to a `.mcworld`, a Java world to a Java world folder, and every structure format
+to any other within an edition (`.schem` → `.schem` for 1.18.2, `.mcstructure` → `.mcstructure`, ...). The input is
+read and upgraded to the pinned version as usual, then written for the target. Whole worlds convert the Overworld
+only and do not write entities yet (both are warned about, as for cross-edition worlds). The output may never be the
+input or lie inside it (`docs/safety.md`).
 
 **Experimental blocks (Java).** Mojang's reports list blocks of experimental features in the releases where they were
 still experimental (`update_1_20` in 1.19.3 – 1.19.4, `update_1_21` in 1.20.3 – 1.20.6, `winter_drop` in 1.21.2 –
@@ -79,8 +98,7 @@ dark forest (before Java 1.21.4 / Bedrock 1.21.50).
 
 **Block entities.** Java: item stacks `{id, Count: Byte}` without components before 1.20.5, items the target lacks
 dropped (reported), text as JSON strings before 1.21.5, signs as `Text1`–`Text4`/`Color`/`GlowingText` before 1.20,
-banner patterns as `{Pattern: code, Color: dye}` before 1.20.5; block entities of blocks the target lacks are removed
-with them. Bedrock: signs with the front face at the root before 1.19.80; item ids, data values and the items' `Block`
+banner patterns as `{Pattern: code, Color: dye}` before 1.20.5; block entities of substituted blocks as above. Bedrock: signs with the front face at the root before 1.19.80; item ids, data values and the items' `Block`
 tag in the target's spelling.
 
 **World files.** Java: before 26.1 the Overworld is in `region/` and the generation settings (`WorldGenSettings`

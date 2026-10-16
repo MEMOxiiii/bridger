@@ -72,9 +72,9 @@ json targets_for(FormatId input) {
     if (is_structure_format(input))
         ids = {FormatId::McWorld, FormatId::McStructure, FormatId::SpongeSchem, FormatId::Litematic, FormatId::StructureNbt};
     else if (input == FormatId::JavaWorld)
-        ids = {FormatId::McWorld};
+        ids = {FormatId::McWorld, FormatId::JavaWorld}; // the same edition for another game version
     else if (input == FormatId::McWorld)
-        ids = {FormatId::JavaWorld};
+        ids = {FormatId::JavaWorld, FormatId::McWorld};
     json out = json::array();
     for (const FormatId id : ids) {
         const auto& f = formats::info(id);
@@ -746,8 +746,12 @@ struct App::Impl {
             return;
         }
         const auto& f = formats::info(*id);
+        const fs::path ext = platform::path_from_utf8(f.extension).value_or(fs::path());
         fs::path suggested = input->parent_path() / input->stem();
-        suggested += platform::path_from_utf8(f.extension).value_or(fs::path());
+        // The same format (another game version): never suggest the input itself.
+        for (int i = 2; fs::exists(fs::path(suggested).concat(ext.native())) && i < 100; ++i)
+            suggested = input->parent_path() / (input->stem().wstring() + L" (" + std::to_wstring(i) + L")");
+        suggested += ext;
         const std::string def = utf8(suggested);
         const SDL_DialogFileFilter* filter = &kSaveFilters[0];
         for (const auto& sf : kSaveFilters)

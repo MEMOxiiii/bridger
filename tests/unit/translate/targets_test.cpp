@@ -5,6 +5,8 @@
 
 #include <bridger/convert/pipeline.hpp>
 #include <bridger/core/game_versions.hpp>
+#include <bridger/formats/bedrock/mcworld/bedrock_world_reader.hpp>
+#include <bridger/formats/java/anvil/java_world.hpp>
 #include <bridger/formats/structure_file.hpp>
 #include <bridger/io/nbt/nbt_view.hpp>
 #include <bridger/io/nbt/nbt_writer.hpp>
@@ -70,7 +72,8 @@ TEST_CASE("Java states are respelled or reported for older releases", "[translat
     CHECK(fit == JavaTargets::Fit::Exact);
     CHECK(down("minecraft:short_grass", "1.20.3") == "minecraft:short_grass");
     CHECK(down("minecraft:iron_chain[axis=y,waterlogged=false]", "1.21.8") == "minecraft:chain[axis=y,waterlogged=false]");
-    CHECK(down("minecraft:cherry_planks", "1.19.3") == "<missing>");
+    CHECK(down("minecraft:cherry_planks", "1.19.3", &fit) == "minecraft:birch_planks"); // the closest older wood
+    CHECK(fit == JavaTargets::Fit::Approximate);
     CHECK(down("minecraft:cherry_planks", "1.20") == "minecraft:cherry_planks");
     // 1.19.4 has cherry wood only behind the update_1_20 experiment (Mojang's reports list it anyway).
     CHECK(down("minecraft:cherry_planks", "1.19.4") == "minecraft:cherry_planks");
@@ -145,10 +148,12 @@ TEST_CASE("Java block entities take the target's format", "[translate][targets]"
     const auto layer = banner->root().entries().find("Patterns").items().at(0).entries();
     CHECK(layer.find("Pattern").as_string() == "bo");
     CHECK(layer.find("Color").as_int() == 15);
-    // The crafter (1.21) does not exist in 1.19.4: block and block entity are gone, and reported.
-    CHECK(s.block_registry().get(s.block({3, 0, 0})).id() == "minecraft:air");
-    CHECK_FALSE(doc_at({3, 0, 0}));
-    CHECK(report.issues(IssueKind::UnmappedBlock) != nullptr);
+    // The crafter (1.21) does not exist in 1.19.4: it becomes a dropper, with a dropper block entity, reported.
+    CHECK(s.block_registry().get(s.block({3, 0, 0})).id() == "minecraft:dropper");
+    REQUIRE(doc_at({3, 0, 0}));
+    for (const BlockEntity& be : s.block_entities)
+        if (be.pos == BlockPos{3, 0, 0}) CHECK(be.id == "minecraft:dropper");
+    CHECK(report.issues(IssueKind::LossyBlock) != nullptr);
 }
 
 TEST_CASE("Bedrock states and items are written as older versions spell them", "[translate][targets]") {
@@ -172,6 +177,16 @@ TEST_CASE("Bedrock states and items are written as older versions spell them", "
     CHECK(doc->root().entries().find("name").as_string() == "minecraft:wool");
     CHECK(doc->root().entries().find("states").entries().find("color").as_string() == "red");
     CHECK(doc->root().entries().find("version").as_int() == t.block_version);
+
+    // cherry_planks (1.20) is kept with its own name and the pinned block version: 1.19.60 shows an unknown block that
+    // turns back into cherry planks in a newer version.
+    const auto cherry = mapping().find_bedrock("minecraft:cherry_planks", {});
+    REQUIRE(cherry);
+    CHECK(bedrock().resolve(t, *cherry).kind == BedrockTargets::Written::Kind::Missing);
+    const auto kept = io::nbt::NbtDocument::parse(bedrock().state_nbt(t, *cherry, mapping()), Endian::Little);
+    REQUIRE(kept);
+    CHECK(kept->root().entries().find("name").as_string() == "minecraft:cherry_planks");
+    CHECK(kept->root().entries().find("version").as_int() == static_cast<i32>(mapping().bedrock_block_version()));
 }
 
 TEST_CASE("Conversions written for older versions read back as intended", "[translate][targets][convert]") {
@@ -206,7 +221,67 @@ TEST_CASE("Conversions written for older versions read back as intended", "[tran
     CHECK(back->data_version == 2975);
 }
 
-TEST_CASE("Every Bedrock state written for an older version reads back as itself", "[translate][targets][roundtrip]") {
+TEST_CASE("Worlds convert to another version of the same edition, down and back up", "[translate][targets][convert]") {
+    test::TempDir dir;
+    const auto run = [](const std::filesystem::path& in, const std::filesystem::path& out, const char* version) {
+        convert::ConvertOptions o;
+        o.input = in;
+        o.output = out;
+        o.target_version = version;
+        return convert::convert(o);
+    };
+
+    // Java world -> Java 1.18.2 (the old level.dat era) -> Java 26.3 (the dimensions/ layout).
+    const auto down = run(test::data_path("javaworld/basic"), dir.path / "java_1_18_2", "1.18.2");
+    REQUIRE(down);
+    CHECK(down->target_version == "Java 1.18.2");
+    const auto old_world = formats::java::open_java_world(dir.path / "java_1_18_2");
+    REQUIRE(old_world);
+    CHECK(old_world->level.data_version == 2975);
+    const auto up = run(dir.path / "java_1_18_2", dir.path / "java_26_3", "26.3");
+    REQUIRE(up);
+    CHECK(up->blocks == down->blocks);
+    CHECK(up->chunks == down->chunks);
+    const auto new_world = formats::java::open_java_world(dir.path / "java_26_3");
+    REQUIRE(new_world);
+    CHECK(new_world->level.data_version == 5023);
+
+    // Bedrock world -> Bedrock 1.19.80 -> Bedrock 26.50.
+    REQUIRE(run(test::data_path("javaworld/basic"), dir.path / "pinned.mcworld", ""));
+    const auto bdown = run(dir.path / "pinned.mcworld", dir.path / "b_1_19_80.mcworld", "1.19.80");
+    REQUIRE(bdown);
+    {
+        test::TempDir work;
+        const auto r = formats::bedrock::BedrockWorldReader::open_path(dir.path / "b_1_19_80.mcworld", work.path);
+        REQUIRE(r);
+        CHECK(r->level().last_opened_version == std::vector<i32>{1, 19, 80, 0, 0});
+    }
+    const auto bup = run(dir.path / "b_1_19_80.mcworld", dir.path / "b_26_50.mcworld", "26.50");
+    REQUIRE(bup);
+    CHECK(bup->blocks == bdown->blocks);
+    CHECK(bup->chunks == bdown->chunks);
+}
+
+TEST_CASE("A conversion never writes over or into its input", "[convert][safety]") {
+    test::TempDir dir;
+    convert::ConvertOptions o;
+    o.input = test::data_path("javaworld/basic");
+    o.output = test::data_path("javaworld/basic");
+    o.overwrite = true;
+    for (const auto& out : {o.input, o.input / "copy", o.input.parent_path()}) {
+        o.output = out;
+        const auto r = convert::convert(o);
+        REQUIRE_FALSE(r);
+        CHECK(r.error().code() == ErrorCode::InvalidArgument);
+    }
+    o.input = test::data_path("schem/v3_basic.schem");
+    o.output = o.input;
+    const auto r = convert::convert(o);
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code() == ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("Every Bedrock state written for an older version reads back as itself, kept ones too", "[translate][targets][roundtrip]") {
     const auto lookup = convert::bedrock_state_lookup(mapping());
     for (const char* name : {"1.18.30", "1.19.60", "1.20.80", "1.21.50", "26.40"}) {
         INFO(name);
@@ -215,7 +290,8 @@ TEST_CASE("Every Bedrock state written for an older version reads back as itself
         std::string example;
         for (BedrockStateIndex i = 0; i < mapping().bedrock_state_count(); ++i) {
             const auto how = bedrock().resolve(t, i);
-            if (how.kind == BedrockTargets::Written::Kind::Missing || how.kind == BedrockTargets::Written::Kind::Nearest) continue;
+            // Nearest states are rewritten before writing; missing ones keep their own spelling and read back as themselves.
+            if (how.kind == BedrockTargets::Written::Kind::Nearest) continue;
             const auto doc = io::nbt::NbtDocument::parse(bedrock().state_nbt(t, i, mapping()), Endian::Little);
             REQUIRE(doc);
             const auto back = lookup(doc->root().entries());
@@ -229,4 +305,32 @@ TEST_CASE("Every Bedrock state written for an older version reads back as itself
         CHECK(checked > 5000); // 1.18.30 has about 8000 of the pinned states
         CHECK(differ == 0);
     }
+}
+
+TEST_CASE("Every pinned Java block has a substitute in every target", "[translate][targets]") {
+    for (const JavaTarget& t : java().targets()) {
+        INFO(t.name);
+        usize missing = 0;
+        std::string examples;
+        std::string last;
+        for (JavaStateId i = 0; i < mapping().java_state_count(); ++i) {
+            const std::string name(mapping().java_block_name(i));
+            if (name == last) continue; // one state per block is enough here
+            last = name;
+            BlockState out;
+            if (java().downgrade(*BlockState::parse(mapping().java_state_string(i)), t, out) == JavaTargets::Fit::Missing) {
+                ++missing;
+                if (missing <= 8) examples += " " + name;
+            }
+        }
+        INFO("without a substitute:" << examples);
+        CHECK(missing == 0);
+    }
+    // A few of the reviewed choices.
+    CHECK(down("minecraft:cherry_planks", "1.18") == "minecraft:birch_planks");
+    CHECK(down("minecraft:tuff_bricks", "1.20.2") == "minecraft:stone_bricks");
+    CHECK(down("minecraft:waxed_weathered_copper_grate", "1.20.2") == "minecraft:waxed_weathered_cut_copper");
+    CHECK(down("minecraft:red_wool_slab[type=bottom,waterlogged=false]", "26.1") == "minecraft:red_wool");
+    CHECK(down("minecraft:mangrove_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]", "1.18.2") ==
+          "minecraft:jungle_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]");
 }

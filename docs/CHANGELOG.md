@@ -28,8 +28,15 @@ versions follow the release plan in `docs/release.md`.
   1.18.30 to 26.50 ("Game version" list on the convert page, `bridger convert --target-version`, `bridger versions`).
   Blocks, biomes, block entities, item names and the world files follow the target; whatever the target cannot hold is
   reported. Block data from Mojang's data generator (Java) and BedrockBlockPaletteArchive (Bedrock, CC0).
+- Same-edition conversion: a `.mcworld` or Bedrock world folder to a `.mcworld`, a Java world to a Java world folder,
+  and any structure format to another of its edition, for any target version, up or down.
+- Blocks newer than the target: Bedrock keeps them (the older game shows its "unknown" block and the block returns in
+  a newer version); Java gets the closest block it has (cherry → birch, crafter → dropper, ...). Both are reported.
 
 ### Changed
+
+- A conversion is refused when its output is the input, lies inside an input world folder or is a folder containing
+  the input (also with `--overwrite`).
 
 - Legacy `.schematic` files: flower pot contents, skull types and banner colours are converted now, and door
   halves are combined.

@@ -208,10 +208,6 @@ void apply_target_level(const OutputTarget& t, formats::bedrock::LevelDatOptions
     level.version = t.bedrock->version;
 }
 
-translate::BedrockStateIndex bedrock_fallback(const translate::MappingData& m, translate::Fallback f) {
-    return f == translate::Fallback::Air ? m.find_bedrock("minecraft:air", {}).value_or(0) : m.find_bedrock("minecraft:info_update", {}).value_or(0);
-}
-
 BlockState java_fallback(translate::Fallback f) {
     return BlockState(f == translate::Fallback::Air ? "minecraft:air" : "minecraft:sponge", {});
 }
@@ -228,12 +224,148 @@ bool is_java_world_input(const fs::path& p) {
     return fs::is_directory(p, ec) || p.filename() == "level.dat";
 }
 
+// The input is never modified (docs/safety.md): the output may not be the input, lie inside an input world folder,
+// or be a folder that contains the input (a world written there would replace it). weakly_canonical gives the real
+// casing of the existing part of a path, which is the only part that can overlap with the (existing) input.
+Status check_output_is_not_input(const ConvertOptions& o) {
+    std::error_code ec;
+    fs::path in = o.input.filename() == "level.dat" ? o.input.parent_path() : o.input;
+    in = fs::weakly_canonical(in, ec);
+    if (ec) return {};
+    const fs::path out = fs::weakly_canonical(o.output, ec);
+    if (ec) return {};
+    const auto within = [](const fs::path& inner, const fs::path& outer) {
+        auto i = inner.begin();
+        for (auto p = outer.begin(); p != outer.end(); ++p, ++i)
+            if (i == inner.end() || *i != *p) return false;
+        return true;
+    };
+    if (within(out, in) || within(in, out))
+        return make_error(ErrorCode::InvalidArgument, "the output would replace or sit inside the input; choose another name: " +
+                                                          platform::path_to_utf8(o.output).value_or("?"));
+    return {};
+}
+
 // Java world -> new .mcworld, one chunk column at a time (docs/formats/anvil.md). Memory
 // stays bounded by one region file mapping plus one column; the world is built in a
 // scratch directory, validated there, zipped next to the output and moved atomically.
+// Compacts, validates and zips a world built by WorldBuilder in `dir`, then moves it to o.output atomically.
+template <class Phase>
+Result<ConvertSummary> finish_mcworld(const ConvertOptions& o, ConvertSummary summary, formats::bedrock::WorldBuilder& builder,
+                                      const fs::path& dir, const formats::bedrock::LevelDatOptions& level, const Phase& phase) {
+    BRIDGER_TRY_STATUS(step(o, 0.86f, "Compacting the world database"));
+    BRIDGER_TRY_STATUS(builder.finish(level));
+    phase("database compacted");
+    const formats::bedrock::WorldWriteStats written = builder.stats();
+    summary.chunks = written.chunks;
+    summary.subchunks = written.subchunks;
+    summary.block_entities = written.block_entities;
+
+    // Validate the database before zipping, then the zip itself before the move.
+    formats::bedrock::WorldWriteStats reread;
+    BRIDGER_TRY_STATUS(step(o, 0.9f, "Validating"));
+    BRIDGER_TRY_STATUS(formats::bedrock::validate_world_directory(dir, &reread));
+    if (reread.subchunks != written.subchunks || reread.block_entities != written.block_entities ||
+        reread.chunks != written.chunks)
+        return make_error(ErrorCode::ValidationFailed, "re-read world differs from what was written");
+    phase("world validated");
+    BRIDGER_TRY(const fs::path temp, platform::AtomicFileWriter::temp_path_for(o.output));
+    BRIDGER_TRY_STATUS(step(o, 0.94f, "Packing the .mcworld"));
+    platform::AtomicFileWriter writer = platform::AtomicFileWriter::adopt(temp, o.output);
+    BRIDGER_TRY_STATUS(io::write_zip_file_from_directory(dir, temp));
+    phase("zipped");
+    usize expected_entries = 0;
+    for (const auto& e : fs::recursive_directory_iterator(dir))
+        if (e.is_regular_file()) ++expected_entries;
+    auto validate = [&](const fs::path& zip) -> Status {
+        BRIDGER_TRY(const std::vector<io::ZipListing> listing, io::list_zip_file(zip));
+        const bool has_level = std::any_of(listing.begin(), listing.end(), [](const io::ZipListing& l) { return l.name == "level.dat"; });
+        if (listing.size() != expected_entries || !has_level)
+            return make_error(ErrorCode::ValidationFailed, "the zipped world does not list every world file");
+        return {};
+    };
+    BRIDGER_TRY_STATUS(writer.commit(validate, cancel_gate(o)));
+    phase("moved into place");
+    return summary;
+}
+
+struct JavaWorldInfo {
+    std::string level_name;
+    BlockPos spawn{0, 64, 0};
+    std::optional<i64> seed;
+};
+
+// Writes level.dat (and, from 26.1, world_gen_settings.dat) into the Java world built in `temp` for `target`, checks
+// that every chunk re-reads, and renames the folder to o.output. `keep` is set once the folder must not be removed.
+Result<ConvertSummary> finish_java_world(const ConvertOptions& o, ConvertSummary summary, const fs::path& temp, bool& keep,
+                                         const OutputTarget& target, const JavaWorldInfo& info, usize chunks, usize block_entities,
+                                         const std::vector<std::string>& experiments) {
+    const bool modern_layout = target.java->data_version >= formats::java::kJava26_1;
+    formats::java::JavaLevelOptions level;
+    level.level_name = info.level_name;
+    level.spawn = info.spawn;
+    level.seed = info.seed;
+    level.data_version = target.java->data_version;
+    level.version_name = target.java->name;
+    level.experiments = experiments;
+    for (const std::string& e : experiments)
+        summary.warnings.push_back(std::format("the world uses blocks of the experimental feature {} of Java {}; it is switched on in "
+                                               "the world (the game marks it as experimental)", e, target.java->name));
+    level.last_played_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    BRIDGER_TRY(const std::vector<u8> level_dat, formats::java::encode_java_level_dat(level));
+    {
+        std::ofstream f(temp / "level.dat", std::ios::binary);
+        f.write(reinterpret_cast<const char*>(level_dat.data()), static_cast<std::streamsize>(level_dat.size()));
+        if (!f) return make_error(ErrorCode::IoError, "cannot write level.dat");
+    }
+    if (modern_layout) { // 26.1+: the seed is in data/minecraft/world_gen_settings.dat (before: in level.dat)
+        BRIDGER_TRY(const std::vector<u8> wgs, formats::java::encode_world_gen_settings(info.seed.value_or(0), level.data_version));
+        std::ofstream g(temp / "data" / "minecraft" / "world_gen_settings.dat", std::ios::binary);
+        g.write(reinterpret_cast<const char*>(wgs.data()), static_cast<std::streamsize>(wgs.size()));
+        if (!g) return make_error(ErrorCode::IoError, "cannot write world_gen_settings.dat");
+    }
+
+    // Validate: the folder opens as a Java world and every chunk decodes.
+    {
+        BRIDGER_TRY(const formats::java::JavaWorld back, formats::java::open_java_world(temp));
+        usize reread = 0;
+        for (const fs::path& rp : back.overworld_regions) {
+            BRIDGER_TRY(const formats::java::RegionFile rf, formats::java::RegionFile::open(rp));
+            for (u32 lz = 0; lz < 32; ++lz)
+                for (u32 lx = 0; lx < 32; ++lx) {
+                    if (!rf.has_chunk(lx, lz)) continue;
+                    BRIDGER_TRY(const std::optional<std::vector<u8>> raw, rf.read_chunk(lx, lz));
+                    if (!raw) return make_error(ErrorCode::ValidationFailed, "a written chunk is missing");
+                    auto blocks = std::make_shared<BlockStateRegistry>();
+                    BRIDGER_TRY(const formats::java::JavaChunk jc, formats::java::decode_chunk(*raw, blocks, std::make_shared<BiomeRegistry>()));
+                    if (!jc.full) return make_error(ErrorCode::ValidationFailed, "a written chunk is not marked full");
+                    ++reread;
+                }
+        }
+        if (reread != chunks)
+            return make_error(ErrorCode::ValidationFailed, std::format("re-read {} chunks, expected {}", reread, chunks));
+    }
+    // Last cancellation point, then the move into place: a rename of the folder (never replaces
+    // anything; checked again by the OS). A cancelled build is removed with its temp folder.
+    BRIDGER_TRY_STATUS(cancel_point(o));
+    if (auto moved = platform::os_file_ops().move_new(temp, o.output); !moved) {
+        keep = true;
+        return make_error(ErrorCode::IoError, "the converted world is complete at " + platform::path_to_utf8(temp).value_or("?") +
+                                                  " but could not be renamed to the destination: " + moved.error().describe());
+    }
+    keep = true; // it is the destination now
+    summary.chunks = chunks;
+    summary.block_entities = block_entities;
+    return summary;
+}
+
+Result<ConvertSummary> convert_java_world_to_java(const ConvertOptions& o, ConvertSummary summary);
+
 Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummary summary) {
+    if (summary.output_format == FormatId::JavaWorld) return convert_java_world_to_java(o, std::move(summary));
     if (summary.output_format != FormatId::McWorld)
-        return make_error(ErrorCode::NotImplemented, "a Java world can only be converted to a .mcworld so far");
+        return make_error(ErrorCode::NotImplemented, "a Java world converts to a .mcworld or to a Java world folder");
     if (o.into_world) return make_error(ErrorCode::InvalidArgument, "--into-world is not available for whole worlds");
     BRIDGER_TRY_STATUS(check_output(o));
     BRIDGER_TRY(const formats::java::JavaWorld world, formats::java::open_java_world(o.input));
@@ -274,7 +406,6 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     if (!target.bedrock->pinned) // encode every target spelling up front too (the cache then only reads)
         for (u32 s = 0; s < mapping->bedrock_state_count(); ++s) (void)target.bedrock_targets->state_nbt(*target.bedrock, s, *mapping);
     const auto state_fn = target_state_nbt(target, *mapping, state_nbt.fn());
-    const translate::BedrockStateIndex fallback_state = bedrock_fallback(*mapping, o.fallback);
     translate::TranslateOptions topt;
     topt.fallback = o.fallback;
     usize skipped_partial = 0, clipped = 0;
@@ -330,8 +461,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
                 r.report.set_origin({chunk->pos.x * 16, chunk->min_y, chunk->pos.z * 16});
                 auto bedrock = translate::translate_to_bedrock(chunk->column, *mapping, topt, r.report);
                 if (!bedrock) return fail(std::move(bedrock).error());
-                if (auto rw = translate::rewrite_for_bedrock_target(*bedrock, *target.bedrock_targets, *target.bedrock, *mapping,
-                                                                    fallback_state, r.report);
+                if (auto rw = translate::rewrite_for_bedrock_target(*bedrock, *target.bedrock_targets, *target.bedrock, *mapping, r.report);
                     !rw)
                     return fail(std::move(rw).error());
                 auto encoded = formats::bedrock::WorldBuilder::encode_column(chunk->pos, chunk->min_y, *bedrock, *air,
@@ -387,40 +517,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     apply_target_level(target, level);
     phase("chunks converted");
-    BRIDGER_TRY_STATUS(step(o, 0.86f, "Compacting the world database"));
-    BRIDGER_TRY_STATUS(builder.finish(level));
-    phase("database compacted");
-    const formats::bedrock::WorldWriteStats written = builder.stats();
-    summary.chunks = written.chunks;
-    summary.subchunks = written.subchunks;
-    summary.block_entities = written.block_entities;
-
-    // Validate the database before zipping, then the zip itself before the move.
-    formats::bedrock::WorldWriteStats reread;
-    BRIDGER_TRY_STATUS(step(o, 0.9f, "Validating"));
-    BRIDGER_TRY_STATUS(formats::bedrock::validate_world_directory(dir, &reread));
-    if (reread.subchunks != written.subchunks || reread.block_entities != written.block_entities ||
-        reread.chunks != written.chunks)
-        return make_error(ErrorCode::ValidationFailed, "re-read world differs from what was written");
-    phase("world validated");
-    BRIDGER_TRY(const fs::path temp, platform::AtomicFileWriter::temp_path_for(o.output));
-    BRIDGER_TRY_STATUS(step(o, 0.94f, "Packing the .mcworld"));
-    platform::AtomicFileWriter writer = platform::AtomicFileWriter::adopt(temp, o.output);
-    BRIDGER_TRY_STATUS(io::write_zip_file_from_directory(dir, temp));
-    phase("zipped");
-    usize expected_entries = 0;
-    for (const auto& e : fs::recursive_directory_iterator(dir))
-        if (e.is_regular_file()) ++expected_entries;
-    auto validate = [&](const fs::path& zip) -> Status {
-        BRIDGER_TRY(const std::vector<io::ZipListing> listing, io::list_zip_file(zip));
-        const bool has_level = std::any_of(listing.begin(), listing.end(), [](const io::ZipListing& l) { return l.name == "level.dat"; });
-        if (listing.size() != expected_entries || !has_level)
-            return make_error(ErrorCode::ValidationFailed, "the zipped world does not list every world file");
-        return {};
-    };
-    BRIDGER_TRY_STATUS(writer.commit(validate, cancel_gate(o)));
-    phase("moved into place");
-    return summary;
+    return finish_mcworld(o, std::move(summary), builder, dir, level, phase);
 }
 
 
@@ -609,6 +706,247 @@ Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSumm
 // one region; this thread adds them to the region in slot order, so the output does not
 // depend on the thread count. The world is built in a temp folder next to the destination,
 // validated (every chunk re-read) and renamed into place.
+// Bedrock world -> Bedrock world for another game version (docs/versions.md, "Target versions"): every column is
+// read (older versions upgraded on the way), rewritten for the target and written into a new world.
+Result<ConvertSummary> convert_bedrock_world_to_bedrock(const ConvertOptions& o, ConvertSummary summary, const translate::MappingData& m,
+                                                        u32 air) {
+    if (o.into_world) return make_error(ErrorCode::InvalidArgument, "--into-world is not available for whole worlds");
+    BRIDGER_TRY_STATUS(check_output(o));
+    BRIDGER_TRY(const ScratchDir unpacked, ScratchDir::create("bedrockworld"));
+    BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(o.input, unpacked.path()));
+    if (reader.overworld_chunks().empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld chunks");
+    summary.source_version = bedrock_world_version_info(reader.level().last_opened_version);
+    if (reader.has_other_dimensions())
+        summary.warnings.push_back("the Nether and the End were not converted: only the Overworld is supported");
+    if (reader.entity_count() > 0)
+        summary.warnings.push_back(std::format("{} entities were not converted: entities are not written yet", reader.entity_count()));
+    BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::McWorld, summary));
+
+    BRIDGER_TRY(const ScratchDir build, ScratchDir::create("bedrockout"));
+    const fs::path dir = build.path() / "world";
+    BRIDGER_TRY(formats::bedrock::WorldBuilder builder, formats::bedrock::WorldBuilder::create(dir));
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto phase = [&t0](std::string_view what) {
+        const auto now = std::chrono::steady_clock::now();
+        log::debug("{}: {} ms", what, std::chrono::duration_cast<std::chrono::milliseconds>(now - t0).count());
+    };
+    BedrockStateNbt state_nbt(m);
+    state_nbt.prepare_all();
+    if (!target.bedrock->pinned)
+        for (u32 st = 0; st < m.bedrock_state_count(); ++st) (void)target.bedrock_targets->state_nbt(*target.bedrock, st, m);
+    const auto state_fn = target_state_nbt(target, m, state_nbt.fn());
+    const auto lookup = bedrock_lookup(m);
+
+    struct ColumnResult {
+        std::optional<Error> error;
+        formats::bedrock::EncodedColumn encoded;
+        translate::ConversionReport report;
+        std::vector<std::string> warnings;
+        std::map<std::string, u64> unknown;
+        u64 blocks = 0;
+        bool done = false;
+    };
+    const std::vector<ChunkPos>& all = reader.overworld_chunks();
+    constexpr usize kBatch = 128;
+    std::vector<ColumnResult> results(kBatch);
+    std::map<std::string, usize> failures;
+    std::string first_failure;
+    for (usize start = 0; start < all.size(); start += kBatch) {
+        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(start) / static_cast<float>(all.size()), "Converting chunks"));
+        const usize count = std::min(kBatch, all.size() - start);
+        parallel_for(count, o.threads, [&](usize i) {
+            ColumnResult& r = results[i];
+            r = ColumnResult{};
+            const ChunkPos c = all[start + i];
+            auto col = reader.read_column(c, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), m.bedrock_block_version(),
+                                          lookup, air, translate::kDefaultBedrockBiome);
+            if (!col) {
+                r.error = std::move(col).error();
+                return;
+            }
+            r.unknown = std::move(col->unknown_blocks);
+            r.warnings = std::move(col->warnings);
+            r.blocks = count_non_air(col->column, air);
+            r.report.set_origin({c.x * 16, col->min_y, c.z * 16});
+            if (auto rw = translate::rewrite_for_bedrock_target(col->column, *target.bedrock_targets, *target.bedrock, m, r.report); !rw) {
+                r.error = std::move(rw).error();
+                return;
+            }
+            auto encoded = formats::bedrock::WorldBuilder::encode_column(c, col->min_y, col->column, air, translate::kDefaultBedrockBiome,
+                                                                         state_fn, static_cast<u8>(target.bedrock->chunk_version));
+            if (!encoded) {
+                r.error = std::move(encoded).error();
+                return;
+            }
+            r.encoded = std::move(*encoded);
+            r.done = true;
+        });
+        for (usize i = 0; i < count; ++i) {
+            ColumnResult& r = results[i];
+            if (r.error) {
+                if (first_failure.empty()) first_failure = std::format("chunk {},{}: {}", all[start + i].x, all[start + i].z, r.error->describe());
+                ++failures[std::string(to_string(r.error->code()))];
+            } else if (r.done) {
+                summary.report.merge(r.report);
+                summary.warnings.insert(summary.warnings.end(), r.warnings.begin(), r.warnings.end());
+                for (const auto& [name, n] : r.unknown)
+                    summary.report.add(translate::IssueKind::UnmappedBlock, name + " (unknown Bedrock block)",
+                                       {all[start + i].x * 16, 0, all[start + i].z * 16}, n);
+                summary.blocks += r.blocks;
+                BRIDGER_TRY_STATUS(builder.put(r.encoded));
+            }
+            r = ColumnResult{};
+        }
+    }
+    for (const auto& [reason, n] : failures) summary.warnings.push_back(std::format("{} chunks could not be converted ({})", n, reason));
+    if (!first_failure.empty()) summary.warnings.push_back("first failed chunk: " + first_failure);
+    if (builder.stats().chunks == 0) return make_error(ErrorCode::Malformed, "no chunk of the world could be converted");
+
+    formats::bedrock::LevelDatOptions level;
+    level.level_name = !o.level_name.empty() ? o.level_name
+                       : !reader.level().level_name.empty() ? reader.level().level_name
+                                                             : platform::path_to_utf8(o.output.stem()).value_or("Bridger World");
+    level.spawn = reader.level().spawn;
+    level.random_seed = reader.level().seed;
+    level.generator = reader.level().generator;
+    level.flat_world_layers = formats::bedrock::default_flat_world_layers();
+    level.last_played =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    apply_target_level(target, level);
+    phase("chunks converted");
+    return finish_mcworld(o, std::move(summary), builder, dir, level, phase);
+}
+
+// Java world -> Java world for another game version: every chunk is read (older layouts and names upgraded on the
+// way), rewritten for the target and written into a new world folder.
+Result<ConvertSummary> convert_java_world_to_java(const ConvertOptions& o, ConvertSummary summary) {
+    if (o.into_world) return make_error(ErrorCode::InvalidArgument, "--into-world is not available for whole worlds");
+    BRIDGER_TRY_STATUS(check_output_directory(o));
+    BRIDGER_TRY(const formats::java::JavaWorld world, formats::java::open_java_world(o.input));
+    BRIDGER_TRY(const translate::MappingData* mapping, translate::MappingData::embedded());
+    summary.source_data_version = world.level.data_version;
+    summary.source_version = java_version_info(FormatId::JavaWorld, world.level.data_version, world.level.version_name, world.level.storage_format);
+    if (world.has_nether) summary.warnings.push_back("the Nether was not converted: only the Overworld is supported");
+    if (world.has_end) summary.warnings.push_back("the End was not converted: only the Overworld is supported");
+    if (world.has_entity_regions) summary.warnings.push_back("entities (entities/*.mca) were not converted: entities are not written yet");
+    if (world.overworld_regions.empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld region files");
+    BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::JavaWorld, summary));
+
+    BRIDGER_TRY(const fs::path temp, platform::AtomicFileWriter::temp_path_for(o.output));
+    struct TempTree {
+        fs::path path;
+        bool keep = false;
+        ~TempTree() {
+            std::error_code ec;
+            if (!keep) fs::remove_all(path, ec);
+        }
+    } tree{temp};
+    const bool modern_layout = target.java->data_version >= formats::java::kJava26_1;
+    const fs::path region_dir = modern_layout ? temp / "dimensions" / "minecraft" / "overworld" / "region" : temp / "region";
+    fs::create_directories(region_dir);
+    if (modern_layout) fs::create_directories(temp / "data" / "minecraft");
+    const formats::java::LegacyTables legacy = legacy_tables(*mapping);
+    const BlockState fallback_state = java_fallback(o.fallback);
+
+    struct ChunkResult {
+        enum class Kind : u8 { Empty, Failed, Partial, Done } kind = Kind::Empty;
+        std::optional<Error> error;
+        std::vector<u8> nbt;
+        translate::ConversionReport report;
+        std::vector<std::string> warnings;
+        std::vector<std::string> features;
+        u64 blocks = 0;
+        usize block_entities = 0;
+    };
+    constexpr usize kBatch = 128;
+    std::vector<ChunkResult> results(kBatch);
+    usize chunks = 0, block_entities = 0, skipped_partial = 0, regions_done = 0;
+    std::vector<std::string> experiments;
+    std::map<std::string, usize> failures;
+    std::string first_failure;
+    for (const fs::path& region_path : world.overworld_regions) {
+        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(regions_done++) / static_cast<float>(world.overworld_regions.size()),
+                                "Converting chunks"));
+        auto region = formats::java::RegionFile::open(region_path);
+        if (!region) {
+            ++failures[region.error().describe()];
+            if (first_failure.empty()) first_failure = region.error().describe();
+            continue;
+        }
+        formats::java::RegionWriter out(region->region_x(), region->region_z());
+        for (usize batch = 0; batch < 1024; batch += kBatch) {
+            parallel_for(kBatch, o.threads, [&](usize i) {
+                ChunkResult& r = results[i];
+                r = ChunkResult{};
+                const u32 slot = static_cast<u32>(batch + i), lx = slot % 32, lz = slot / 32;
+                if (!region->has_chunk(lx, lz)) return;
+                auto fail = [&](Error e) {
+                    r.kind = ChunkResult::Kind::Failed;
+                    r.error = std::move(e);
+                };
+                auto raw = region->read_chunk(lx, lz);
+                if (!raw) return fail(std::move(raw).error());
+                auto chunk = formats::java::decode_chunk(**raw, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), {},
+                                                         &legacy);
+                if (!chunk) return fail(std::move(chunk).error());
+                if (!chunk->full) {
+                    r.kind = ChunkResult::Kind::Partial;
+                    return;
+                }
+                r.warnings = std::move(chunk->warnings);
+                r.blocks = count_non_air(chunk->column, kAirStateId);
+                r.report.set_origin({chunk->pos.x * 16, chunk->min_y, chunk->pos.z * 16});
+                auto rw = translate::rewrite_for_java_target(chunk->column, *target.java_targets, *target.java, fallback_state, r.report);
+                if (!rw) return fail(std::move(rw).error());
+                r.features = std::move(rw->features);
+                r.block_entities = chunk->column.block_entities.size();
+                auto nbt = formats::java::encode_chunk(chunk->column, chunk->pos, chunk->min_y, target.java->data_version);
+                if (!nbt) return fail(std::move(nbt).error());
+                r.nbt = std::move(*nbt);
+                r.kind = ChunkResult::Kind::Done;
+            });
+            for (usize i = 0; i < kBatch; ++i) {
+                ChunkResult& r = results[i];
+                switch (r.kind) {
+                case ChunkResult::Kind::Empty: break;
+                case ChunkResult::Kind::Partial: ++skipped_partial; break;
+                case ChunkResult::Kind::Failed:
+                    if (first_failure.empty())
+                        first_failure = std::format("region {},{} chunk {},{}: {}", region->region_x(), region->region_z(), (batch + i) % 32,
+                                                    (batch + i) / 32, r.error->describe());
+                    ++failures[std::string(to_string(r.error->code()))];
+                    break;
+                case ChunkResult::Kind::Done:
+                    summary.warnings.insert(summary.warnings.end(), r.warnings.begin(), r.warnings.end());
+                    summary.report.merge(r.report);
+                    summary.blocks += r.blocks;
+                    block_entities += r.block_entities;
+                    for (std::string& f : r.features)
+                        if (std::find(experiments.begin(), experiments.end(), f) == experiments.end()) experiments.push_back(std::move(f));
+                    BRIDGER_TRY_STATUS(out.add(static_cast<u32>((batch + i) % 32), static_cast<u32>((batch + i) / 32), r.nbt));
+                    ++chunks;
+                    break;
+                }
+                r = ChunkResult{};
+            }
+        }
+        if (out.chunk_count() > 0) BRIDGER_TRY_STATUS(out.write(region_dir));
+    }
+    if (skipped_partial > 0)
+        summary.warnings.push_back(std::format("{} partially generated chunks were skipped (the game generates them)", skipped_partial));
+    for (const auto& [reason, n] : failures) summary.warnings.push_back(std::format("{} chunks could not be read ({})", n, reason));
+    if (!first_failure.empty()) summary.warnings.push_back("first unreadable chunk: " + first_failure);
+    if (chunks == 0) return make_error(ErrorCode::Malformed, "no chunk of the world could be converted");
+
+    JavaWorldInfo info;
+    info.level_name = !o.level_name.empty() ? o.level_name
+                      : !world.level.level_name.empty() ? world.level.level_name
+                                                         : platform::path_to_utf8(world.root.filename()).value_or("Bridger World");
+    info.spawn = world.level.spawn.value_or(BlockPos{0, 64, 0});
+    info.seed = world.level.seed;
+    return finish_java_world(o, std::move(summary), tree.path, tree.keep, target, info, chunks, block_entities, experiments);
+}
+
 Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSummary summary, const translate::MappingData& m, u32 air) {
     if (o.into_world) return make_error(ErrorCode::InvalidArgument, "--into-world is not available for whole worlds");
     BRIDGER_TRY(const ScratchDir unpacked, ScratchDir::create("bedrockworld"));
@@ -738,68 +1076,16 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     if (!first_failure.empty()) summary.warnings.push_back("first failed chunk: " + first_failure);
     if (chunks == 0) return make_error(ErrorCode::Malformed, "no chunk of the world could be converted");
 
-    formats::java::JavaLevelOptions level;
-    level.level_name = !o.level_name.empty() ? o.level_name
-                       : !reader.level().level_name.empty() ? reader.level().level_name
-                                                             : platform::path_to_utf8(o.output.filename()).value_or("Bridger World");
-    level.spawn = reader.level().spawn;
-    level.seed = reader.level().seed;
-    level.data_version = target.java->data_version;
-    level.version_name = target.java->name;
-    level.experiments = experiments;
-    for (const std::string& e : experiments)
-        summary.warnings.push_back(std::format("the world uses blocks of the experimental feature {} of Java {}; it is switched on in "
-                                               "the world (the game marks it as experimental)", e, target.java->name));
-    level.last_played_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    BRIDGER_TRY(const std::vector<u8> level_dat, formats::java::encode_java_level_dat(level));
-    {
-        std::ofstream f(temp / "level.dat", std::ios::binary);
-        f.write(reinterpret_cast<const char*>(level_dat.data()), static_cast<std::streamsize>(level_dat.size()));
-        if (!f) return make_error(ErrorCode::IoError, "cannot write level.dat");
-    }
-    if (modern_layout) { // 26.1+: the seed is in data/minecraft/world_gen_settings.dat (before: in level.dat)
-        BRIDGER_TRY(const std::vector<u8> wgs, formats::java::encode_world_gen_settings(reader.level().seed, level.data_version));
-        std::ofstream g(temp / "data" / "minecraft" / "world_gen_settings.dat", std::ios::binary);
-        g.write(reinterpret_cast<const char*>(wgs.data()), static_cast<std::streamsize>(wgs.size()));
-        if (!g) return make_error(ErrorCode::IoError, "cannot write world_gen_settings.dat");
-    }
     if (reader.level().generator != 1)
         summary.warnings.push_back("the Bedrock world is not an infinite world; chunks it never had are generated by Java's "
                                    "default (infinite) generator");
-
-    // Validate: the folder opens as a Java world and every chunk decodes.
-    {
-        BRIDGER_TRY(const formats::java::JavaWorld back, formats::java::open_java_world(temp));
-        usize reread = 0;
-        for (const fs::path& rp : back.overworld_regions) {
-            BRIDGER_TRY(const formats::java::RegionFile rf, formats::java::RegionFile::open(rp));
-            for (u32 lz = 0; lz < 32; ++lz)
-                for (u32 lx = 0; lx < 32; ++lx) {
-                    if (!rf.has_chunk(lx, lz)) continue;
-                    BRIDGER_TRY(const std::optional<std::vector<u8>> raw, rf.read_chunk(lx, lz));
-                    if (!raw) return make_error(ErrorCode::ValidationFailed, "a written chunk is missing");
-                    auto blocks = std::make_shared<BlockStateRegistry>();
-                    BRIDGER_TRY(const formats::java::JavaChunk jc, formats::java::decode_chunk(*raw, blocks, std::make_shared<BiomeRegistry>()));
-                    if (!jc.full) return make_error(ErrorCode::ValidationFailed, "a written chunk is not marked full");
-                    ++reread;
-                }
-        }
-        if (reread != chunks)
-            return make_error(ErrorCode::ValidationFailed, std::format("re-read {} chunks, expected {}", reread, chunks));
-    }
-    // Last cancellation point, then the move into place: a rename of the folder (never replaces
-    // anything; checked again by the OS). A cancelled build is removed with its temp folder.
-    BRIDGER_TRY_STATUS(cancel_point(o));
-    if (auto moved = platform::os_file_ops().move_new(temp, o.output); !moved) {
-        tree.keep = true;
-        return make_error(ErrorCode::IoError, "the converted world is complete at " + platform::path_to_utf8(temp).value_or("?") +
-                                                  " but could not be renamed to the destination: " + moved.error().describe());
-    }
-    tree.keep = true; // it is the destination now
-    summary.chunks = chunks;
-    summary.block_entities = block_entities;
-    return summary;
+    JavaWorldInfo info;
+    info.level_name = !o.level_name.empty() ? o.level_name
+                      : !reader.level().level_name.empty() ? reader.level().level_name
+                                                            : platform::path_to_utf8(o.output.filename()).value_or("Bridger World");
+    info.spawn = reader.level().spawn;
+    info.seed = reader.level().seed;
+    return finish_java_world(o, std::move(summary), tree.path, tree.keep, target, info, chunks, block_entities, experiments);
 }
 
 } // namespace
@@ -881,15 +1167,17 @@ Result<ViewStructure> load_view_structure(const fs::path& input) {
 Result<ConvertSummary> convert(const ConvertOptions& o) {
     ConvertSummary summary;
     BRIDGER_TRY(summary.output_format, output_format_of(o));
+    BRIDGER_TRY_STATUS(check_output_is_not_input(o));
     if (formats::bedrock::is_bedrock_world_folder(o.input) && (!o.input_format || *o.input_format == FormatId::McWorld)) {
         summary.input_format = FormatId::McWorld;
-        if (summary.output_format != FormatId::JavaWorld)
-            return make_error(ErrorCode::NotImplemented, "a Bedrock world can only be converted to a Java world so far");
-        BRIDGER_TRY_STATUS(check_output_directory(o));
+        if (summary.output_format != FormatId::JavaWorld && summary.output_format != FormatId::McWorld)
+            return make_error(ErrorCode::NotImplemented, "a Bedrock world converts to a Java world folder or to a .mcworld");
+        if (summary.output_format == FormatId::JavaWorld) BRIDGER_TRY_STATUS(check_output_directory(o));
         BRIDGER_TRY(const translate::MappingData* mapping, translate::MappingData::embedded());
         summary.target_data_version = mapping->java_data_version();
         const auto air = mapping->find_bedrock("minecraft:air", {});
         if (!air) return make_error(ErrorCode::Malformed, "mapping data lacks air");
+        if (summary.output_format == FormatId::McWorld) return convert_bedrock_world_to_bedrock(o, std::move(summary), *mapping, *air);
         return convert_bedrock_world(o, std::move(summary), *mapping, *air);
     }
     if (is_java_world_input(o.input) && (!o.input_format || *o.input_format == FormatId::JavaWorld)) {
@@ -911,8 +1199,9 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
     if (!air) return make_error(ErrorCode::Malformed, "mapping data lacks air");
 
     if (summary.input_format == FormatId::McWorld) {
+        if (summary.output_format == FormatId::McWorld) return convert_bedrock_world_to_bedrock(o, std::move(summary), *mapping, *air);
         if (summary.output_format != FormatId::JavaWorld)
-            return make_error(ErrorCode::NotImplemented, "a Bedrock world can only be converted to a Java world so far");
+            return make_error(ErrorCode::NotImplemented, "a Bedrock world converts to a Java world folder or to a .mcworld");
         return convert_bedrock_world(o, std::move(summary), *mapping, *air);
     }
 
@@ -990,8 +1279,8 @@ Result<ConvertSummary> convert(const ConvertOptions& o) {
                                                    "experiment switched on", e, version.java->name));
         return write_java_structure_output(o, std::move(summary), target, version.java->data_version);
     }
-    BRIDGER_TRY(const u64 rewritten, translate::rewrite_for_bedrock_target(target, *version.bedrock_targets, *version.bedrock, *mapping,
-                                                                           bedrock_fallback(*mapping, o.fallback), summary.report));
+    BRIDGER_TRY(const u64 rewritten,
+                translate::rewrite_for_bedrock_target(target, *version.bedrock_targets, *version.bedrock, *mapping, summary.report));
     (void)rewritten;
     return write_bedrock_output(o, std::move(summary), target, *mapping, *air, version);
 }

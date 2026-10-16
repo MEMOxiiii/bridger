@@ -139,6 +139,100 @@ void remap_biomes(Structure& s, Map map, Name name, ConversionReport& report) {
 
 } // namespace
 
+// ---- Java substitutes ------------------------------------------------------------------------------------------
+// Blocks newer than the target are written as the closest block it has (Bridger's choice, reviewed by hand; Java has
+// no placeholder that would keep them). Rules are tried in order until the target has the result; properties are then
+// matched as for any state. Everything substituted is reported.
+
+std::string substitute_once(std::string_view id) {
+    std::string n(id.substr(id.starts_with("minecraft:") ? 10 : 0));
+    static const std::unordered_map<std::string_view, std::string_view> kExact{
+        // plants and small things
+        {"bush", "fern"}, {"firefly_bush", "fern"}, {"short_dry_grass", "dead_bush"}, {"tall_dry_grass", "dead_bush"},
+        {"red_shrub", "dead_bush"}, {"cactus_flower", "air"}, {"leaf_litter", "air"}, {"wildflowers", "air"}, {"pink_petals", "air"},
+        {"torchflower", "poppy"}, {"potted_torchflower", "potted_poppy"}, {"torchflower_crop", "air"}, {"pitcher_plant", "peony"},
+        {"pitcher_crop", "air"}, {"open_eyeblossom", "poppy"}, {"closed_eyeblossom", "poppy"}, {"potted_open_eyeblossom", "potted_poppy"},
+        {"potted_closed_eyeblossom", "potted_poppy"}, {"golden_dandelion", "dandelion"}, {"potted_golden_dandelion", "potted_dandelion"},
+        {"shelf_mushroom", "brown_mushroom"}, {"orange_poplar_leaves", "oak_leaves"}, {"red_poplar_leaves", "oak_leaves"},
+        {"yellow_poplar_leaves", "oak_leaves"}, {"pale_moss_block", "moss_block"}, {"pale_moss_carpet", "moss_carpet"},
+        {"pale_hanging_moss", "air"}, {"creaking_heart", "birch_log"}, {"mangrove_propagule", "jungle_sapling"},
+        {"potted_mangrove_propagule", "potted_jungle_sapling"}, {"mangrove_roots", "jungle_wood"}, {"muddy_mangrove_roots", "coarse_dirt"},
+        {"sniffer_egg", "turtle_egg"}, {"frogspawn", "air"}, {"dried_ghast", "air"}, {"straw_bed", "hay_block"},
+        {"ochre_froglight", "shroomlight"}, {"verdant_froglight", "shroomlight"}, {"pearlescent_froglight", "shroomlight"},
+        // stone-like
+        {"mud", "dirt"}, {"packed_mud", "coarse_dirt"}, {"mud_bricks", "bricks"}, {"mud_brick_slab", "brick_slab"},
+        {"mud_brick_stairs", "brick_stairs"}, {"mud_brick_wall", "brick_wall"}, {"tuff_bricks", "stone_bricks"},
+        {"tuff_brick_slab", "stone_brick_slab"}, {"tuff_brick_stairs", "stone_brick_stairs"}, {"tuff_brick_wall", "stone_brick_wall"},
+        {"polished_tuff", "polished_andesite"}, {"polished_tuff_slab", "polished_andesite_slab"},
+        {"polished_tuff_stairs", "polished_andesite_stairs"}, {"polished_tuff_wall", "andesite_wall"}, {"tuff_slab", "andesite_slab"},
+        {"tuff_stairs", "andesite_stairs"}, {"tuff_wall", "andesite_wall"}, {"chiseled_tuff", "chiseled_stone_bricks"},
+        {"chiseled_tuff_bricks", "chiseled_stone_bricks"}, {"resin_block", "honeycomb_block"}, {"resin_bricks", "orange_terracotta"},
+        {"chiseled_resin_bricks", "chiseled_red_sandstone"}, {"resin_brick_slab", "brick_slab"}, {"resin_brick_stairs", "brick_stairs"},
+        {"resin_brick_wall", "brick_wall"}, {"resin_clump", "air"}, {"reinforced_deepslate", "deepslate"},
+        {"sulfur", "yellow_terracotta"}, {"potent_sulfur", "yellow_terracotta"}, {"polished_sulfur", "yellow_terracotta"},
+        {"sulfur_bricks", "yellow_terracotta"}, {"chiseled_sulfur", "yellow_terracotta"}, {"sulfur_spike", "air"},
+        {"cinnabar", "red_terracotta"}, {"polished_cinnabar", "red_terracotta"}, {"cinnabar_bricks", "red_terracotta"},
+        {"chiseled_cinnabar", "red_terracotta"},
+        // sculk
+        {"sculk", "deepslate"}, {"sculk_catalyst", "deepslate"}, {"sculk_vein", "air"}, {"sculk_shrieker", "sculk_sensor"},
+        {"calibrated_sculk_sensor", "sculk_sensor"},
+        // blocks with a function
+        {"chiseled_bookshelf", "bookshelf"}, {"decorated_pot", "flower_pot"}, {"piglin_head", "zombie_head"},
+        {"piglin_wall_head", "zombie_wall_head"}, {"suspicious_sand", "sand"}, {"suspicious_gravel", "gravel"}, {"crafter", "dropper"},
+        /* a spawner would spawn pigs: */ {"trial_spawner", "iron_bars"}, {"vault", "iron_block"}, {"heavy_core", "air"}, {"test_block", "air"}, {"test_instance_block", "air"},
+        {"copper_torch", "torch"}, {"copper_wall_torch", "wall_torch"}, {"bamboo_block", "oak_log"}, {"stripped_bamboo_block", "stripped_oak_log"},
+        {"bamboo_mosaic", "oak_planks"}, {"bamboo_mosaic_slab", "oak_slab"}, {"bamboo_mosaic_stairs", "oak_stairs"},
+    };
+    if (const auto it = kExact.find(n); it != kExact.end()) return "minecraft:" + std::string(it->second);
+
+    // Sulfur and cinnabar slabs, stairs, walls (26.x).
+    for (const auto& [stone, family] : {std::pair{"sulfur", "sandstone"}, std::pair{"cinnabar", "red_sandstone"}})
+        for (const char* shape : {"_slab", "_stairs", "_wall"})
+            if (n.find(stone) != std::string::npos && n.ends_with(shape)) return "minecraft:" + std::string(family) + shape;
+
+    // Coloured wool and concrete slabs and stairs (26.x): the full block in that colour.
+    for (const char* mat : {"_wool", "_concrete"})
+        for (const char* shape : {"_slab", "_stairs"})
+            if (n.ends_with(std::string(mat) + shape)) return "minecraft:" + n.substr(0, n.size() - std::string_view(shape).size());
+
+    // Copper (1.20.3+, 1.21.9). Only cut copper keeps "waxed_" and the oxidation stage.
+    {
+        std::string base = n, prefix;
+        if (base.starts_with("waxed_")) {
+            prefix += "waxed_";
+            base = base.substr(6);
+        }
+        for (const char* ox : {"exposed_", "weathered_", "oxidized_"})
+            if (base.starts_with(ox)) {
+                prefix += ox;
+                base = base.substr(std::string_view(ox).size());
+            }
+        static const std::unordered_map<std::string_view, std::string_view> kCopper{
+            {"chiseled_copper", "cut_copper"}, {"copper_grate", "cut_copper"}, {"copper_bulb", "redstone_lamp"}, {"copper_door", "iron_door"},
+            {"copper_trapdoor", "iron_trapdoor"}, {"copper_bars", "iron_bars"}, {"copper_chain", "chain"}, {"copper_chest", "chest"},
+            {"copper_golem_statue", "air"}, {"copper_lantern", "lantern"}, {"lightning_rod", "lightning_rod"}};
+        if (const auto it = kCopper.find(base); it != kCopper.end() && (base != "lightning_rod" || !prefix.empty()))
+            return "minecraft:" + (it->second == "cut_copper" ? prefix : std::string()) + std::string(it->second);
+    }
+
+    // Hanging signs and shelves (1.20, 26.x).
+    if (n.ends_with("_hanging_sign")) return "minecraft:air";
+    if (n.ends_with("_shelf")) return "minecraft:bookshelf";
+
+    // Wood types the target does not have: the closest older wood.
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 5> kWood{
+        {{"pale_oak", "birch"}, {"cherry", "birch"}, {"mangrove", "jungle"}, {"bamboo", "oak"}, {"poplar", "oak"}}};
+    for (const auto& [wood, older] : kWood) {
+        const auto at = n.find(wood);
+        if (at == std::string::npos) continue;
+        if (at > 0 && n[at - 1] != '_') continue;
+        const usize end = at + wood.size();
+        if (end < n.size() && n[end] != '_') continue;
+        return "minecraft:" + n.substr(0, at) + std::string(older) + n.substr(end);
+    }
+    return {};
+}
+
 // ---- Java -------------------------------------------------------------------------------------------
 
 struct JavaTargets::Impl {
@@ -265,9 +359,20 @@ JavaTargets::Fit JavaTargets::downgrade(const BlockState& state, const JavaTarge
                     id = std::string(before);
                     d = old;
                 }
-    if (d == nullptr) return Fit::Missing;
-
     bool approximate = false;
+    // Blocks the target does not have: the closest block it has (rules above), at most a few steps.
+    for (int step = 0; d == nullptr && step < 4; ++step) {
+        const std::string next = substitute_once(id);
+        if (next.empty()) break;
+        id = next;
+        approximate = true;
+        if (id == "minecraft:air") {
+            out = BlockState(id, {});
+            return Fit::Approximate;
+        }
+        d = impl_->def(id, target.index);
+    }
+    if (d == nullptr) return Fit::Missing;
     // creaking_heart: creaking_heart_state (1.21.5+) was "active" (1.21.4) and "creaking" (1.21.2 - 1.21.3).
     if (const std::string* st = find_prop(props, "creaking_heart_state")) {
         const auto has = [&](std::string_view p) { return std::any_of(d->props.begin(), d->props.end(), [&](const auto& kv) { return kv.first == p; }); };
@@ -327,6 +432,10 @@ Result<JavaRewrite> rewrite_for_java_target(Structure& java, const JavaTargets& 
         case JavaTargets::Fit::Exact: map[id] = reg.intern(out); break;
         }
     }
+    // The block each block entity stood on, before rewriting (a substituted block may need another block entity).
+    std::vector<std::string> be_block(java.block_entities.size());
+    for (usize i = 0; i < java.block_entities.size(); ++i)
+        if (java.contains(java.block_entities[i].pos)) be_block[i] = reg.get(java.block(java.block_entities[i].pos)).id();
     std::unordered_map<u32, std::pair<u64, BlockPos>> counts;
     count_states(java, [&](u32 v) { return v < n && fit[v] != JavaTargets::Fit::Exact; }, counts, false);
     for (const auto& [id, cp] : counts) {
@@ -350,9 +459,20 @@ Result<JavaRewrite> rewrite_for_java_target(Structure& java, const JavaTargets& 
     // Block entities: removed with their block, or rewritten into the target's format.
     std::vector<BlockEntity> kept;
     kept.reserve(java.block_entities.size());
-    for (BlockEntity& be : java.block_entities) {
+    // Block entity ids of substituted blocks: the substitute's own type, or none (then it goes).
+    static const std::unordered_map<std::string_view, std::string_view> kSubstituteEntity{
+        {"minecraft:crafter", "minecraft:dropper"},         {"minecraft:copper_chest", "minecraft:chest"},
+        {"minecraft:chest", "minecraft:chest"},             {"minecraft:sculk_shrieker", "minecraft:sculk_sensor"},
+        {"minecraft:calibrated_sculk_sensor", "minecraft:sculk_sensor"}, {"minecraft:skull", "minecraft:skull"}};
+    for (usize bi = 0; bi < java.block_entities.size(); ++bi) {
+        BlockEntity& be = java.block_entities[bi];
         // Blocks are already rewritten: a block entity on the fallback block lost its block (the target lacks it).
-        if (!java.contains(be.pos) || java.block(be.pos) == fallback_id) continue;
+        if (!java.contains(be.pos) || java.block(be.pos) == fallback_id || reg.get(java.block(be.pos)).id() == "minecraft:air") continue;
+        if (reg.get(java.block(be.pos)).id() != be_block[bi] && !be_block[bi].empty()) {
+            const auto it = kSubstituteEntity.find(be.id);
+            if (it == kSubstituteEntity.end()) continue; // e.g. a decorated pot that became a flower pot
+            be.id = std::string(it->second);
+        }
         std::vector<std::string> lossy, dropped;
         if (auto bytes = detail::downgrade_java_block_entity(be, targets, target, lossy, dropped)) be.data.bytes = std::move(*bytes);
         for (const std::string& l : lossy) report.add(IssueKind::LossyBlock, std::format("{}: {} (Java {})", be.id, l, target.name), be.pos);
@@ -547,14 +667,16 @@ std::span<const u8> BedrockTargets::state_nbt(const BedrockTarget& target, Bedro
         }
         w.end_compound();
     }
-    w.write_int("version", target.block_version);
+    // A state the target does not have keeps its own spelling and the pinned block version: the old game keeps it as an
+    // unknown block, and newer ones read it as what it was.
+    w.write_int("version", how.kind == Written::Kind::Missing ? static_cast<i32>(mapping.bedrock_block_version()) : target.block_version);
     w.end_compound();
     slot = std::move(w).finish().value_or(std::vector<u8>{});
     return slot;
 }
 
 Result<u64> rewrite_for_bedrock_target(Structure& bedrock, const BedrockTargets& targets, const BedrockTarget& target,
-                                       const MappingData& mapping, BedrockStateIndex fallback, ConversionReport& report) {
+                                       const MappingData& mapping, ConversionReport& report) {
     if (target.pinned) return u64{0};
     const usize n = mapping.bedrock_state_count();
     auto state_text = [&](BedrockStateIndex i) {
@@ -591,17 +713,6 @@ Result<u64> rewrite_for_bedrock_target(Structure& bedrock, const BedrockTargets&
     auto affected = [&](u32 v) {
         return v < n && (how[v].kind == BedrockTargets::Written::Kind::Nearest || how[v].kind == BedrockTargets::Written::Kind::Missing);
     };
-    // Block entities whose block the target does not have go with it.
-    std::unordered_set<u64> orphaned;
-    auto pos_key = [](BlockPos p) {
-        return (static_cast<u64>(static_cast<u32>(p.x) & 0x1FFFFF) << 42) | (static_cast<u64>(static_cast<u32>(p.y) & 0x1FFFFF) << 21) |
-               static_cast<u64>(static_cast<u32>(p.z) & 0x1FFFFF);
-    };
-    for (const BlockEntity& be : bedrock.block_entities)
-        if (bedrock.contains(be.pos)) {
-            const u32 v = bedrock.block(be.pos);
-            if (v < n && how[v].kind == BedrockTargets::Written::Kind::Missing) orphaned.insert(pos_key(be.pos));
-        }
     u64 changed = 0;
     for (const bool secondary : {false, true}) {
         std::unordered_map<u32, std::pair<u64, BlockPos>> counts;
@@ -609,7 +720,10 @@ Result<u64> rewrite_for_bedrock_target(Structure& bedrock, const BedrockTargets&
         for (const auto& [v, cp] : counts) {
             if (derived_only[v]) continue; // exact for that version
             if (how[v].kind == BedrockTargets::Written::Kind::Missing)
-                report.add(IssueKind::UnmappedBlock, std::format("{} (not in Bedrock {})", state_text(v), target.name), cp.second, cp.first);
+                report.add(IssueKind::LossyBlock,
+                           std::format("{} kept for newer versions (not in Bedrock {}, which shows it as an unknown block)", state_text(v),
+                                       target.name),
+                           cp.second, cp.first);
             else
                 report.add(IssueKind::LossyBlock,
                            std::format("{} written as {} (Bedrock {})", state_text(v), state_text(how[v].nearest), target.name), cp.second,
@@ -619,17 +733,17 @@ Result<u64> rewrite_for_bedrock_target(Structure& bedrock, const BedrockTargets&
         remap_layers(
             bedrock,
             [&](u32 v) -> u32 {
-                if (!affected(v)) return v;
-                return how[v].kind == BedrockTargets::Written::Kind::Missing ? fallback : how[v].nearest;
+                if (!affected(v) || how[v].kind == BedrockTargets::Written::Kind::Missing) return v; // missing: kept as it is
+                return how[v].nearest;
             },
             secondary);
     }
 
-    // Block entities: removed with their block, or rewritten into the target's form.
+    // Block entities in the target's form (those of kept blocks too: the game keeps them with the block).
     std::vector<BlockEntity> kept;
     kept.reserve(bedrock.block_entities.size());
     for (BlockEntity& be : bedrock.block_entities) {
-        if (!bedrock.contains(be.pos) || orphaned.contains(pos_key(be.pos))) continue; // its block was not written
+        if (!bedrock.contains(be.pos)) continue;
         std::vector<std::string> lossy;
         if (auto bytes = detail::downgrade_bedrock_block_entity(be, targets, target, mapping, lossy)) be.data.bytes = std::move(*bytes);
         for (const std::string& l : lossy) report.add(IssueKind::LossyBlock, std::format("{}: {} (Bedrock {})", be.id, l, target.name), be.pos);

@@ -167,6 +167,7 @@ Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3
 | 15 | Old worlds open and convert: a Bedrock world folder from `minecraftWorlds` (the folder itself, not a `.mcworld`), a Java world from before 1.13; the original folders are unchanged afterwards. |
 | 16 | The convert page shows "Saved by" with the right version for a `.schem` from an older WorldEdit, a 1.20 Java world, a `.mcworld` and a `.schematic`; the "Game version" list offers every target, newest first, and the line under it reads "source → target". |
 | 17 | Target versions in the game: a world converted for Java 1.20.1 and one for 1.18.2 open in those versions (launcher installations) with the build and chests intact; a `.schem` written for 1.20.1 pastes in WorldEdit on 1.20.1. A `.mcworld` written for an older Bedrock version opens in the current Bedrock (which upgrades it). |
+| 18 | Same edition: a 26.3 Java world converted to a Java 1.19.4 world opens in 1.19.4 with cherry wood as birch and a crafter as a dropper with its items; a `.mcworld` converted to 1.20.0 and back to 26.50 opens with every block intact. ⚠ Bedrock "unknown" placeholder: a world with cherry planks written for 1.19.80 still shows cherry planks after the current Bedrock opens it (the kept block comes back). |
 
 ### Procedure
 

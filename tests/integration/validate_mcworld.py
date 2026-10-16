@@ -114,6 +114,7 @@ def main():
     ap.add_argument("--palette", required=True)
     ap.add_argument("--report")
     ap.add_argument("--generator", type=int, default=2, help="expected Generator (2 flat, 1 infinite for converted worlds)")
+    ap.add_argument("--chunk-version", type=int, default=42, help="expected chunk version byte (40, 41 or 42 by target version)")
     args = ap.parse_args()
 
     palette_keys, block_version = load_palette(args.palette)
@@ -147,7 +148,7 @@ def main():
                 blocks_by_y[y] = blocks_by_y.get(y, 0) + non_air
                 subchunks += 1
             elif len(key) == 9 and key[8] == 0x2C:
-                if value != bytes([42]):
+                if value != bytes([args.chunk_version]):
                     fail(f"chunk version {value!r}")
                 chunks += 1
             elif len(key) == 9 and key[8] == 0x36:

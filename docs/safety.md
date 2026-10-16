@@ -21,7 +21,10 @@ Bridger opens every input read-only (Bedrock worlds read for conversion to Java 
 directory and only the copy is opened). That includes worlds used as a placement target: `--into-world` reads the
 existing world and writes a **new** output world. The original is never edited in place: it is unzipped into a
 scratch directory under `%TEMP%`, the copy is changed there, and the result is zipped into the output. Java world
-folders are only read.
+folders are only read. Before anything is read, a conversion is refused, even with `--overwrite`, when its output is the input,
+lies inside an input world folder, or is a folder that contains the input (`check_output_is_not_input` in
+`convert/pipeline.cpp`; possible now that a world converts to its own edition). Tests:
+`tests/unit/translate/targets_test.cpp` ("A conversion never writes over or into its input").
 
 ## 2. How output is written
 
