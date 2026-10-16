@@ -97,9 +97,9 @@ pass `--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
 | `.schematic` (MCEdit legacy) | Java | ✓ | — |
 | `.litematic` | Java | ✓ | ✓ |
 | Structure `.nbt` | Java | ✓ | ✓ |
-| Java world (Overworld; reads Beta 1.3 – 26.3, writes 26.3) | Java | ✓ | ✓ |
+| Java world (Overworld; reads Beta 1.3 – 26.3, writes 1.18 – 26.3) | Java | ✓ | ✓ |
 | `.mcstructure` | Bedrock | ✓ | ✓ |
-| `.mcworld` or world folder (Overworld; reads Pocket Edition 0.9 – 26.52, writes 26.52) | Bedrock | ✓ | ✓ |
+| `.mcworld` or world folder (Overworld; reads Pocket Edition 0.9 – 26.52, writes 1.18.30 – 26.50) | Bedrock | ✓ | ✓ |
 | `.mcworld` (place into a copy of an existing world) | Bedrock | — | ✓ |
 
 ✓ means golden tests, a fuzz target, a benchmark and a recorded in-game check all pass. The pinned versions are

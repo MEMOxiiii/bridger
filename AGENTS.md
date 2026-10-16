@@ -8,8 +8,9 @@ Bridger is a Windows desktop tool, written in C++20, that converts Minecraft str
 formats (`.schem`, `.schematic`, `.litematic`, structure `.nbt`, Anvil worlds) and Bedrock formats
 (`.mcstructure`, `.mcworld`), and renders them in 3D. Speed is a core feature, and every speed claim needs a
 benchmark behind it. A conversion must never corrupt or silently lose user data.
-**Released: 0.4.2. Current phase: 7 + 8 released (Vulkan viewer with resource packs and world streaming;
-desktop app `bridger-gui.exe` with a React/WebView2 interface composited over the viewer, ADR 0009).** All
+**Released: 1.0.0. Current phase: 9 released (old worlds of every version read, target versions: Java 1.18 – 26.3
+and Bedrock 1.18.30 – 26.50, same-edition conversion, distant terrain), on top of the Vulkan viewer and the desktop
+app `bridger-gui.exe` (ADR 0009).** All
 automated checks pass; the in-game and app checklists (`docs/testing.md`) gate release 0.4.0. Phase 0.5's questions are folded
 into that checklist (`docs/formats/bedrock-world.md`, "Open questions").
 

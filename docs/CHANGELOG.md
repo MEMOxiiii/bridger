@@ -5,6 +5,8 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-16
+
 ### Added
 
 - Old Bedrock worlds: every LevelDB world from Pocket Edition 0.9 to 26.52 is read, including the pre-1.0
@@ -37,9 +39,17 @@ versions follow the release plan in `docs/release.md`.
 
 - A conversion is refused when its output is the input, lies inside an input world folder or is a folder containing
   the input (also with `--overwrite`).
-
 - Legacy `.schematic` files: flower pot contents, skull types and banner colours are converted now, and door
   halves are combined.
+
+### Known limitations
+
+- Entities (mobs, armor stands, item frames, paintings) are not converted; they are listed in the report.
+- Worlds: the Overworld only, in both directions and within an edition.
+- Older target versions are checked against each version's exact block data; the in-game checks cover the pinned
+  versions and the releases listed in `docs/testing.md`. Experimental Bedrock blocks are not switched on in an older
+  Bedrock world.
+- Portable zip only (no installer); Windows x64 only.
 
 ## [0.4.2] - 2026-10-15
 
@@ -143,6 +153,7 @@ Edition 26.3** (DataVersion 5023) and **Bedrock Edition 26.52** (palette 26.50).
 - One Java and one Bedrock version at a time.
 - Windows x64 only.
 
+[1.0.0]: https://github.com/MEMOxiiii/bridger/releases/tag/v1.0.0
 [0.4.2]: https://github.com/MEMOxiiii/bridger/releases/tag/v0.4.2
 [0.4.1]: https://github.com/MEMOxiiii/bridger/releases/tag/v0.4.1
 [0.4.0]: https://github.com/MEMOxiiii/bridger/releases/tag/v0.4.0
