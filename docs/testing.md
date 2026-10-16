@@ -193,3 +193,4 @@ app checklist above.
 | Date | Bridger commit | Game + version | Structures | Result | Notes |
 |---|---|---|---|---|---|
 | 2026-10-12 | `72d121a` | Bedrock 26.52, Java 26.3 | the five Phase 4 worlds (`build/ingame-test/`) and every Phase 5–6 file (`build/ingame-test/phase56/`) | **passed** | Run by the maintainer, who reported every item as working (release 0.3.0 gate). This answers the open questions in `docs/formats/bedrock-world.md` and `anvil.md` for these files |
+| 2026-10-16 | `fe2368d` | Bedrock 26.52 and older Java releases | items 15–18: old worlds, "Saved by", target versions, same-edition conversion and the Bedrock "unknown" block | **passed** | Run by the maintainer, who reported everything as working |
