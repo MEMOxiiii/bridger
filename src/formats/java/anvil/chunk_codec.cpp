@@ -55,6 +55,39 @@ u8 nibble(std::span<const u8> a, usize i) { return static_cast<u8>((a[i >> 1] >>
 
 std::string chunk_where(ChunkPos p) { return "chunk " + std::to_string(p.x) + "," + std::to_string(p.z); }
 
+// Java entity compounds -> core Entity (absolute "Pos" doubles -> column-local position).
+Status read_entities(NbtView list, ChunkPos pos, i32 min_y, std::vector<Entity>& out, std::vector<std::string>& warnings) {
+    for (const NbtView e : list.items()) {
+        const NbtCompoundView c = e.entries();
+        const auto id = c.find("id").as_string();
+        const io::nbt::NbtListView p = c.find("Pos").items();
+        if (!id || p.size() != 3 || !p.at(0).as_double()) {
+            warnings.push_back("chunk " + std::to_string(pos.x) + "," + std::to_string(pos.z) + ": an entity without id or position was skipped");
+            continue;
+        }
+        Entity ent;
+        BRIDGER_TRY(ent.id, detail::utf8(*id));
+        if (ent.id.find(':') == std::string::npos) {
+            // Before 1.11 ids were CamelCase ("ItemFrame", "Painting", "Pig"): snake_case gives the 1.11+ name for
+            // these (minecraft.wiki "Java Edition 1.11", entity renames); the rest is only reported.
+            std::string snake;
+            for (const char ch : ent.id) {
+                if (ch >= 'A' && ch <= 'Z') {
+                    if (!snake.empty()) snake += '_';
+                    snake += static_cast<char>(ch - 'A' + 'a');
+                } else {
+                    snake += ch;
+                }
+            }
+            ent.id = "minecraft:" + snake;
+        }
+        ent.pos = {*p.at(0).as_double() - pos.x * 16.0, *p.at(1).as_double() - min_y, *p.at(2).as_double() - pos.z * 16.0};
+        BRIDGER_TRY(ent.data, detail::encode_compound(c, {"id"}));
+        out.push_back(std::move(ent));
+    }
+    return {};
+}
+
 // Pre-1.18 chunks: everything under a "Level" compound; sections with a 1.13+ palette, or numeric
 // ids (Anvil, 1.2 - 1.12), or one 128-high column of numeric ids (McRegion, Beta 1.3 - 1.1).
 Result<JavaChunk> decode_old_chunk(NbtCompoundView level, i32 data_version, std::shared_ptr<BlockStateRegistry> blocks,
@@ -240,8 +273,7 @@ Result<JavaChunk> decode_old_chunk(NbtCompoundView level, i32 data_version, std:
         col.block_entities.push_back(std::move(be));
     }
     if (numeric_ids) detail::fix_legacy_blocks(col, out.warnings);
-    if (const usize n = level.find("Entities").items().size(); n > 0)
-        out.warnings.push_back(where + ": " + std::to_string(n) + " entities were not converted");
+    BRIDGER_TRY_STATUS(read_entities(level.find("Entities"), out.pos, out.min_y, col.entities, out.warnings));
     return out;
 }
 
@@ -383,6 +415,14 @@ Result<JavaChunk> decode_chunk(std::span<const u8> nbt, std::shared_ptr<BlockSta
         BRIDGER_TRY(be.data, detail::encode_compound(c, {"id", "x", "y", "z", "keepPacked"}));
         col.block_entities.push_back(std::move(be));
     }
+    return out;
+}
+
+Result<std::vector<Entity>> decode_entity_chunk(std::span<const u8> nbt, ChunkPos pos, i32 min_y, const io::nbt::NbtLimits& limits) {
+    BRIDGER_TRY(const io::nbt::NbtDocument doc, io::nbt::NbtDocument::parse(nbt, Endian::Big, limits));
+    std::vector<Entity> out;
+    std::vector<std::string> warnings;
+    BRIDGER_TRY_STATUS(read_entities(doc.root().entries().find("Entities"), pos, min_y, out, warnings));
     return out;
 }
 

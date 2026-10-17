@@ -173,7 +173,7 @@ TEST_CASE("A Java world converts to a valid .mcworld", "[anvil][convert][e2e]") 
     REQUIRE(summary);
     CHECK(summary->input_format == FormatId::JavaWorld);
     CHECK(summary->chunks == 6); // Overworld (0,0) (1,0) (2,0) (0,1) (-1,0) ((1,1) is partial) and Nether (0,0)
-    CHECK(summary->block_entities == 1);
+    CHECK(summary->block_entities == 3); // the chest and the two item frames (Bedrock stores frames as block entities)
     CHECK(summary->report.total(translate::IssueKind::UnmappedBlock) == 0);
     CHECK(summary->report.total(translate::IssueKind::DroppedSecondaryLayer) == 0);
     const auto has_warning = [&](std::string_view needle) {
@@ -339,7 +339,9 @@ TEST_CASE("1.2 - 1.12 chunks: numeric ids and the states 1.13 moved", "[anvil][o
     const auto item = doc->root().entries().find("Items").items().at(0).entries();
     CHECK(item.find("id").as_string() == "minecraft:diamond");
     CHECK(item.find("count").as_int() == 5);
-    CHECK(has_warning(c, "entities"));
+    // Entities kept in the chunk before 1.17 are read ("Pig" is the pre-1.11 id), column-local.
+    REQUIRE(c.column.entities.size() == 1);
+    CHECK(c.column.entities[0].id == "minecraft:pig");
 
     CHECK_FALSE(decode_old(chunk_bytes("v1_12/region/r.0.0.mca", 1, 0)).full); // TerrainPopulated 0
 }
@@ -430,4 +432,146 @@ TEST_CASE("The Nether and the End convert in both directions", "[anvil][convert]
     const auto end = bedrock::BedrockWorldReader::open_path(dir.path / "end.mcworld", work.path);
     REQUIRE(end);
     CHECK(end->chunks(Dimension::End).size() == 1);
+}
+
+TEST_CASE("Item frames and paintings convert in both directions; other entities are reported", "[anvil][convert][entities]") {
+    test::TempDir dir;
+    using bedrock::Dimension;
+    const translate::MappingData& m = **translate::MappingData::embedded();
+    const auto run = [](const std::filesystem::path& in, const std::filesystem::path& out, const char* version = "") {
+        convert::ConvertOptions o;
+        o.input = in;
+        o.output = out;
+        o.target_version = version;
+        return convert::convert(o);
+    };
+    // Java (entities/r.0.0.mca) -> Bedrock: frames become frame blocks with ItemFrame block entities, the painting an
+    // actor; the pig is reported.
+    const auto to_bedrock = run(test::data_path("javaworld/basic"), dir.path / "e.mcworld");
+    REQUIRE(to_bedrock);
+    const auto* unmapped = to_bedrock->report.issues(translate::IssueKind::UnmappedEntity);
+    REQUIRE(unmapped);
+    CHECK(unmapped->size() == 1);
+    CHECK(unmapped->contains("minecraft:pig"));
+    {
+        test::TempDir work;
+        const auto r = bedrock::BedrockWorldReader::open_path(dir.path / "e.mcworld", work.path);
+        REQUIRE(r);
+        const auto lookup = convert::bedrock_state_lookup(m);
+        const auto air = m.find_bedrock("minecraft:air", {});
+        const auto col = r->read_column({0, 0}, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(),
+                                        m.bedrock_block_version(), lookup, *air, 1);
+        REQUIRE(col);
+        const BlockPos frame_at{5, 70 - col->min_y, 5};
+        const translate::BedrockState& frame = m.bedrock(col->column.block(frame_at));
+        CHECK(frame.name == "minecraft:frame");
+        bool facing_south = false;
+        for (const auto& p : frame.properties) facing_south |= p.key == "facing_direction" && p.int_value == 3;
+        CHECK(facing_south);
+        CHECK(m.bedrock(col->column.block({7, 65 - col->min_y, 7})).name == "minecraft:glow_frame");
+        const BlockEntity* be = nullptr;
+        for (const BlockEntity& b : col->column.block_entities)
+            if (b.pos == frame_at) be = &b;
+        REQUIRE(be);
+        CHECK(be->id == "ItemFrame");
+        const auto doc = io::nbt::NbtDocument::parse(be->data.bytes, be->data.endian);
+        REQUIRE(doc);
+        CHECK(doc->root().entries().find("Item").entries().find("Name").as_string() == "minecraft:diamond");
+        CHECK(doc->root().entries().find("ItemRotation").as_float() == 90.0f);
+        REQUIRE(col->column.entities.size() == 1);
+        const Entity& painting = col->column.entities[0];
+        CHECK(painting.id == "minecraft:painting");
+        const auto pd = io::nbt::NbtDocument::parse(painting.data.bytes, painting.data.endian);
+        REQUIRE(pd);
+        CHECK(pd->root().entries().find("Motif").as_string() == "Kebab");
+        CHECK(pd->root().entries().find("Direction").as_byte() == i8{2});
+    }
+    // ... and back to Java: the frames are entities again with their tile, facing and item; Java 1.20.1 uses TileX/Y/Z.
+    for (const auto& [version, tile_key] : {std::pair{"", "block_pos"}, std::pair{"1.20.1", "TileX"}}) {
+        INFO(version);
+        const auto out = dir.path / (std::string("java_") + (*version ? "old" : "new"));
+        REQUIRE(run(dir.path / "e.mcworld", out, version));
+        const auto world = formats::java::open_java_world(out);
+        REQUIRE(world);
+        const std::filesystem::path entities = (world->modern_layout ? out / "dimensions" / "minecraft" / "overworld" : out) / "entities" / "r.0.0.mca";
+        const auto region = formats::java::RegionFile::open(entities);
+        REQUIRE(region);
+        const auto raw = region->read_chunk(0, 0);
+        REQUIRE(raw);
+        REQUIRE(*raw);
+        const auto doc = io::nbt::NbtDocument::parse(**raw, Endian::Big);
+        REQUIRE(doc);
+        usize frames = 0, paintings = 0;
+        for (const auto e : doc->root().entries().find("Entities").items()) {
+            const auto c = e.entries();
+            CHECK(c.find(tile_key));
+            const auto id = c.find("id").as_string();
+            if (id == "minecraft:item_frame") {
+                ++frames;
+                CHECK(c.find("Facing").as_byte() == i8{3});
+                CHECK(c.find("Item").entries().find("id").as_string() == "minecraft:diamond");
+                CHECK(c.find("ItemRotation").as_byte() == i8{2});
+            }
+            if (id == "minecraft:painting") {
+                ++paintings;
+                CHECK(c.find("variant").as_string() == "minecraft:kebab");
+            }
+        }
+        CHECK(frames == 1);
+        CHECK(paintings == 1);
+    }
+}
+
+TEST_CASE("The single-player player converts in both directions", "[anvil][convert][player]") {
+    test::TempDir dir;
+    const auto run = [](const std::filesystem::path& in, const std::filesystem::path& out, const char* version = "") {
+        convert::ConvertOptions o;
+        o.input = in;
+        o.output = out;
+        o.target_version = version;
+        return convert::convert(o);
+    };
+    const auto to_bedrock = run(test::data_path("javaworld/basic"), dir.path / "p.mcworld");
+    REQUIRE(to_bedrock);
+    // Ender chest and experience are not converted (as in Chunker): reported.
+    const auto* lossy = to_bedrock->report.issues(translate::IssueKind::LossyBlock);
+    REQUIRE(lossy);
+    CHECK(lossy->contains("player EnderItems not converted"));
+    CHECK(lossy->contains("player XpLevel not converted"));
+    {
+        test::TempDir work;
+        const auto r = bedrock::BedrockWorldReader::open_path(dir.path / "p.mcworld", work.path);
+        REQUIRE(r);
+        REQUIRE(r->level().local_player);
+        const auto doc = io::nbt::NbtDocument::parse(*r->level().local_player, Endian::Little);
+        REQUIRE(doc);
+        const auto c = doc->root().entries();
+        CHECK(c.find("Pos").items().at(1).as_float() == 65.0f + 1.62001f); // Bedrock stores the eye position
+        CHECK(c.find("PlayerGameMode").as_int() == 1);
+        CHECK(c.find("DimensionId").as_int() == 0);
+        CHECK(c.find("Inventory").items().size() == 2);
+        CHECK(c.find("Armor").items().at(0).entries().find("Name").as_string() == "minecraft:diamond_helmet"); // head first
+    }
+    for (const auto& [version, helmet_in_equipment] : {std::pair{"", true}, std::pair{"1.20.1", false}}) {
+        INFO(version);
+        const auto out = dir.path / (std::string("p_") + (helmet_in_equipment ? "new" : "old"));
+        REQUIRE(run(dir.path / "p.mcworld", out, version));
+        const auto world = formats::java::open_java_world(out);
+        REQUIRE(world);
+        REQUIRE(world->level.player);
+        const auto doc = io::nbt::NbtDocument::parse(world->level.player->bytes, world->level.player->endian);
+        REQUIRE(doc);
+        const auto p = doc->root().entries();
+        CHECK(p.find("Dimension").as_string() == "minecraft:overworld");
+        CHECK(p.find("playerGameType").as_int() == 1);
+        bool helmet = false;
+        if (helmet_in_equipment) {
+            helmet = p.find("equipment").entries().find("head").entries().find("id").as_string() == "minecraft:diamond_helmet";
+        } else {
+            for (const auto it : p.find("Inventory").items())
+                helmet |= it.entries().find("Slot").as_byte() == i8{103} &&
+                          it.entries().find("id").as_string() == "minecraft:diamond_helmet";
+        }
+        CHECK(helmet);
+    }
 }

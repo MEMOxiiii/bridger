@@ -270,6 +270,10 @@ Result<std::vector<u8>> encode_java_level_dat(const JavaLevelOptions& o) {
         for (const std::string& e : o.experiments) w.write_string({}, e);
         w.end_list();
     }
+    if (o.player) {
+        BRIDGER_TRY(const io::nbt::NbtDocument player, io::nbt::NbtDocument::parse(o.player->bytes, o.player->endian));
+        w.write_view("Player", player.root());
+    }
     w.end_compound();
     w.end_compound();
     BRIDGER_TRY(const std::vector<u8> raw, std::move(w).finish());
@@ -291,6 +295,47 @@ Result<std::vector<u8>> encode_world_gen_settings(i64 seed, i32 data_version) {
     w.end_compound();
     BRIDGER_TRY(const std::vector<u8> raw, std::move(w).finish());
     return io::compress(raw, io::Compression::Gzip, 6);
+}
+
+Result<std::vector<u8>> encode_entity_chunk(const std::vector<Entity>& entities, ChunkPos pos, i32 min_y, i32 data_version) {
+    const BlockPos origin{pos.x * 16, min_y, pos.z * 16};
+    io::nbt::NbtWriter w(Endian::Big);
+    w.begin_root_compound();
+    w.write_int("DataVersion", data_version);
+    const std::array<i32, 2> position{pos.x, pos.z};
+    w.write_int_array("Position", position);
+    w.begin_list("Entities", entities.empty() ? io::nbt::TagType::End : io::nbt::TagType::Compound, entities.size());
+    for (usize i = 0; i < entities.size(); ++i) {
+        const Entity& e = entities[i];
+        BRIDGER_TRY(const io::nbt::NbtDocument doc, io::nbt::NbtDocument::parse(e.data.bytes, e.data.endian));
+        w.begin_compound();
+        w.write_string("id", e.id);
+        w.begin_list("Pos", io::nbt::TagType::Double, 3);
+        w.write_double({}, origin.x + e.pos.x);
+        w.write_double({}, origin.y + e.pos.y);
+        w.write_double({}, origin.z + e.pos.z);
+        w.end_list();
+        const std::array<i32, 4> uuid{0x42524447 /* "BRDG" */, pos.x, pos.z, static_cast<i32>(i)};
+        w.write_int_array("UUID", uuid);
+        for (const io::nbt::NbtEntry& en : doc.root().entries()) {
+            if (en.name == "id" || en.name == "Pos" || en.name == "UUID") continue;
+            if (en.name == "block_pos") {
+                if (const auto bp = en.value.as_int_array(); bp && bp->size() == 3) {
+                    const std::array<i32, 3> abs{(*bp)[0] + origin.x, (*bp)[1] + origin.y, (*bp)[2] + origin.z};
+                    w.write_int_array("block_pos", abs);
+                }
+            } else if (en.name == "TileX" || en.name == "TileY" || en.name == "TileZ") {
+                const i32 add = en.name == "TileX" ? origin.x : en.name == "TileY" ? origin.y : origin.z;
+                w.write_int(en.name, en.value.as_int().value_or(0) + add);
+            } else {
+                w.write_view(en.name, en.value);
+            }
+        }
+        w.end_compound();
+    }
+    w.end_list();
+    w.end_compound();
+    return std::move(w).finish();
 }
 
 } // namespace bridger::formats::java

@@ -21,6 +21,7 @@
 #include <bridger/platform/paths.hpp>
 #include <bridger/formats/java/upgrade.hpp>
 #include <bridger/translate/bedrock_upgrade.hpp>
+#include <bridger/translate/player.hpp>
 #include <bridger/translate/targets.hpp>
 
 #include <algorithm>
@@ -293,6 +294,7 @@ struct JavaWorldInfo {
     std::string level_name;
     BlockPos spawn{0, 64, 0};
     std::optional<i64> seed;
+    std::optional<RawNbt> player; // level.dat Data.Player
 };
 
 // Writes level.dat (and, from 26.1, world_gen_settings.dat) into the Java world built in `temp` for `target`, checks
@@ -311,6 +313,12 @@ fs::path java_region_dir(const fs::path& root, bool modern_layout, Dimension d) 
         return root / "dimensions" / "minecraft" / (d == Dimension::Nether ? "the_nether" : d == Dimension::End ? "the_end" : "overworld") /
                "region";
     return d == Dimension::Nether ? root / "DIM-1" / "region" : d == Dimension::End ? root / "DIM1" / "region" : root / "region";
+}
+
+// A dimension's entity region folder (Java 1.17+): dimensions/minecraft/<name>/entities, or entities, DIM-1/entities,
+// DIM1/entities.
+fs::path java_entities_dir(const fs::path& root, bool modern_layout, Dimension d) {
+    return java_region_dir(root, modern_layout, d).parent_path() / "entities";
 }
 
 const std::vector<fs::path>& java_regions(const formats::java::JavaWorld& w, Dimension d) {
@@ -350,6 +358,7 @@ Result<ConvertSummary> finish_java_world(const ConvertOptions& o, ConvertSummary
     level.level_name = info.level_name;
     level.spawn = info.spawn;
     level.seed = info.seed;
+    level.player = info.player;
     level.data_version = target.java->data_version;
     level.version_name = target.java->name;
     level.experiments = experiments;
@@ -433,7 +442,6 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
                                                "blocks are reported",
                                                *world.level.data_version, mapping->java_data_version(), mapping->java_version()));
     warn_server_dimensions(world, summary);
-    if (world.has_entity_regions) summary.warnings.push_back("entities (entities/*.mca) were not converted: entities are not written yet");
     if (world.overworld_regions.empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld region files");
 
     BRIDGER_TRY(const ScratchDir build, ScratchDir::create("javaworld"));
@@ -482,6 +490,13 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
             if (first_failure.empty()) first_failure = region.error().describe();
             continue;
         }
+        // Entities (1.17+) live in a region file of the same name under entities/.
+        std::optional<formats::java::RegionFile> entity_region;
+        if (const fs::path ep = java_entities_dir(world.root, world.modern_layout, dim) / region_path.filename(); fs::exists(ep)) {
+            if (auto er = formats::java::RegionFile::open(ep)) entity_region.emplace(std::move(*er));
+            else summary.warnings.push_back("entity file " + platform::path_to_utf8(ep.filename()).value_or("?") + " could not be read: " +
+                                            er.error().describe());
+        }
         for (usize batch = 0; batch < 1024; batch += kBatch) {
             BRIDGER_TRY_STATUS(step(o, 0.85f * (static_cast<float>(regions_done - 1) + static_cast<float>(batch) / 1024.0f) /
                                            static_cast<float>(total_regions),
@@ -507,6 +522,16 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
                 r.warnings = std::move(chunk->warnings);
                 r.blocks = count_non_air(chunk->column, kAirStateId);
                 r.report.set_origin({chunk->pos.x * 16, chunk->min_y, chunk->pos.z * 16});
+                if (entity_region && entity_region->has_chunk(lx, lz)) {
+                    auto raw_entities = entity_region->read_chunk(lx, lz);
+                    auto entities = raw_entities && *raw_entities
+                                        ? formats::java::decode_entity_chunk(**raw_entities, chunk->pos, chunk->min_y)
+                                        : Result<std::vector<Entity>>(std::vector<Entity>{});
+                    if (entities)
+                        for (Entity& e : *entities) chunk->column.entities.push_back(std::move(e));
+                    else
+                        r.warnings.push_back(std::format("entities of chunk {},{} could not be read", chunk->pos.x, chunk->pos.z));
+                }
                 auto bedrock = translate::translate_to_bedrock(chunk->column, *mapping, topt, r.report);
                 if (!bedrock) return fail(std::move(bedrock).error());
                 if (auto rw = translate::rewrite_for_bedrock_target(*bedrock, *target.bedrock_targets, *target.bedrock, *mapping, r.report);
@@ -560,6 +585,9 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     level.spawn = world.level.spawn.value_or(BlockPos{0, 64, 0});
     level.random_seed = world.level.seed.value_or(0);
     level.generator = 1; // infinite: chunks the Java world never generated are generated by Bedrock from the same seed
+    if (world.level.player)
+        if (const auto player = translate::java_player_to_bedrock(*world.level.player, *mapping, summary.report))
+            BRIDGER_TRY_STATUS(builder.put_raw("~local_player", *player));
     level.flat_world_layers = formats::bedrock::default_flat_world_layers();
     level.last_played =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -651,6 +679,10 @@ Result<ConvertSummary> write_java_structure_output(const ConvertOptions& o, Conv
 
 Result<ConvertSummary> write_bedrock_output(const ConvertOptions& o, ConvertSummary summary, const Structure& bedrock,
                                             const translate::MappingData& m, u32 air, const OutputTarget& target) {
+    // Actors (paintings) are written in whole worlds only; for structures they are reported.
+    for (const Entity& e : bedrock.entities)
+        summary.report.add(translate::IssueKind::UnmappedEntity, e.id + " (not written into structures yet)",
+                           {static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)});
     BedrockStateNbt pinned_nbt(m);
     const formats::bedrock::StateNbtFn state_fn = target_state_nbt(target, m, pinned_nbt.fn());
     if (summary.output_format == FormatId::McStructure) {
@@ -764,8 +796,6 @@ Result<ConvertSummary> convert_bedrock_world_to_bedrock(const ConvertOptions& o,
     BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(o.input, unpacked.path()));
     if (reader.overworld_chunks().empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld chunks");
     summary.source_version = bedrock_world_version_info(reader.level().last_opened_version);
-    if (reader.entity_count() > 0)
-        summary.warnings.push_back(std::format("{} entities were not converted: entities are not written yet", reader.entity_count()));
     BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::McWorld, summary));
 
     BRIDGER_TRY(const ScratchDir build, ScratchDir::create("bedrockout"));
@@ -862,6 +892,7 @@ Result<ConvertSummary> convert_bedrock_world_to_bedrock(const ConvertOptions& o,
     level.random_seed = reader.level().seed;
     level.generator = reader.level().generator;
     level.flat_world_layers = formats::bedrock::default_flat_world_layers();
+    if (reader.level().local_player) BRIDGER_TRY_STATUS(builder.put_raw("~local_player", *reader.level().local_player));
     level.last_played =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     apply_target_level(target, level);
@@ -949,6 +980,9 @@ Result<ConvertSummary> convert_java_world_to_java(const ConvertOptions& o, Conve
                 r.warnings = std::move(chunk->warnings);
                 r.blocks = count_non_air(chunk->column, kAirStateId);
                 r.report.set_origin({chunk->pos.x * 16, chunk->min_y, chunk->pos.z * 16});
+                for (const Entity& e : chunk->column.entities)
+                    r.report.add(translate::IssueKind::UnmappedEntity, e.id,
+                                 {static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)});
                 auto rw = translate::rewrite_for_java_target(chunk->column, *target.java_targets, *target.java, fallback_state, r.report);
                 if (!rw) return fail(std::move(rw).error());
                 r.features = std::move(rw->features);
@@ -997,6 +1031,10 @@ Result<ConvertSummary> convert_java_world_to_java(const ConvertOptions& o, Conve
                                                          : platform::path_to_utf8(world.root.filename()).value_or("Bridger World");
     info.spawn = world.level.spawn.value_or(BlockPos{0, 64, 0});
     info.seed = world.level.seed;
+    if (world.level.player) {
+        if (world.level.data_version.value_or(0) <= target.java->data_version) info.player = world.level.player;
+        else summary.warnings.push_back("the player was not converted: the target version is older than the world");
+    }
     return finish_java_world(o, std::move(summary), tree.path, tree.keep, target, info, chunks, block_entities, experiments);
 }
 
@@ -1007,8 +1045,6 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(o.input, unpacked.path()));
     if (reader.overworld_chunks().empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld chunks");
     summary.source_version = bedrock_world_version_info(reader.level().last_opened_version);
-    if (reader.entity_count() > 0)
-        summary.warnings.push_back(std::format("{} entities were not converted: entities are not written yet", reader.entity_count()));
 
     // Temp folder in the destination's directory (same volume: the final rename cannot cross volumes).
     BRIDGER_TRY(const fs::path temp, platform::AtomicFileWriter::temp_path_for(o.output));
@@ -1039,6 +1075,7 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
         u64 blocks = 0;
         usize block_entities = 0;
         std::vector<std::string> features; // experimental features of the target its blocks need
+        std::vector<u8> entity_nbt;        // the chunk of the entity region file, if it has entities
     };
     usize chunks = 0, block_entities = 0;
     std::vector<std::string> experiments;
@@ -1061,6 +1098,7 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     for (const auto& [rpos, cols] : regions) {
         BRIDGER_TRY_STATUS(step(o, 0.9f * static_cast<float>(regions_done++) / static_cast<float>(total_regions), "Converting chunks"));
         formats::java::RegionWriter region(rpos.first, rpos.second);
+        formats::java::RegionWriter entity_region(rpos.first, rpos.second);
         std::vector<ColumnResult> results(cols.size());
         parallel_for(cols.size(), o.threads, [&](usize i) {
             ColumnResult& r = results[i];
@@ -1105,6 +1143,14 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
                 return;
             }
             r.nbt = std::move(*nbt);
+            if (!java->entities.empty()) {
+                auto entities = formats::java::encode_entity_chunk(java->entities, c, col->min_y, target.java->data_version);
+                if (!entities) {
+                    r.error = std::move(entities).error();
+                    return;
+                }
+                r.entity_nbt = std::move(*entities);
+            }
         });
         for (usize i = 0; i < cols.size(); ++i) {
             ColumnResult& r = results[i];
@@ -1123,10 +1169,17 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
             for (std::string& f : r.features)
                 if (std::find(experiments.begin(), experiments.end(), f) == experiments.end()) experiments.push_back(std::move(f));
             BRIDGER_TRY_STATUS(region.add(static_cast<u32>(cols[i].x & 31), static_cast<u32>(cols[i].z & 31), r.nbt));
+            if (!r.entity_nbt.empty())
+                BRIDGER_TRY_STATUS(entity_region.add(static_cast<u32>(cols[i].x & 31), static_cast<u32>(cols[i].z & 31), r.entity_nbt));
             ++chunks;
             r = ColumnResult{};
         }
         if (region.chunk_count() > 0) BRIDGER_TRY_STATUS(region.write(region_dir));
+        if (entity_region.chunk_count() > 0) {
+            const fs::path entities_dir = java_entities_dir(temp, modern_layout, dim);
+            fs::create_directories(entities_dir);
+            BRIDGER_TRY_STATUS(entity_region.write(entities_dir));
+        }
     }
     }
     for (const auto& [reason, n] : failures) summary.warnings.push_back(std::format("{} chunks could not be converted ({})", n, reason));
@@ -1142,6 +1195,8 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
                                                             : platform::path_to_utf8(o.output.filename()).value_or("Bridger World");
     info.spawn = reader.level().spawn;
     info.seed = reader.level().seed;
+    if (reader.level().local_player)
+        info.player = translate::bedrock_player_to_java(*reader.level().local_player, target.java->data_version, m, summary.report);
     return finish_java_world(o, std::move(summary), tree.path, tree.keep, target, info, chunks, block_entities, experiments);
 }
 

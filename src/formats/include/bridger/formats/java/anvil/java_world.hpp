@@ -23,6 +23,7 @@ struct JavaLevelInfo {
     std::optional<i32> storage_format; // level.dat "version": 19132 McRegion, 19133 Anvil
     std::optional<BlockPos> spawn;
     std::optional<i64> seed;
+    std::optional<RawNbt> player; // Data.Player (single player), big-endian NBT
 };
 
 [[nodiscard]] Result<JavaLevelInfo> read_java_level_dat(std::span<const u8> bytes, const io::DecompressLimits& limits = {});

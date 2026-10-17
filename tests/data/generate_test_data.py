@@ -708,6 +708,18 @@ def generate_java_world():
         "Version": Compound({"Name": String("26.3"), "Id": Int(5023)}),
         "spawn": Compound({"dimension": String("minecraft:overworld"), "pos": IntArray([8, 70, 8])}),
         "WorldGenSettings": Compound({"seed": Long(12345)}),
+        # The single-player player (1.21.5+ "equipment" compound for armor and offhand).
+        "Player": Compound({
+            "Pos": List[Double]([Double(8.5), Double(65.0), Double(8.5)]),
+            "Motion": List[Double]([Double(0), Double(0), Double(0)]),
+            "Rotation": List[Float]([Float(90.0), Float(10.0)]),
+            "Dimension": String("minecraft:overworld"), "playerGameType": Int(1),
+            "Inventory": List[Compound]([Compound({"Slot": Byte(0), "id": String("minecraft:diamond_sword"), "count": Int(1)}),
+                                         Compound({"Slot": Byte(9), "id": String("minecraft:torch"), "count": Int(32)})]),
+            "equipment": Compound({"head": Compound({"id": String("minecraft:diamond_helmet"), "count": Int(1)})}),
+            "EnderItems": List[Compound]([Compound({"Slot": Byte(0), "id": String("minecraft:emerald"), "count": Int(3)})]),
+            "XpLevel": Int(5),
+        }),
     })})
     write_gzip(world / "level.dat", nbt_bytes(level, "", "big"))
 
@@ -750,6 +762,27 @@ def generate_java_world():
     # Negative coordinates: chunk (-1,0) is local (31,0) of region (-1,0).
     cm1 = anvil_chunk(-1, 0, [anvil_section(-1, ["minecraft:emerald_block"])])
     write_region(world / "region" / "r.-1.0.mca", {(31, 0): (2, nbt_bytes(cm1, "", "big"), False)})
+    # Entities (1.17+ entities/ region file) of chunk (0,0): an item frame holding a diamond (facing south, 1.21.5+
+    # block_pos), a glow item frame holding a map (facing up), a 1x1 painting facing north and a pig (reported).
+    def entity(eid, pos, extra):
+        c = Compound({"id": String(eid), "Pos": List[Double]([Double(v) for v in pos]),
+                      "Rotation": List[Float]([Float(0), Float(0)]), "UUID": IntArray([1, 2, 3, len(eid)])})
+        c.update(extra)
+        return c
+    entities = Compound({"DataVersion": Int(5023), "Position": IntArray([0, 0]), "Entities": List[Compound]([
+        entity("minecraft:item_frame", (5.5, 70.5, 5.03125), {
+            "Facing": Byte(3), "block_pos": IntArray([5, 70, 5]), "ItemRotation": Byte(2), "ItemDropChance": Float(1.0),
+            "Item": Compound({"id": String("minecraft:diamond"), "count": Int(1)})}),
+        entity("minecraft:glow_item_frame", (7.5, 64.96875 + 1.0, 7.5), {
+            "Facing": Byte(1), "block_pos": IntArray([7, 65, 7]), "ItemRotation": Byte(0),
+            "Item": Compound({"id": String("minecraft:filled_map"), "count": Int(1),
+                              "components": Compound({"minecraft:map_id": Int(0)})})}),
+        entity("minecraft:painting", (6.5, 71.5, 4.03125), {
+            "facing": Byte(2), "block_pos": IntArray([6, 71, 4]), "variant": String("minecraft:kebab")}),
+        entity("minecraft:pig", (9.5, 65.0, 9.5), {}),
+    ])})
+    write_region(world / "entities" / "r.0.0.mca", {(0, 0): (2, nbt_bytes(entities, "", "big"), False)})
+
     # The Nether (DIM-1): chunk (0,0) from y 0, netherrack at the bottom, glowstone at y 64 and a stone platform at
     # y 128 above the Bedrock Nether's height (y 0..127), where it is dropped and reported.
     nether_pal = ["minecraft:air", "minecraft:glowstone"]

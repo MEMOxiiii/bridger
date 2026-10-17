@@ -6,6 +6,7 @@
 #include <bridger/io/nbt/nbt_writer.hpp>
 #include <bridger/translate/targets.hpp>
 
+#include "entity_translator.hpp"
 #include "bedrock_block_entity_downgrade.hpp"
 #include "java_block_entity_downgrade.hpp"
 
@@ -410,6 +411,41 @@ Result<JavaRewrite> rewrite_for_java_target(Structure& java, const JavaTargets& 
                                             ConversionReport& report) {
     JavaRewrite result;
     if (target.pinned) return result;
+    // Entities (item frames, paintings): Chunker JavaHangingEntityHandler / JavaPaintingEntityHandler /
+    // JavaPaintingMotiveResolver: block_pos from 1.21.5 (TileX/TileY/TileZ before), "variant"/"facing" from 1.19
+    // ("Motive"/"Facing" before); painting variants newer than the target are removed and reported.
+    const i32 dv = target.data_version;
+    std::erase_if(java.entities, [&](Entity& e) {
+        if (e.id != "minecraft:painting" && e.id != "minecraft:item_frame" && e.id != "minecraft:glow_item_frame") return false;
+        const auto doc = io::nbt::NbtDocument::parse(e.data.bytes, e.data.endian);
+        if (!doc) return false;
+        const io::nbt::NbtCompoundView c = doc->root().entries();
+        const BlockPos where{static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)};
+        if (const auto variant = c.find("variant").as_string(); variant && detail::java_painting_since(*variant) > dv) {
+            report.add(IssueKind::UnmappedEntity, "minecraft:painting " + std::string(*variant) + " (not in Java " + target.name + ")", where);
+            return true;
+        }
+        io::nbt::NbtWriter w(e.data.endian);
+        w.begin_root_compound();
+        for (const io::nbt::NbtEntry& en : c) {
+            if (en.name == "block_pos" && dv < 4325) { // 1.21.5
+                const auto bp = en.value.as_int_array();
+                if (!bp || bp->size() != 3) continue;
+                w.write_int("TileX", (*bp)[0]);
+                w.write_int("TileY", (*bp)[1]);
+                w.write_int("TileZ", (*bp)[2]);
+            } else if (en.name == "variant" && dv < 3105) { // 1.19
+                w.write_view("Motive", en.value);
+            } else if (en.name == "facing" && dv < 3105) {
+                w.write_view("Facing", en.value);
+            } else {
+                w.write_view(en.name, en.value);
+            }
+        }
+        w.end_compound();
+        if (auto bytes = std::move(w).finish()) e.data.bytes = std::move(*bytes);
+        return false;
+    });
     BlockStateRegistry& reg = java.block_registry();
     const usize n = reg.size();
     std::vector<u32> map(n);
@@ -678,6 +714,28 @@ std::span<const u8> BedrockTargets::state_nbt(const BedrockTarget& target, Bedro
 Result<u64> rewrite_for_bedrock_target(Structure& bedrock, const BedrockTargets& targets, const BedrockTarget& target,
                                        const MappingData& mapping, ConversionReport& report) {
     if (target.pinned) return u64{0};
+    // Paintings: "Motive" until 1.20.60, "Motif" after (Chunker BedrockPaintingEntityHandler); motives newer than the
+    // target are removed and reported.
+    const std::array<i32, 3> target_v{target.version[0], target.version[1], target.version[2]};
+    std::erase_if(bedrock.entities, [&](Entity& e) {
+        if (e.id != "minecraft:painting") return false;
+        const auto doc = io::nbt::NbtDocument::parse(e.data.bytes, e.data.endian);
+        if (!doc) return false;
+        const std::string motif(doc->root().entries().find("Motif").as_string().value_or(""));
+        const BlockPos where{static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)};
+        if (const auto since = detail::painting_motive_since(motif); since && target_v < *since) {
+            report.add(IssueKind::UnmappedEntity, "minecraft:painting " + motif + " (not in Bedrock " + target.name + ")", where);
+            return true;
+        }
+        if (target_v < std::array<i32, 3>{1, 20, 70}) {
+            io::nbt::NbtWriter w(e.data.endian);
+            w.begin_root_compound();
+            for (const io::nbt::NbtEntry& en : doc->root().entries()) w.write_view(en.name == "Motif" ? "Motive" : en.name, en.value);
+            w.end_compound();
+            if (auto bytes = std::move(w).finish()) e.data.bytes = std::move(*bytes);
+        }
+        return false;
+    });
     const usize n = mapping.bedrock_state_count();
     auto state_text = [&](BedrockStateIndex i) {
         const BedrockState& st = mapping.bedrock(i);

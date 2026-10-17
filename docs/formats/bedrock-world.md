@@ -83,6 +83,53 @@ writes one storage per subchunk of the dimension [3]; `BedrockBiomeIDResolver` f
 y 127 is dropped and counted ("blocks of the Nether outside the Bedrock build height"). The Caves & Cliffs
 experiment's shifted subchunk keys (chunk versions 0x16–0x1D) apply to the Overworld only.
 
+## Entities
+
+Bedrock keeps item frames as **blocks** and paintings (and every other entity) as **actors**; Java keeps both as
+entities. Translation: `translate/entity_translator.cpp`, following Chunker [3] (`BedrockItemFrameEntityHandler`,
+`ItemFrameEntity.toBedrockBlockEntity`, `BedrockItemFrameBlockEntityHandler`, `BedrockPaintingEntityHandler` and its
+`Relocator`, `BedrockPaintingMotiveResolver`, `JavaItemFrameEntityHandler`, `JavaPaintingEntityHandler`,
+`JavaHangingEntityHandler`, `BedrockEntityHandler`).
+
+| Java entity | Bedrock |
+|---|---|
+| `item_frame`, `glow_item_frame`: `Facing` (0..5 = down, up, north, south, west, east), tile `block_pos` (1.21.5+) or `TileX/Y/Z`, `Item`, `ItemRotation` (0..7) | block `minecraft:frame` / `glow_frame` at the tile: `facing_direction` = Java `Facing` (same order), `item_frame_map_bit` (holds a filled map), `item_frame_photo_bit` 0; water there moves to layer 2; block entity `ItemFrame` / `GlowItemFrame` with `Item` and `ItemRotation` = steps × 45 (Float degrees, 1.13+) |
+| `painting`: `variant` (1.19+) or `Motive`, `facing` / `Facing` (2D: south, west, north, east = 0..3), tile | actor `minecraft:painting`: `Motif` (after 1.20.60; `Motive` before), `Direction` = Java facing, `Pos`, `Rotation`, `Motion` |
+
+Motive names: the old ones in CamelCase (`Kebab`, `SkullAndRoses`, `DonkeyKong`), the 1.21 ones in lower case
+(`backyard`, `prairie_ride`, …), `dennis` from 1.21.93; for older targets newer motives are removed and reported.
+Painting position (Chunker's Relocator, writing): tile −= tile offset (x −1 facing south and z −1 facing west for an even
+width, y −1 for an even height); Pos = tile − position offset, where the offset is (side, y, −0.96875) north,
+(−0.03125, y, side) east, (side, y, −0.03125) south, (−0.96875, y, side) west, side = 0 for an even width else −0.5,
+y = 0 for an even height else −0.5. Reading Bedrock runs it forward (Pos += offset, tile = floor(Pos + tile offset)).
+
+**Actor storage** (1.18.30+): `actorprefix` + 8-byte storage key → the actor NBT; `digp` + x, z (+ dimension) → the
+storage keys of the actors in that chunk (an actor is listed in the chunk its position is in). Bridger assigns
+`UniqueID` = (world start count 0, flipped) << 32 | counter and the storage key 0x100000000 + (UniqueID ^
+0xFFFFFFFF00000000), big-endian (Chunker `generateStorageKeyForEntity`) [3][1]. Worlds before 1.18.30 keep a chunk's
+entities as concatenated NBT under its Entity key (0x32); both are read. Every other entity is reported
+("unmapped entity"); within an edition (Bedrock → Bedrock) actors are copied as they are, as Chunker does.
+
+## Player
+
+The single-player player: Java `level.dat` `Data.Player` ↔ Bedrock `~local_player` (`translate/player.cpp`; Chunker
+`JavaLevelReader.parsePlayer`, `JavaLevelWriter.writePlayer`, `BedrockLevelWriter.writeLocalPlayer`,
+`BedrockLevelReader`) [3]:
+
+| Java | Bedrock |
+|---|---|
+| `Pos` (feet) | `Pos` Floats, y + 1.62001 (the eye position Bedrock saves) |
+| `Motion`, `Rotation` | same, as Floats |
+| `Dimension` (`minecraft:the_nether`, …; older −1/0/1) | `DimensionId` 0, 1, 2 |
+| `playerGameType` 0..3 | `PlayerGameMode`; spectator 3 ↔ 6 |
+| `Inventory` slots 0..35 | `Inventory` with the same `Slot` |
+| armor: `equipment` {`head`, `chest`, `legs`, `feet`} (1.21.5+) or slots 103..100 | `Armor` list head, chest, legs, feet (empty slots as items with `Name` "") |
+| offhand: `equipment.offhand` or slot −106 | `Offhand` list |
+
+Bedrock also gets the `minecraft:movement` attribute (base 0.1), without which it uses a wrong default speed. Ender
+chest, experience, effects and respawn point are reported, not converted. Server players (`playerdata/`) are not read,
+as in Chunker.
+
 ## Block entities
 
 Stored per chunk under tag `0x31` as concatenated little-endian NBT roots [1]. Each one gets `x`, `y`, `z`

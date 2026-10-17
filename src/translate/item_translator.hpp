@@ -34,4 +34,9 @@ void write_items(io::nbt::NbtWriter& w, std::string_view name, io::nbt::NbtView 
 bool write_item(io::nbt::NbtWriter& w, std::string_view name, io::nbt::NbtCompoundView java_item, const MappingData& m,
                 ConversionReport& report, BlockPos pos);
 
+// One Bedrock item {Name, Damage, Count, tag} -> a Java item compound {id, count} written as `name` (Bedrock -> Java,
+// reverse_block_entities.cpp). Returns false when the item has no Java counterpart (reported).
+bool write_java_item(io::nbt::NbtWriter& w, std::string_view name, io::nbt::NbtCompoundView bedrock_item, const MappingData& m,
+                     ConversionReport& report, BlockPos pos);
+
 } // namespace bridger::translate::detail

@@ -8,6 +8,7 @@
 #include <bridger/io/nbt/nbt_writer.hpp>
 #include <bridger/translate/block_entity_translator.hpp>
 
+#include "item_translator.hpp"
 #include "tables.hpp"
 
 #include <string>
@@ -59,6 +60,29 @@ void write_java_items(NbtWriter& w, NbtView items, const MappingData& m, Convers
     }
     w.end_list();
 }
+
+} // namespace
+
+bool detail::write_java_item(NbtWriter& w, std::string_view field, NbtCompoundView c, const MappingData& m, ConversionReport& report,
+                             BlockPos pos) {
+    const auto name = c.find("Name").as_string();
+    if (!name || name->empty()) return false;
+    const std::string bedrock = utf8_of(*name);
+    const auto java = m.java_item_of_bedrock(bedrock, c.find("Damage").as_short().value_or(0));
+    const i32 count = c.find("Count").as_byte().value_or(1);
+    if (!java) {
+        report.add(IssueKind::UnmappedBlockEntity, "item " + bedrock, pos, static_cast<u64>(count < 1 ? 1 : count));
+        return false;
+    }
+    if (c.find("tag")) report.add(IssueKind::LossyBlock, "item data dropped: " + bedrock, pos);
+    w.begin_compound(field);
+    w.write_string("id", *java);
+    w.write_int("count", count < 1 ? 1 : count);
+    w.end_compound();
+    return true;
+}
+
+namespace {
 
 void write_java_custom_name(NbtWriter& w, NbtCompoundView c) {
     // A plain string is a valid text component in Java 1.21.5+ NBT.

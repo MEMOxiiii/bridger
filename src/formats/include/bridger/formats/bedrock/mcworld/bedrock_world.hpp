@@ -42,6 +42,13 @@ struct WorldWriteStats {
     usize chunks = 0;
     usize subchunks = 0;
     usize block_entities = 0;
+    usize actors = 0;
+};
+
+// An actor (entity) to store: little-endian NBT without "Pos" and "UniqueID", and its absolute position.
+struct EncodedActor {
+    std::vector<u8> nbt;
+    f64 x = 0, y = 0, z = 0;
 };
 
 // Builds the world in `work_dir` (an empty scratch directory) and returns the zipped
@@ -61,6 +68,8 @@ struct EncodedColumn {
     std::vector<std::pair<std::string, std::vector<u8>>> entries;
     WorldWriteStats stats;
     usize clipped_blocks = 0; // blocks outside the dimension's build height, dropped
+    Dimension dimension = Dimension::Overworld;
+    std::vector<EncodedActor> actors; // the column's entities (Structure::entities); stored by WorldBuilder::put
 
     void add(std::string key, std::span<const u8> value) { entries.emplace_back(std::move(key), std::vector<u8>(value.begin(), value.end())); }
 };
@@ -82,6 +91,8 @@ public:
                                                              u8 chunk_version = kChunkVersion,
                                                              Dimension dimension = Dimension::Overworld);
     [[nodiscard]] Status put(const EncodedColumn& column);
+    // Stores one entry as it is (e.g. "~local_player").
+    [[nodiscard]] Status put_raw(std::string_view key, std::span<const u8> value);
 
     // `column`: a Bedrock-domain 16 x h x 16 structure whose local (0,0,0) is world
     // (pos.x*16, min_y, pos.z*16); block entities as for write_new_world. No flat layers

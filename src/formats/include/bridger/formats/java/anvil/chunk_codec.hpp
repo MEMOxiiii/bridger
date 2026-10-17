@@ -27,6 +27,12 @@ struct JavaChunk {
 
 inline constexpr i32 kFirstFlatteningChunkDataVersion = 2860; // Java 1.18 (21w43a+) section layout
 
+// Entities of a chunk from Java 1.17's entity region files (entities/r.<x>.<z>.mca: {DataVersion, Position, Entities}),
+// as core Entity values: id, position relative to the column at (pos.x*16, min_y, pos.z*16), and the whole compound
+// (Pos included) as data. Chunks older than 1.17 keep "Entities" in the chunk itself; decode_chunk reads those.
+[[nodiscard]] Result<std::vector<Entity>> decode_entity_chunk(std::span<const u8> nbt, ChunkPos pos, i32 min_y,
+                                                              const io::nbt::NbtLimits& limits = {});
+
 // Every Java chunk layout since McRegion (Beta 1.3): 1.18+ sections, the pre-1.18 "Level" compound
 // with 1.13+ palettes, numeric-id sections (1.2 - 1.12) and McRegion columns (Beta 1.3 - 1.1).
 // Numeric ids need `legacy` (the caller's legacy table); without it such chunks fail with

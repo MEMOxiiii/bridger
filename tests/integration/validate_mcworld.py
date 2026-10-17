@@ -144,7 +144,20 @@ def main():
         # format"; Chunker Dimension).
         ranges = {0: range(-4, 20), 1: range(0, 8), 2: range(0, 16)}
         blocks_by_y = {}
+        actors, digp = {}, {}
         for key, value in db.iterate():
+            # Actors (1.18.30+): "actorprefix" + 8-byte key -> NBT; "digp" + chunk key -> the chunk's actor keys.
+            if key.startswith(b"actorprefix") and len(key) == 19:
+                actor = read_nbt_le(io.BytesIO(value))
+                if "identifier" not in actor or len(actor.get("Pos", [])) != 3 or "UniqueID" not in actor:
+                    fail("actor without identifier, Pos or UniqueID")
+                actors[key[11:]] = actor
+                continue
+            if key.startswith(b"digp") and len(key) in (12, 16):
+                if len(value) % 8:
+                    fail("digp value is not a list of 8-byte keys")
+                digp[key[4:]] = [value[i:i + 8] for i in range(0, len(value), 8)]
+                continue
             # Chunk keys: x, z (8 bytes), a dimension (4 bytes) outside the Overworld, the tag, a subchunk index.
             if len(key) in (13, 14):
                 dim = struct.unpack("<i", key[8:12])[0]
@@ -189,8 +202,19 @@ def main():
                 if len(value) < 512:
                     fail("Data3D too short")
         db.close()
+        for chunk, keys in digp.items():
+            cx, cz = struct.unpack("<ii", chunk[:8])
+            for k in keys:
+                if k not in actors:
+                    fail("digp lists an actor that does not exist")
+                pos = actors[k]["Pos"]
+                if (int(float(pos[0])) // 16, int(float(pos[2])) // 16) != (cx, cz):
+                    fail("actor listed in the digp entry of another chunk")
+        if len(actors) != sum(len(v) for v in digp.values()):
+            fail("actors not listed in any digp entry")
 
     dims = "".join(f", {n} {name} chunks" for d, name in ((1, "Nether"), (2, "End")) if (n := per_dim[d]))
+    dims += f", {len(actors)} actors" if actors else ""
     print(f"valid: {chunks} chunks{dims}, {subchunks} subchunks, {block_entities} block entities, "
           f"level '{level['LevelName']}'")
     if args.report:

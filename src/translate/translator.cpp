@@ -1,6 +1,8 @@
 #include <bridger/translate/block_entity_translator.hpp>
 #include <bridger/translate/translator.hpp>
 
+#include "entity_translator.hpp"
+
 #include <unordered_map>
 #include <unordered_set>
 
@@ -157,10 +159,8 @@ Result<Structure> translate_to_bedrock(const Structure& java, const MappingData&
         if (auto synthesized = synthesize_block_entity(pos, jid, map)) out.block_entities.push_back(std::move(*synthesized));
     }
 
-    // --- Entities: Bedrock actor storage is not written yet (planned); never silently dropped.
-    for (const Entity& e : java.entities)
-        report.add(IssueKind::UnmappedEntity, e.id,
-                   BlockPos{static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)});
+    // --- Entities: item frames (Bedrock blocks) and paintings (actors); every other entity is reported.
+    for (const Entity& e : java.entities) detail::translate_entity(e, out, map, *air, *water, report);
 
     return out;
 }

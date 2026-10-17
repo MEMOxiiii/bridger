@@ -243,6 +243,7 @@ Result<BedrockWorldReader> BedrockWorldReader::open_unpacked(BedrockWorldReader 
         std::sort(list->begin(), list->end(), [](ChunkPos a, ChunkPos b) { return a.z != b.z ? a.z < b.z : a.x < b.x; });
         list->erase(std::unique(list->begin(), list->end()), list->end());
     }
+    BRIDGER_TRY(m.level.local_player, db.get("~local_player"));
     m.db.emplace(std::move(db));
     return r;
 }
@@ -437,6 +438,58 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
             BRIDGER_TRY(std::vector<u8> bytes, std::move(w).finish());
             be.data = RawNbt{std::move(bytes), Endian::Little};
             col.block_entities.push_back(std::move(be));
+        }
+    }
+
+    // Actors: since 1.18.30 "digp" + x, z (+ dimension) lists 8-byte keys of "actorprefix" entries; before, the chunk's
+    // Entity key (0x32) holds concatenated NBT roots (minecraft.wiki "Bedrock Edition level format"; Chunker
+    // v1_18_30 ColumnReader). Each becomes a column-local Entity whose data is the actor's NBT as stored.
+    const auto add_actor = [&](std::span<const u8> nbt, usize* consumed) {
+        auto doc = io::nbt::NbtDocument::parse(nbt, Endian::Little);
+        if (!doc) {
+            out.warnings.push_back(where + ": an entity could not be read and was skipped");
+            return false;
+        }
+        if (consumed) *consumed = doc->consumed_bytes();
+        const NbtCompoundView c = doc->root().entries();
+        const auto pos_list = c.find("Pos").items();
+        const auto id = c.find("identifier").as_string();
+        if (!id || pos_list.size() != 3) return true;
+        Entity e;
+        e.id = std::string(*id);
+        const auto coord = [&](usize i) { return static_cast<f64>(pos_list.at(i).as_float().value_or(0.0f)); };
+        e.pos = {coord(0) - pos.x * 16.0, coord(1) - out.min_y, coord(2) - pos.z * 16.0};
+        e.data = RawNbt{std::vector<u8>(nbt.begin(), nbt.begin() + static_cast<std::ptrdiff_t>(doc->consumed_bytes())), Endian::Little};
+        col.entities.push_back(std::move(e));
+        return true;
+    };
+    std::string digp = "digp";
+    std::array<u8, 4> le{};
+    for (const i32 v : {pos.x, pos.z}) {
+        io::store_le<i32>(le.data(), v);
+        digp.append(reinterpret_cast<const char*>(le.data()), 4);
+    }
+    if (dim != Dimension::Overworld) {
+        io::store_le<i32>(le.data(), static_cast<i32>(dim));
+        digp.append(reinterpret_cast<const char*>(le.data()), 4);
+    }
+    BRIDGER_TRY(const auto keys, db.get(digp));
+    if (keys) {
+        for (usize k = 0; k + 8 <= keys->size(); k += 8) {
+            std::string actor_key = "actorprefix";
+            actor_key.append(reinterpret_cast<const char*>(keys->data() + k), 8);
+            BRIDGER_TRY(const auto actor, db.get(actor_key));
+            if (actor) (void)add_actor(*actor, nullptr);
+        }
+    }
+    BRIDGER_TRY(const auto legacy_entities, db.get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kEntityTag))));
+    if (legacy_entities) {
+        const std::span<const u8> all(*legacy_entities);
+        usize p = 0;
+        while (p < all.size()) {
+            usize used = 0;
+            if (!add_actor(all.subspan(p), &used) || used == 0) break;
+            p += used;
         }
     }
     return out;

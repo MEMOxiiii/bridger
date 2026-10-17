@@ -27,6 +27,7 @@ struct BedrockLevelInfo {
     i32 generator = 1; // 0 old, 1 infinite, 2 flat, 5 void
     std::vector<i32> last_opened_version; // level.dat lastOpenedWithVersion, e.g. [1, 21, 50, 0, 0]; empty in very old worlds
     i32 storage_version = 0;               // level.dat header / StorageVersion
+    std::optional<std::vector<u8>> local_player; // the "~local_player" entry (little-endian NBT), if any
 };
 
 struct BedrockColumn {

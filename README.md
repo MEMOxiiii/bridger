@@ -139,8 +139,9 @@ Against [Chunker](https://github.com/HiveGamesOSS/Chunker) 1.21.0 converting the
   `world_nether` / `world_the_end` folders are not read (as in Chunker); Bridger says so. Java Alpha worlds (before
   Beta 1.3) and Pocket Edition worlds before 0.9 are not read. Worlds from before 1.18 have nothing below y 0 after
   conversion.
-- Entities (armor stands, item frames, mobs) and players are not written yet; text formatting (colours, bold) is
-  reduced to plain text. All of it is listed in the report.
+- Entities: item frames and paintings convert; mobs, villagers, armor stands and minecarts are not written yet and
+  are listed in the report by type. The single-player player converts (inventory, armor, position); a server's
+  `playerdata` is not read. Text formatting (colours, bold) is reduced to plain text.
 - Bedrock-only blocks have no Java equivalent: they are replaced and reported.
 - One Java and one Bedrock version at a time; Windows x64 only for now.
 

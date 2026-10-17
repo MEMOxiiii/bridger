@@ -21,6 +21,12 @@ namespace bridger::formats::java {
 // uncompressed chunk NBT.
 [[nodiscard]] Result<std::vector<u8>> encode_chunk(const Structure& column, ChunkPos pos, i32 min_y, i32 data_version);
 
+// The column's entities as a chunk of an entity region file (entities/r.<x>.<z>.mca, Java 1.17+):
+// {DataVersion, Position: [I; x, z], Entities: [...]} (big-endian NBT). Each entity gets "id", "Pos" (absolute doubles)
+// and a "UUID" (int[4], unique per world: Bridger's marker, chunk x, chunk z, index); its tile fields ("block_pos" or
+// TileX/TileY/TileZ), column-local in Structure::entities, are made absolute. docs/formats/anvil.md, "Entities".
+[[nodiscard]] Result<std::vector<u8>> encode_entity_chunk(const std::vector<Entity>& entities, ChunkPos pos, i32 min_y, i32 data_version);
+
 // Collects the chunks of one region and builds r.<x>.<z>.mca (zlib per chunk; payloads over
 // 255 sectors go to c.<x>.<z>.mcc files next to it).
 class RegionWriter {
@@ -52,6 +58,8 @@ struct JavaLevelOptions {
     // Experimental features to switch on ("update_1_20"): data packs and enabled_features, as Chunker's
     // JavaLevelWriter.enableExperiments writes them. Needed when the world holds experimental blocks.
     std::vector<std::string> experiments;
+    // The single-player player: a Player compound (big-endian NBT), written as Data.Player.
+    std::optional<RawNbt> player;
 };
 
 // Gzip-compressed level.dat ({Data: {...}}) and, from 26.1, world_gen_settings.dat (seed only). The layout follows

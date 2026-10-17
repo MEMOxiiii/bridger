@@ -9,6 +9,9 @@
 #include <bridger/platform/paths.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <tuple>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -294,6 +297,61 @@ struct WorldBuilder::Impl {
     fs::path dir;
     std::optional<LevelDbStore> db;
     WorldWriteStats stats;
+    u32 next_actor = 0;
+    // Actor storage keys per chunk (dimension, x, z), written as "digp" entries by finish(): an actor belongs to the
+    // chunk its position is in, which may be a neighbour of the column it came from.
+    std::map<std::tuple<i32, i32, i32>, std::vector<u8>> digp;
+
+    // Actors since 1.18.30 (Chunker v1_18_30 ColumnWriter; minecraft.wiki "Bedrock Edition level format"):
+    // "actorprefix" + 8-byte storage key -> the actor's NBT; "digp" + x, z (+ dimension) -> the storage keys of the
+    // chunk's actors. UniqueID = (world start count 0, flipped) << 32 | counter; storage key =
+    // 0x100000000 + (UniqueID ^ 0xFFFFFFFF00000000), big-endian (Chunker generateStorageKeyForEntity).
+    Status put_actor(Dimension dim, const EncodedActor& a) {
+        const auto doc = io::nbt::NbtDocument::parse(a.nbt, Endian::Little);
+        if (!doc) return tl::unexpected(doc.error());
+        const i64 unique_id = static_cast<i64>((0xFFFFFFFFull << 32) | next_actor++);
+        io::nbt::NbtWriter w(Endian::Little);
+        w.begin_root_compound();
+        for (const io::nbt::NbtEntry& e : doc->root().entries())
+            if (e.name != "Pos" && e.name != "UniqueID") w.write_view(e.name, e.value);
+        w.begin_list("Pos", io::nbt::TagType::Float, 3);
+        w.write_float({}, static_cast<f32>(a.x));
+        w.write_float({}, static_cast<f32>(a.y));
+        w.write_float({}, static_cast<f32>(a.z));
+        w.end_list();
+        w.write_long("UniqueID", unique_id);
+        w.end_compound();
+        BRIDGER_TRY(const std::vector<u8> bytes, std::move(w).finish());
+        const u64 storage = 0x100000000ull + (static_cast<u64>(unique_id) ^ 0xFFFFFFFF00000000ull);
+        std::array<u8, 8> key{};
+        for (usize i = 0; i < 8; ++i) key[i] = static_cast<u8>(storage >> (56 - 8 * i));
+        std::string full = "actorprefix";
+        full.append(reinterpret_cast<const char*>(key.data()), key.size());
+        BRIDGER_TRY_STATUS(db->put(full, bytes));
+        const i32 cx = static_cast<i32>(std::floor(a.x)) >> 4, cz = static_cast<i32>(std::floor(a.z)) >> 4;
+        auto& list = digp[{static_cast<i32>(dim), cx, cz}];
+        list.insert(list.end(), key.begin(), key.end());
+        ++stats.actors;
+        return {};
+    }
+    Status write_digp() {
+        for (const auto& [chunk, keys] : digp) {
+            const auto [dim, cx, cz] = chunk;
+            std::string key = "digp";
+            std::array<u8, 4> b{};
+            for (const i32 v : {cx, cz}) {
+                io::store_le<i32>(b.data(), v);
+                key.append(reinterpret_cast<const char*>(b.data()), 4);
+            }
+            if (dim != 0) {
+                io::store_le<i32>(b.data(), dim);
+                key.append(reinterpret_cast<const char*>(b.data()), 4);
+            }
+            BRIDGER_TRY_STATUS(db->put(key, keys));
+        }
+        digp.clear();
+        return {};
+    }
 };
 
 WorldBuilder::WorldBuilder() = default;
@@ -348,6 +406,9 @@ Result<EncodedColumn> WorldBuilder::encode_column(ChunkPos pos, i32 min_y, const
         BRIDGER_TRY_STATUS(acc.add_subchunk(out, pos.x, pos.z, sy, *blocks, layer2, air_state, state_nbt));
     }
     const BlockPos origin{pos.x * 16, min_y, pos.z * 16};
+    out.dimension = dimension;
+    for (const Entity& e : column.entities)
+        out.actors.push_back({e.data.bytes, origin.x + e.pos.x, origin.y + e.pos.y, origin.z + e.pos.z});
     std::vector<std::pair<const BlockEntity*, BlockPos>> bes;
     for (const BlockEntity& be : column.block_entities) {
         const BlockPos w{be.pos.x + origin.x, be.pos.y + origin.y, be.pos.z + origin.z};
@@ -361,7 +422,14 @@ Result<EncodedColumn> WorldBuilder::encode_column(ChunkPos pos, i32 min_y, const
 Status WorldBuilder::put(const EncodedColumn& column) {
     Impl& m = *impl_;
     if (!m.db) return make_error(ErrorCode::InvalidArgument, "WorldBuilder::put after finish");
-    return put_column(*m.db, column, m.stats);
+    BRIDGER_TRY_STATUS(put_column(*m.db, column, m.stats));
+    for (const EncodedActor& a : column.actors) BRIDGER_TRY_STATUS(m.put_actor(column.dimension, a));
+    return {};
+}
+
+Status WorldBuilder::put_raw(std::string_view key, std::span<const u8> value) {
+    if (!impl_->db) return make_error(ErrorCode::InvalidArgument, "WorldBuilder::put_raw after finish");
+    return impl_->db->put(key, value);
 }
 
 Status WorldBuilder::write_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state, i32 default_biome,
@@ -374,6 +442,7 @@ Status WorldBuilder::write_column(ChunkPos pos, i32 min_y, const Structure& colu
 Status WorldBuilder::finish(const LevelDatOptions& level) {
     Impl& m = *impl_;
     if (!m.db) return make_error(ErrorCode::InvalidArgument, "WorldBuilder::finish called twice");
+    BRIDGER_TRY_STATUS(m.write_digp());
     BRIDGER_TRY_STATUS(m.db->flush());
     m.db.reset(); // closed: the directory is complete
     return write_level_files(m.dir, level);

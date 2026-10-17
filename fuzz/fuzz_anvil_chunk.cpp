@@ -1,7 +1,7 @@
 // Fuzz target: the Java chunk decoder (every layout: 1.18+ sections, the pre-1.18 Level compound,
 // numeric ids, McRegion columns) on raw chunk NBT, as stored in a region file after
 // decompression. Accepted chunks are re-encoded with Bridger's writer (always the 1.18+ layout)
-// and decoded again: every block must survive the round trip.
+// and decoded again: every block must survive the round trip. The input is also decoded as an entity chunk.
 
 #include <bridger/formats/java/anvil/anvil_writer.hpp>
 #include <bridger/convert/pipeline.hpp>
@@ -20,6 +20,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     bridger::io::nbt::NbtLimits limits;
     limits.max_tags = 1u << 18;
     static const LegacyTables legacy = bridger::convert::legacy_tables(*bridger::translate::MappingData::embedded().value());
+    // The same bytes as an entity chunk (entities/r.x.z.mca, 1.17+): entities read must re-encode.
+    if (auto entities = decode_entity_chunk(std::span<const u8>(data, size), {0, 0}, -64, limits)) {
+        if (!encode_entity_chunk(*entities, {0, 0}, -64, kFirstFlatteningChunkDataVersion)) std::abort();
+    }
     auto chunk = decode_chunk(std::span<const u8>(data, size), std::make_shared<BlockStateRegistry>(),
                               std::make_shared<BiomeRegistry>(), limits, &legacy);
     if (!chunk) return 0;

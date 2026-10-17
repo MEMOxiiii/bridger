@@ -23,6 +23,12 @@ versions follow the release plan in `docs/release.md`.
   `world_nether`/`world_the_end` folders are reported, not read (as in Chunker). `bridger info` counts the chunks of
   every dimension.
 
+- Item frames (with their item and rotation) and paintings convert in both directions, also in old worlds whose
+  entities are kept in the chunks; Bedrock stores frames as blocks and paintings as actors. Every other entity is
+  reported by type instead of one warning; Bedrock → Bedrock copies all actors.
+- The single-player player converts in both directions: position, rotation, dimension, game mode, inventory, armor
+  and offhand. Ender chest, experience and effects are reported, as in Chunker.
+
 ### Fixed
 
 - Items with names from before 1.21.9 (`chain`) or older (`scute`, `grass`, ...) in old worlds were dropped.

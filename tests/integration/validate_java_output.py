@@ -140,12 +140,58 @@ def check_world(path):
                 fail(f"level.dat: dimension {name} has no noise generator")
         dims = [("Overworld", path / "region", -4), ("Nether", path / "DIM-1" / "region", 0), ("End", path / "DIM1" / "region", 0)]
     counts = {}
+    entities = 0
     for dim_name, region_dir, min_section in dims:
         counts[dim_name] = check_regions(region_dir, dv, min_section)
+        entities += check_entities(region_dir.parent / "entities", dv)
     if counts["Overworld"] == 0:
         fail("world has no Overworld chunks")
     extra = "".join(f", {n} {d} chunks" for d, n in counts.items() if d != "Overworld" and n)
+    extra += f", {entities} entities" if entities else ""
     return f"java world '{level['LevelName']}', {counts['Overworld']} chunks{extra}"
+
+
+def region_chunks(rp):
+    """Yields (index, chunk NBT) for every chunk of a region file."""
+    rx, rz = (int(v) for v in rp.name.split(".")[1:3])
+    data = rp.read_bytes()
+    for i in range(1024):
+        loc = struct.unpack(">I", data[4 * i:4 * i + 4])[0]
+        if not loc:
+            continue
+        off = (loc >> 8) * 4096
+        length, kind = struct.unpack(">iB", data[off:off + 5])
+        if kind & 0x80:
+            payload = (rp.parent / f"c.{rx * 32 + i % 32}.{rz * 32 + i // 32}.mcc").read_bytes()
+        else:
+            payload = data[off + 5:off + 4 + length]
+        raw = zlib.decompress(payload) if kind & 0x7F == 2 else gzip.decompress(payload)
+        yield i, File.parse(io.BytesIO(raw))
+
+
+def check_entities(entities_dir, dv):
+    """Entity region files (1.17+): {DataVersion, Position, Entities}; every entity has an id, a 4-int UUID and a Pos in
+    its chunk; hanging entities (frames, paintings) have their tile (block_pos from 1.21.5, TileX/Y/Z before)."""
+    count = 0
+    for rp in sorted(entities_dir.glob("r.*.*.mca")):
+        rx, rz = (int(v) for v in rp.name.split(".")[1:3])
+        for i, c in region_chunks(rp):
+            cx, cz = rx * 32 + i % 32, rz * 32 + i // 32
+            if int(c["DataVersion"]) != dv:
+                fail(f"entities {rp.name}: chunk {i} DataVersion differs from level.dat's")
+            if [int(v) for v in c["Position"]] != [cx, cz]:
+                fail(f"entities {rp.name}: chunk {i} Position {list(c['Position'])} is not {cx},{cz}")
+            for e in c["Entities"]:
+                if "id" not in e or len(e.get("UUID", [])) != 4 or len(e.get("Pos", [])) != 3:
+                    fail("entity without id, UUID or Pos")
+                if (int(float(e["Pos"][0])) // 16, int(float(e["Pos"][2])) // 16) != (cx, cz):
+                    fail(f"entity {e['id']} outside its chunk")
+                if str(e["id"]) in ("minecraft:item_frame", "minecraft:glow_item_frame", "minecraft:painting"):
+                    tile = "block_pos" if dv >= 4325 else "TileX"
+                    if tile not in e:
+                        fail(f"{e['id']} without {tile}")
+                count += 1
+    return count
 
 
 def check_regions(region_dir, dv, min_section):

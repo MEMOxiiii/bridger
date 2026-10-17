@@ -21,6 +21,9 @@ Result<JavaLevelInfo> read_java_level_dat(std::span<const u8> bytes, const io::D
         BRIDGER_TRY(info.level_name, detail::utf8(*n));
     }
     if (const auto dv = data.find("DataVersion").as_int()) info.data_version = *dv;
+    if (const io::nbt::NbtView player = data.find("Player", TagType::Compound)) {
+        BRIDGER_TRY(info.player, detail::encode_compound(player.entries()));
+    }
     if (const auto f = data.find("version").as_int()) info.storage_format = *f;
     if (const auto vn = data.find("Version").entries().find("Name").as_string()) {
         BRIDGER_TRY(info.version_name, detail::utf8(*vn));

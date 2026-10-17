@@ -19,6 +19,7 @@
 
 #include <bridger/io/nbt/nbt_view.hpp>
 
+#include "entity_translator.hpp"
 #include "tables.hpp"
 
 #include <array>
@@ -148,6 +149,12 @@ Result<Structure> translate_to_java(const Structure& bedrock, const MappingData&
         if (b >= rev_cache.size()) return Rev{};
         if (rev_cache[b]) return *rev_cache[b];
         Rev r;
+        // Bedrock frames are blocks; Java item frames are entities (made from the block entity below): air here.
+        if (detail::is_bedrock_frame(m.bedrock(b).name)) {
+            r.java = *air_j;
+            rev_cache[b] = r;
+            return r;
+        }
         if (const auto j = m.java_of_bedrock(b)) r.java = *j;
         else if (const auto n = m.nearest_java_of_bedrock(b)) {
             r.java = *n;
@@ -461,12 +468,16 @@ Result<Structure> translate_to_java(const Structure& bedrock, const MappingData&
     // --- Block entities, against the final Java state at their position.
     for (const BlockEntity& be : bedrock.block_entities) {
         if (!out.contains(be.pos)) continue;
+        if ((be.id == "ItemFrame" || be.id == "GlowItemFrame") && bedrock.contains(be.pos) &&
+            detail::is_bedrock_frame(m.bedrock(bedrock.block(be.pos)).name)) {
+            detail::frame_to_java(be, bedrock.block(be.pos), out, m, report);
+            continue;
+        }
         const StateId id = out.block(be.pos);
         const JavaStateId j = id < java_of_out.size() ? java_of_out[id] : *air_j;
         if (auto translated = translate_block_entity_to_java(be, j, m, report)) out.block_entities.push_back(std::move(*translated));
     }
-    for (const Entity& e : bedrock.entities)
-        report.add(IssueKind::UnmappedEntity, e.id, BlockPos{static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)});
+    for (const Entity& e : bedrock.entities) detail::actor_to_java(e, out, report);
     return out;
 }
 
