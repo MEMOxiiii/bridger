@@ -5,6 +5,22 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Item data in containers converts to Bedrock: enchantments (also on books), damage, names and lore, repair cost,
+  potions and tipped arrows, written and writable books, shulker box and bundle contents, fireworks, armor trims and
+  dye colours, goat horns, ominous bottles, suspicious stews and banner patterns. Whatever an item carries that
+  Bedrock cannot hold is reported by name; the item itself is kept.
+- Block entities: unopened loot chests and suspicious sand/gravel keep their loot table; spawners keep their mob and
+  timings; brewing stands, chiseled bookshelves, crafters, decorated pots (sherds and item), campfires, lecterns and
+  jukeboxes keep what they hold; furnaces their progress; beacons their effects; command blocks their command.
+  Sculk blocks, trial spawners, vaults, beehives, creaking hearts and end portals are written as Chunker writes
+  them; bees in hives and a vault's rewarded players are reported.
+
+### Fixed
+
+- Items with names from before 1.21.9 (`chain`) or older (`scute`, `grass`, ...) in old worlds were dropped.
+
 ## [1.0.0] - 2026-10-16
 
 ### Added

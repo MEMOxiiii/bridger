@@ -76,7 +76,21 @@ Stored per chunk under tag `0x31` as concatenated little-endian NBT roots [1]. E
 | Java id | Bedrock id [3] | Fields |
 |---|---|---|
 | `chest`, `trapped_chest` | `Chest` (Bedrock has no separate trapped-chest id; Chunker refuses to write `TrappedChest` [3]) | `Items`, `CustomName`, pairing |
-| `barrel`, `furnace`, `blast_furnace`, `smoker`, `hopper`, `dispenser`, `dropper`, `shulker_box` | `Barrel`, `Furnace`, `BlastFurnace`, `Smoker`, `Hopper`, `Dispenser`, `Dropper`, `ShulkerBox` | `Items`, `CustomName` (slot layouts are identical) |
+| `barrel`, `furnace`, `blast_furnace`, `smoker`, `hopper`, `dispenser`, `dropper`, `shulker_box` | `Barrel`, `Furnace`, `BlastFurnace`, `Smoker`, `Hopper`, `Dispenser`, `Dropper`, `ShulkerBox` | `Items`, `CustomName` (slot layouts are identical); furnaces `BurnTime`, `CookTime`, `BurnDuration` (Short) from Java `lit_time_remaining`, `cooking_time_spent`, `lit_total_time` (older `BurnTime`, `CookTime`, `CookTimeTotal`) |
+| any container with `LootTable` (also `decorated_pot`, `brushable_block`) | | `LootTable`: `loot_tables/<path>.json`; Bedrock keeps five old names (`chests/buriedtreasure`, `dispenser_trap`, `shipwreck`, `shipwrecksupply`, `shipwrecktreasure`); `village_fisher` has no Bedrock table (reported). `LootTableSeed` and a hopper's `TransferCooldown` are transient and not written [3] |
+| `brewing_stand` | `BrewingStand` | `Items` with slots remapped (Java bottles 0 – 2, ingredient 3, fuel 4 → Bedrock ingredient 0, bottles 1 – 3, fuel 4), `FuelAmount`, `FuelTotal` (Java `total_fuel` from 26.3, else 20), `CookTime` (Java `BrewTime`) [3] |
+| `chiseled_bookshelf` | `ChiseledBookshelf` | `Items` [3] |
+| `crafter` | `Crafter` | `Items`, `disabled_slots` (Short bit mask; Java: Int array of slots), `crafting_ticks_remaining` [3] |
+| `decorated_pot` | `DecoratedPot` | `sherds`: four Bedrock item names in the order back, left, right, front (Java: a list, or `{back: {id}, …}` from 26.3; a missing side is `brick`); `item`. Before Bedrock 1.20.0 the list is `shards`; the item exists from 1.20.50 [3] |
+| `campfire`, `soul_campfire` | `Campfire` | `Item1` – `Item4`, `ItemTime1` – `ItemTime4` (Java `Items` slots 0 – 3, `CookingTimes`) [3] |
+| `beacon` | `Beacon` | `primary`, `secondary`: Bedrock effect ids (speed 1, haste 3, strength 5, jump boost 8, regeneration 10, resistance 11) from Java `primary_effect` names (older: the same numbers) [3] |
+| `lectern` | `Lectern` | `book` (item), `hasBook`, `totalPages`, `page` = Java `Page` / 2 (Bedrock counts open spreads) [3] |
+| `jukebox` | `Jukebox` | `RecordItem` [3] |
+| `mob_spawner` | `MobSpawner` | `EntityIdentifier` (Java `SpawnData.entity.id`, older `SpawnData.id`; 17 mobs are named differently, e.g. `zombified_piglin` → `zombie_pigman`, `villager` → `villager_v2`), `Delay`, `SpawnRange`, `MinSpawnDelay`, `MaxSpawnDelay`, `SpawnCount`, `RequiredPlayerRange`, `MaxNearbyEntities` (Short) [3] |
+| `command_block` | `CommandBlock` | `Command`, `auto`, `TrackOutput`, `CustomName` [3]; reported, because command syntax differs between the editions |
+| `brushable_block` | `BrushableBlock` | `type` (the block), `brush_direction` (Java `hit_direction`, default 6), `brush_count` 0, `item`, `LootTable` [3] |
+| `sculk_sensor` | `SculkSensor` | `VibrationListener` {`selector` {}} [3] |
+| `sculk_catalyst`, `sculk_shrieker`, `calibrated_sculk_sensor`, `trial_spawner`, `vault`, `creaking_heart`, `end_portal`, `beehive`, `conduit` | `SculkCatalyst`, `SculkShrieker`, `CalibratedSculkSensor`, `TrialSpawner`, `Vault`, `CreakingHeart`, `EndPortal`, `Beehive`, `Conduit` | id only, as Chunker writes them [3]; bees in a hive (entities) and a vault's list of rewarded players are reported |
 | `ender_chest`, `enchanting_table` | `EnderChest`, `EnchantTable` | `CustomName` |
 | `bed` | `Bed` | `color` (Byte, dye order white=0 … black=15) [3] |
 | `sign`, `hanging_sign` | `Sign`, `HangingSign` | `FrontText`/`BackText` {`Text`, `SignTextColor`, `IgnoreLighting`, `TextIgnoreLegacyBugResolved`}, `IsWaxed` [3] |
@@ -89,8 +103,39 @@ Anything else is reported as an unmapped block entity (the block itself is still
   ⚠ verify in-game that both halves open as one chest.
 - **Items** (`Items` list): `Name` (Bedrock id from GeyserMC `items.json`), `Count` (Byte), `Damage` (Short, from
   the mapping's `bedrock_data`), `Slot` (Byte), `WasPickedUp` (Byte 0); block items also get `Block` {name, states,
-  version} [3][5]. Item components (enchantments, custom names, damage, …) are **dropped and reported** in 0.1.0.
+  version} [3][5]. The item's data goes into its `tag` compound (next section).
 - Java text components (custom names, sign lines) are reduced to plain text; formatting is dropped and reported.
+
+### Items
+
+Item data inside containers (`translate/item_translator.cpp`). Java reads both the 1.20.5+ `components` (with the
+1.20.5 – 1.21.4 `{levels: …}` wrapper of enchantments, and the 1.21.5+ form without it) and the older `tag`. Bedrock
+fields, ids and data values follow Chunker's `BedrockItemStackResolver`, `BedrockItemIdentifierResolver`,
+`BedrockEnchantmentIDResolver`, `BedrockPotionIDResolver`, `BedrockTrim{Material,Pattern}Resolver` and
+`ChunkerDyeColor` [3]; the Java side follows its `JavaComponentItemStackResolver` and `JavaItemStackResolver` [3].
+
+| Java (component / old `tag`) | Bedrock |
+|---|---|
+| `damage` / `Damage` | `tag.Damage` (Int) |
+| `enchantments`, `stored_enchantments` / `Enchantments`, `StoredEnchantments` | `tag.ench` [{`id` Short, `lvl` Short}]; ids 0 – 41 (protection 0 … lunge 41). Sweeping Edge has no Bedrock id: reported |
+| `repair_cost` / `RepairCost` | `tag.RepairCost` (Int) |
+| `custom_name`, `lore` / `display.Name`, `display.Lore` | `tag.display` {`Name`, `Lore` [String]}; plain text, formatting reported |
+| `dyed_color` / `display.color` | `tag.customColor` (Int, ARGB with alpha FF) |
+| `potion_contents.potion` / `Potion` on potions | the item's data value (`Damage`): water 0, mundane 1, … infested 46; Luck has none: reported |
+| the same on `tipped_arrow` | `minecraft:arrow` with data value potion + 1 |
+| `written_book_content`, `writable_book_content` / `pages`, `title`, `author` | `tag.pages` [{`photoname` "", `text`}], `tag.title`, `tag.author` |
+| `container` / `BlockEntityTag.Items` | `tag.Items` (items with `Slot`), up to three levels deep |
+| `bundle_contents` | `tag.storage_item_component_content` |
+| `fireworks`, `firework_explosion` / `Fireworks`, `Explosion` | `tag.Fireworks` {`Flight`, `Explosions`}, `tag.FireworksItem`: `FireworkType`, `FireworkColor`/`FireworkFade` as reversed dye indexes (closest dye to the Java RGB), `FireworkTrail`, `FireworkFlicker` |
+| `trim` / `Trim` | `tag.Trim` {`Material`, `Pattern`} without namespace |
+| `instrument` (goat horn) | data value 0 – 7 (ponder, sing, seek, feel, admire, call, yearn, dream) |
+| `ominous_bottle_amplifier` | data value 0 – 4 |
+| `suspicious_stew_effects` | data value 0 – 10 by effect and duration |
+| `banner_patterns` / `BlockEntityTag.Patterns` | `tag.Patterns` as on the banner block |
+
+Old item ids are renamed first (e.g. `chain` → `iron_chain` before 1.21.9, `scute` → `turtle_scute` before 1.20.5).
+Anything else on an item (e.g. `custom_data`, `map_id`, `entity_data`, `block_entity_data`) is reported as "item data
+not converted: <name>"; the item itself is kept.
 
 ## level.dat
 

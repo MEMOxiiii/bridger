@@ -5,8 +5,10 @@
 #include <bridger/io/nbt/nbt_writer.hpp>
 #include <bridger/translate/block_entity_translator.hpp>
 
+#include "item_translator.hpp"
 #include "tables.hpp"
 
+#include <algorithm>
 #include <array>
 #include <string>
 
@@ -93,141 +95,8 @@ std::optional<BlockPos> chest_partner(const BlockState& s, BlockPos pos) {
     return tables::chest_partner(*type, *facing, pos);
 }
 
-// Plain text of a Java text component: a plain string, a JSON string (pre-1.21.5
-// files), or an NBT compound/list (1.21.5+). Formatting is dropped; `lossy` is set
-// when anything besides text was present.
-std::string text_of(NbtView v, bool& lossy);
-
-std::string json_text(std::string_view json, bool& lossy) {
-    // Minimal scan for "text":"..." values in order; enough for names and sign lines.
-    std::string out;
-    bool any = false;
-    usize i = 0;
-    while ((i = json.find("\"text\"", i)) != std::string_view::npos) {
-        i = json.find(':', i + 6);
-        if (i == std::string_view::npos) break;
-        i = json.find('"', i + 1);
-        if (i == std::string_view::npos) break;
-        ++i;
-        while (i < json.size() && json[i] != '"') {
-            if (json[i] == '\\' && i + 1 < json.size()) {
-                const char e = json[i + 1];
-                out += e == 'n' ? '\n' : e;
-                i += 2;
-            } else {
-                out += json[i++];
-            }
-        }
-        any = true;
-    }
-    if (!any) {
-        // A bare JSON string: "abc"
-        if (json.size() >= 2 && json.front() == '"' && json.back() == '"') return std::string(json.substr(1, json.size() - 2));
-        if (!json.empty()) lossy = true; // e.g. a translatable component
-        return {};
-    }
-    for (std::string_view key : {"\"color\"", "\"bold\"", "\"italic\"", "\"translate\"", "\"underlined\"",
-                                 "\"strikethrough\"", "\"obfuscated\"", "\"clickEvent\"", "\"hoverEvent\""})
-        if (json.find(key) != std::string_view::npos) lossy = true;
-    return out;
-}
-
-std::string text_of(NbtView v, bool& lossy) {
-    if (const auto s = v.as_string()) {
-        auto utf8 = io::nbt::mutf8_to_utf8(*s);
-        const std::string text = utf8 ? *utf8 : std::string(*s);
-        if (!text.empty() && (text.front() == '{' || text.front() == '[' || text.front() == '"'))
-            return json_text(text, lossy);
-        return text;
-    }
-    if (v.is(TagType::Compound)) {
-        std::string out;
-        for (const io::nbt::NbtEntry& e : v.entries()) {
-            if (e.name == "text") out += text_of(e.value, lossy);
-            else if (e.name == "extra") for (const NbtView x : e.value.items()) out += text_of(x, lossy);
-            else lossy = true;
-        }
-        return out;
-    }
-    if (v.is(TagType::List)) {
-        std::string out;
-        for (const NbtView x : v.items()) out += text_of(x, lossy);
-        return out;
-    }
-    lossy = true;
-    return {};
-}
-
-// Writes the Bedrock "Block" compound {name, states, version} for an item that is a block.
-void write_block_tag(NbtWriter& w, std::string_view name, const MappingData& m, BedrockStateIndex idx) {
-    const BedrockState& s = m.bedrock(idx);
-    w.begin_compound(name);
-    w.write_string("name", s.name);
-    w.begin_compound("states");
-    for (const BedrockProperty& p : s.properties) {
-        switch (p.type) {
-        case NbtValueType::Byte: w.write_byte(p.key, static_cast<i8>(p.int_value)); break;
-        case NbtValueType::Int: w.write_int(p.key, p.int_value); break;
-        case NbtValueType::String: w.write_string(p.key, p.str_value); break;
-        }
-    }
-    w.end_compound();
-    w.write_int("version", static_cast<i32>(m.bedrock_block_version()));
-    w.end_compound();
-}
-
-// Java "Items" list -> Bedrock "Items" list. Unknown items and dropped item data are reported.
-void write_items(NbtWriter& w, NbtView java_items, const MappingData& m, ConversionReport& report, BlockPos pos) {
-    struct Item {
-        std::string bedrock;
-        i16 damage;
-        i8 count;
-        i8 slot;
-        std::optional<BedrockStateIndex> block;
-    };
-    std::vector<Item> items;
-    for (const NbtView it : java_items.items()) {
-        const NbtCompoundView c = it.entries();
-        const auto id = c.find("id").as_string();
-        if (!id) continue;
-        const std::string java_id(*id);
-        // 1.20.5+: "count" (Int); older: "Count" (Byte).
-        i32 count = 1;
-        if (const auto n = c.find("count").as_int()) count = *n;
-        else if (const auto b = c.find("Count").as_byte()) count = *b;
-        const i8 slot = c.find("Slot").as_byte().value_or(0);
-
-        const auto mapping = m.find_item(java_id);
-        if (!mapping) {
-            report.add(IssueKind::UnmappedBlockEntity, "item " + java_id, pos, static_cast<u64>(count));
-            continue;
-        }
-        if (c.find("components") || c.find("tag"))
-            report.add(IssueKind::LossyBlock, "item data dropped: " + java_id, pos);
-        if (count < 1 || count > 127) {
-            report.add(IssueKind::LossyBlock, "item count clamped: " + java_id, pos);
-            count = count < 1 ? 1 : 127;
-        }
-        Item out{std::string(mapping->bedrock_name), mapping->damage, static_cast<i8>(count), slot, std::nullopt};
-        if (mapping->java_block_state) {
-            const JavaStateMapping jm = m.map(*mapping->java_block_state);
-            if (jm.bedrock != UINT32_MAX) out.block = jm.bedrock;
-        }
-        items.push_back(std::move(out));
-    }
-    w.begin_list("Items", items.empty() ? TagType::End : TagType::Compound, items.size());
-    for (const Item& item : items) {
-        w.begin_compound();
-        w.write_string("Name", item.bedrock);
-        w.write_byte("Count", item.count);
-        w.write_short("Damage", item.damage);
-        w.write_byte("Slot", item.slot);
-        w.write_byte("WasPickedUp", 0);
-        if (item.block) write_block_tag(w, "Block", m, *item.block);
-        w.end_compound();
-    }
-    w.end_list();
-}
+using detail::text_of;
+using detail::write_block_tag;
 
 void write_custom_name(NbtWriter& w, NbtCompoundView c, ConversionReport& report, BlockPos pos) {
     const NbtView name = c.find("CustomName");
@@ -275,6 +144,133 @@ void write_sign_face(NbtWriter& w, std::string_view name, NbtView java_face, std
     w.write_byte("TextIgnoreLegacyBugResolved", 1);
     w.end_compound();
 }
+
+// Block entities Chunker writes with their id only (BedrockBlockEntityResolver, EmptyBlockEntityHandler).
+std::optional<std::string_view> empty_block_entity(std::string_view java_id) {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 9> kEmpty{{
+        {"minecraft:sculk_catalyst", "SculkCatalyst"},
+        {"minecraft:sculk_shrieker", "SculkShrieker"},
+        {"minecraft:calibrated_sculk_sensor", "CalibratedSculkSensor"},
+        {"minecraft:trial_spawner", "TrialSpawner"},
+        {"minecraft:vault", "Vault"},
+        {"minecraft:creaking_heart", "CreakingHeart"},
+        {"minecraft:end_portal", "EndPortal"},
+        {"minecraft:beehive", "Beehive"},
+        {"minecraft:conduit", "Conduit"},
+    }};
+    for (const auto& [java, bedrock] : kEmpty)
+        if (java == java_id) return bedrock;
+    return std::nullopt;
+}
+
+// A Byte, Short or Int field as a Short (clamped): `name`, else `old`, else `fallback`.
+i16 number(NbtCompoundView c, std::string_view name, std::string_view old, i32 fallback) {
+    NbtView v = c.find(name);
+    if (!v && !old.empty()) v = c.find(old);
+    i32 n = fallback;
+    if (const auto b = v.as_byte()) n = *b;
+    else if (const auto sh = v.as_short()) n = *sh;
+    else if (const auto i = v.as_int()) n = *i;
+    return static_cast<i16>(std::clamp(n, -32768, 32767));
+}
+
+// Java loot table id -> Bedrock path: "minecraft:chests/simple_dungeon" -> "loot_tables/chests/simple_dungeon.json",
+// with the tables Bedrock still names the old way (Chunker BedrockRandomizableContainerBlockEntityHandler).
+std::optional<std::string> bedrock_loot_table(std::string_view java) {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 5> kRenamed{{
+        {"minecraft:chests/buried_treasure", "minecraft:chests/buriedtreasure"},
+        {"minecraft:chests/jungle_temple_dispenser", "minecraft:chests/dispenser_trap"},
+        {"minecraft:chests/shipwreck_map", "minecraft:chests/shipwreck"},
+        {"minecraft:chests/shipwreck_supply", "minecraft:chests/shipwrecksupply"},
+        {"minecraft:chests/shipwreck_treasure", "minecraft:chests/shipwrecktreasure"},
+    }};
+    if (java.empty() || java == "minecraft:chests/village/village_fisher") return std::nullopt; // no Bedrock table
+    std::string id(java);
+    for (const auto& [from, to] : kRenamed)
+        if (id == from) id = std::string(to);
+    std::string path = id.starts_with("minecraft:") ? "loot_tables/" + id.substr(10) : "loot_tables/" + id;
+    if (!path.ends_with(".json")) path += ".json";
+    return path;
+}
+
+void write_loot_table(NbtWriter& w, NbtCompoundView c, ConversionReport& report, BlockPos pos) {
+    const auto table = c.find("LootTable").as_string();
+    if (!table) return;
+    if (const auto path = bedrock_loot_table(*table)) w.write_string("LootTable", *path);
+    else report.add(IssueKind::LossyBlock, "loot table without a Bedrock counterpart: " + std::string(*table), pos);
+}
+
+// Java entity id -> Bedrock entity id where they differ (Chunker JavaEntityTypeResolver / BedrockEntityTypeResolver).
+std::optional<std::string> bedrock_entity(std::string_view java) {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 17> kDiffer{{
+        {"minecraft:breeze_wind_charge", "minecraft:breeze_wind_charge_projectile"},
+        {"minecraft:end_crystal", "minecraft:ender_crystal"},
+        {"minecraft:evoker", "minecraft:evocation_illager"},
+        {"minecraft:evoker_fangs", "minecraft:evocation_fang"},
+        {"minecraft:experience_bottle", "minecraft:xp_bottle"},
+        {"minecraft:experience_orb", "minecraft:xp_orb"},
+        {"minecraft:eye_of_ender", "minecraft:eye_of_ender_signal"},
+        {"minecraft:firework_rocket", "minecraft:fireworks_rocket"},
+        {"minecraft:fishing_bobber", "minecraft:fishing_hook"},
+        {"minecraft:oak_boat", "minecraft:boat"},
+        {"minecraft:oak_chest_boat", "minecraft:chest_boat"},
+        {"minecraft:trident", "minecraft:thrown_trident"},
+        {"minecraft:tropical_fish", "minecraft:tropicalfish"},
+        {"minecraft:villager", "minecraft:villager_v2"},
+        {"minecraft:wind_charge", "minecraft:wind_charge_projectile"},
+        {"minecraft:zombie_villager", "minecraft:zombie_villager_v2"},
+        {"minecraft:zombified_piglin", "minecraft:zombie_pigman"},
+    }};
+    // Java-only entities (Chunker has no Bedrock id for them).
+    static constexpr std::array<std::string_view, 6> kJavaOnly{"minecraft:giant", "minecraft:illusioner", "minecraft:marker",
+                                                              "minecraft:interaction", "minecraft:spectral_arrow", "minecraft:mannequin"};
+    for (const auto& [from, to] : kDiffer)
+        if (java == from) return std::string(to);
+    for (const std::string_view j : kJavaOnly)
+        if (java == j || java.ends_with("_display")) return std::nullopt;
+    return std::string(java);
+}
+
+// Mob spawner (Chunker BedrockSpawnerBlockEntityHandler / JavaSpawnerBlockEntityHandler): timings as Shorts, the
+// mob from SpawnData {entity: {id}} (1.18+) or SpawnData {id} (older).
+void write_spawner(NbtWriter& w, NbtCompoundView c, ConversionReport& report, BlockPos pos) {
+    const auto shorts = [&](std::string_view name, i16 fallback) {
+        const NbtView v = c.find(name);
+        w.write_short(name, v.as_short().value_or(static_cast<i16>(v.as_int().value_or(fallback))));
+    };
+    shorts("Delay", 20);
+    shorts("SpawnRange", 4);
+    shorts("MaxSpawnDelay", 800);
+    shorts("MinSpawnDelay", 200);
+    shorts("SpawnCount", 4);
+    shorts("RequiredPlayerRange", 16);
+    shorts("MaxNearbyEntities", 6);
+    const NbtCompoundView data = c.find("SpawnData").entries();
+    std::optional<std::string_view> mob = data.find("entity").entries().find("id").as_string();
+    if (!mob) mob = data.find("id").as_string();
+    if (!mob) return; // an empty spawner
+    if (const auto id = bedrock_entity(*mob)) w.write_string("EntityIdentifier", *id);
+    else report.add(IssueKind::LossyBlock, "spawner mob without a Bedrock counterpart: " + std::string(*mob), pos);
+    if (c.find("SpawnPotentials").items().size() > 1) report.add(IssueKind::LossyBlock, "spawner with several mobs: first kept", pos);
+}
+
+// Bedrock beacon effect ids (Chunker BedrockEffectIDResolver); Java stores names (1.20.2+) or the same numbers.
+i32 beacon_effect(NbtView name, NbtView number) {
+    static constexpr std::array<std::string_view, 12> kEffects{"",         "speed",          "slowness",       "haste",
+                                                               "mining_fatigue", "strength", "instant_health", "instant_damage",
+                                                               "jump_boost",     "nausea",   "regeneration",   "resistance"};
+    if (const auto s = name.as_string()) {
+        const std::string_view n = s->starts_with("minecraft:") ? s->substr(10) : *s;
+        for (usize i = 1; i < kEffects.size(); ++i)
+            if (kEffects[i] == n) return static_cast<i32>(i);
+        return 0;
+    }
+    return number.as_int().value_or(0);
+}
+
+// Brewing stand slots: Java bottles 0-2, ingredient 3, fuel 4; Bedrock ingredient 0, bottles 1-3, fuel 4
+// (Chunker BedrockContainerBlockEntityHandler.remapSlot).
+i8 brewing_slot(i8 java) { return java == 3 ? i8{0} : java <= 2 && java >= 0 ? static_cast<i8>(java + 1) : java; }
 
 std::optional<RawNbt> finish(NbtWriter&& w) {
     auto bytes = std::move(w).finish();
@@ -362,12 +358,153 @@ std::optional<BlockEntity> translate_block_entity(const BlockEntity& java, JavaS
     if (const auto container = simple_container(java.id)) {
         out.id = std::string(*container);
         w.write_string("id", out.id);
-        write_items(w, c.find("Items"), m, report, java.pos);
+        detail::write_items(w, "Items", c.find("Items"), m, report, java.pos);
         write_custom_name(w, c, report, java.pos);
         if (out.id == "Chest") write_pairing(w, *state, java.pos);
-        if (c.find("LootTable")) report.add(IssueKind::LossyBlock, "loot table dropped", java.pos);
-        if (c.find("CookTime") || c.find("cooking_time_spent") || c.find("TransferCooldown"))
-            report.add(IssueKind::LossyBlock, "container progress state dropped", java.pos);
+        write_loot_table(w, c, report, java.pos);
+        // Furnaces (Chunker BedrockFurnaceBlockEntityHandler): Java lit_time_remaining / cooking_time_spent /
+        // lit_total_time (1.21.4+) or BurnTime / CookTime / CookTimeTotal -> Bedrock BurnTime / CookTime / BurnDuration.
+        if (out.id == "Furnace" || out.id == "BlastFurnace" || out.id == "Smoker") {
+            w.write_short("BurnTime", number(c, "lit_time_remaining", "BurnTime", 0));
+            w.write_short("CookTime", number(c, "cooking_time_spent", "CookTime", 0));
+            w.write_short("BurnDuration", number(c, "lit_total_time", "CookTimeTotal", 0));
+        }
+        // Hopper TransferCooldown and LootTableSeed are transient (Chunker writes neither).
+    } else if (java.id == "minecraft:brewing_stand") {
+        // Chunker BedrockBrewingStandBlockEntityHandler: FuelAmount, FuelTotal (Java total_fuel from 26.3, else 20),
+        // CookTime (Java BrewTime).
+        out.id = "BrewingStand";
+        w.write_string("id", out.id);
+        detail::write_items(w, "Items", c.find("Items"), m, report, java.pos, brewing_slot);
+        write_custom_name(w, c, report, java.pos);
+        w.write_short("FuelAmount", number(c, "Fuel", {}, 0));
+        w.write_short("FuelTotal", number(c, "total_fuel", {}, 20));
+        w.write_short("CookTime", number(c, "BrewTime", {}, 0));
+    } else if (java.id == "minecraft:chiseled_bookshelf") {
+        out.id = "ChiseledBookshelf";
+        w.write_string("id", out.id);
+        detail::write_items(w, "Items", c.find("Items"), m, report, java.pos);
+    } else if (java.id == "minecraft:crafter") {
+        // Chunker BedrockCrafterBlockEntityHandler: disabled_slots as a Short bit mask (Java: an int array of slots).
+        out.id = "Crafter";
+        w.write_string("id", out.id);
+        detail::write_items(w, "Items", c.find("Items"), m, report, java.pos);
+        write_custom_name(w, c, report, java.pos);
+        i32 disabled = 0;
+        if (const auto slots = c.find("disabled_slots").as_int_array())
+            for (usize i = 0; i < slots->size(); ++i)
+                if ((*slots)[i] >= 0 && (*slots)[i] < 9) disabled |= 1 << (*slots)[i];
+        w.write_short("disabled_slots", static_cast<i16>(disabled));
+        w.write_int("crafting_ticks_remaining", c.find("crafting_ticks_remaining").as_int().value_or(0));
+    } else if (java.id == "minecraft:decorated_pot") {
+        // Chunker BedrockDecoratedPotBlockEntityHandler: "sherds" = 4 Bedrock item names (back, left, right, front);
+        // Java: a list of ids, or {back: {id}, ...} from 26.3; missing sides are bricks.
+        out.id = "DecoratedPot";
+        w.write_string("id", out.id);
+        std::array<std::string, 4> sides{"minecraft:brick", "minecraft:brick", "minecraft:brick", "minecraft:brick"};
+        const NbtView sherds = c.find("sherds");
+        if (sherds.is(TagType::List)) {
+            usize i = 0;
+            for (const NbtView v : sherds.items())
+                if (i < 4) sides[i++] = std::string(v.as_string().value_or("minecraft:brick"));
+        } else if (sherds.is(TagType::Compound)) {
+            static constexpr std::array<std::string_view, 4> kSides{"back", "left", "right", "front"};
+            for (usize i = 0; i < 4; ++i)
+                if (const auto id = sherds.entries().find(kSides[i]).entries().find("id").as_string()) sides[i] = std::string(*id);
+        }
+        w.begin_list("sherds", TagType::String, 4);
+        for (const std::string& side : sides) {
+            const auto item = m.find_item(side);
+            if (item) w.write_string({}, item->bedrock_name);
+            else w.write_string({}, "minecraft:brick");
+            if (!item) report.add(IssueKind::LossyBlock, "decorated pot sherd " + side, java.pos);
+        }
+        w.end_list();
+        if (const NbtView item = c.find("item"); item.is(TagType::Compound)) detail::write_item(w, "item", item.entries(), m, report, java.pos);
+        write_loot_table(w, c, report, java.pos);
+    } else if (java.id == "minecraft:campfire" || java.id == "minecraft:soul_campfire") {
+        // Chunker BedrockCampfireBlockEntityHandler: Item1-4 and ItemTime1-4 (Java Items with Slot 0-3, CookingTimes).
+        out.id = "Campfire";
+        w.write_string("id", out.id);
+        const auto times = c.find("CookingTimes").as_int_array();
+        for (const NbtView it : c.find("Items").items()) {
+            const NbtCompoundView item = it.entries();
+            const i8 slot = item.find("Slot").as_byte().value_or(-1);
+            if (slot < 0 || slot > 3) continue;
+            const std::string n = std::to_string(slot + 1);
+            const usize index = static_cast<usize>(slot);
+            if (detail::write_item(w, "Item" + n, item, m, report, java.pos))
+                w.write_int("ItemTime" + n, times && index < times->size() ? (*times)[index] : 0);
+        }
+    } else if (java.id == "minecraft:beacon") {
+        out.id = "Beacon";
+        w.write_string("id", out.id);
+        w.write_int("primary", beacon_effect(c.find("primary_effect"), c.find("Primary")));
+        w.write_int("secondary", beacon_effect(c.find("secondary_effect"), c.find("Secondary")));
+    } else if (java.id == "minecraft:lectern") {
+        // Chunker BedrockLecternBlockEntityHandler: book, hasBook, page (Java Page / 2: Bedrock counts open spreads),
+        // totalPages.
+        out.id = "Lectern";
+        w.write_string("id", out.id);
+        const NbtView book = c.find("Book");
+        bool has = false;
+        if (book.is(TagType::Compound)) {
+            has = detail::write_item(w, "book", book.entries(), m, report, java.pos);
+            if (has) {
+                const NbtCompoundView comps = book.entries().find("components").entries();
+                NbtView pages = comps.find("minecraft:written_book_content").entries().find("pages");
+                if (!pages) pages = comps.find("minecraft:writable_book_content").entries().find("pages");
+                if (!pages) pages = book.entries().find("tag").entries().find("pages");
+                w.write_int("totalPages", static_cast<i32>(pages.items().size()));
+            }
+        }
+        w.write_byte("hasBook", has ? 1 : 0);
+        w.write_int("page", c.find("Page").as_int().value_or(0) / 2);
+    } else if (java.id == "minecraft:jukebox") {
+        out.id = "Jukebox";
+        w.write_string("id", out.id);
+        if (const NbtView record = c.find("RecordItem"); record.is(TagType::Compound))
+            detail::write_item(w, "RecordItem", record.entries(), m, report, java.pos);
+    } else if (java.id == "minecraft:mob_spawner") {
+        out.id = "MobSpawner";
+        w.write_string("id", out.id);
+        write_spawner(w, c, report, java.pos);
+    } else if (java.id == "minecraft:command_block") {
+        // Chunker BedrockCommandBlockBlockEntityHandler: Command, auto, TrackOutput.
+        out.id = "CommandBlock";
+        w.write_string("id", out.id);
+        const std::string command(c.find("Command").as_string().value_or(""));
+        w.write_string("Command", command);
+        w.write_byte("auto", c.find("auto").as_byte().value_or(0));
+        w.write_byte("TrackOutput", c.find("TrackOutput").as_byte().value_or(1));
+        write_custom_name(w, c, report, java.pos);
+        // Java and Bedrock commands share most syntax, but not all of it (selectors, NBT, block states).
+        if (!command.empty()) report.add(IssueKind::LossyBlock, "command block: check the command in Bedrock", java.pos);
+    } else if (java.id == "minecraft:brushable_block") {
+        // Chunker BedrockBrushableBlockEntityHandler: type (the block), brush_direction, brush_count, item, LootTable.
+        out.id = "BrushableBlock";
+        w.write_string("id", out.id);
+        w.write_string("type", state->id());
+        w.write_byte("brush_direction", c.find("hit_direction").as_byte().value_or(6));
+        w.write_int("brush_count", 0);
+        if (const NbtView item = c.find("item"); item.is(TagType::Compound)) detail::write_item(w, "item", item.entries(), m, report, java.pos);
+        write_loot_table(w, c, report, java.pos);
+    } else if (java.id == "minecraft:sculk_sensor") {
+        out.id = "SculkSensor";
+        w.write_string("id", out.id);
+        w.begin_compound("VibrationListener"); // Chunker BedrockSculkSensorBlockEntityHandler
+        w.begin_compound("selector");
+        w.end_compound();
+        w.end_compound();
+    } else if (const auto empty = empty_block_entity(java.id)) {
+        // Written with their id only, as Chunker does: the data is transient or rebuilt by the game, except what is
+        // reported here.
+        out.id = std::string(*empty);
+        w.write_string("id", out.id);
+        if (java.id == "minecraft:beehive" && !c.find("bees").items().empty())
+            report.add(IssueKind::LossyBlock, "bees in a beehive not converted (entities)", java.pos, c.find("bees").items().size());
+        if (java.id == "minecraft:vault" && !c.find("server_data").entries().find("rewarded_players").items().empty())
+            report.add(IssueKind::LossyBlock, "vault: players already rewarded are forgotten", java.pos);
     } else if (java.id == "minecraft:ender_chest" || java.id == "minecraft:enchanting_table") {
         out.id = java.id == "minecraft:ender_chest" ? "EnderChest" : "EnchantTable";
         w.write_string("id", out.id);

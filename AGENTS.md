@@ -146,6 +146,8 @@ additions to it are recorded here as required:
 - `formats/java/java_writers.hpp` (+ `.cpp`): the `.schem`/`.nbt`/`.litematic` writers share palette and block
   entity code, so they live in one file instead of one per reader. `formats/java/anvil/anvil_writer.hpp`: chunk,
   region, level.dat and world_gen_settings.dat writing. `formats/bedrock/mcworld/bedrock_world_reader.hpp`.
+- `src/translate/item_translator.{hpp,cpp}` (Java → Bedrock item data, shared by every block entity) and
+  `tests/unit/translate/item_test.cpp`.
 - `src/translate/reverse_translator.cpp`, `reverse_block_entities.cpp` (Bedrock → Java) and `tables.hpp`
   (internal tables shared by both directions); `tools/mapgen/overrides/reverse_blocks.json`.
 - `src/core/parallel.cpp` implements `core/parallel.hpp`.

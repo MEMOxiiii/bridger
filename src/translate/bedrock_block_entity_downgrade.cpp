@@ -23,6 +23,9 @@ using io::nbt::TagType;
 namespace {
 
 constexpr std::array<i32, 3> kSignFaces{1, 19, 80};
+// Decorated pots: "shards" before 1.20.0, an item only from 1.20.50 (Chunker BedrockDecoratedPotBlockEntityHandler).
+constexpr std::array<i32, 3> kPotSherds{1, 20, 0};
+constexpr std::array<i32, 3> kPotItem{1, 20, 50};
 
 bool before(const BedrockTarget& t, const std::array<i32, 3>& v) {
     return std::array<i32, 3>{t.version[0], t.version[1], t.version[2]} < v;
@@ -95,6 +98,10 @@ std::optional<std::vector<u8>> downgrade_bedrock_block_entity(const BlockEntity&
             if (const auto t = e.value.entries().find("Text").as_string(); t && !t->empty()) lossy.push_back("sign back text (before 1.19.80)");
         } else if (flat_sign && e.name == "IsWaxed") {
             continue;
+        } else if (be.id == "DecoratedPot" && e.name == "sherds" && before(target, kPotSherds)) {
+            w.write_view("shards", e.value);
+        } else if (be.id == "DecoratedPot" && e.name == "item" && before(target, kPotItem)) {
+            lossy.push_back("decorated pot item (before 1.20.50)");
         } else {
             w.write_view(e.name, e.value);
         }
