@@ -31,6 +31,25 @@ inline constexpr i32 kOverworldMaxY = 319;
 inline constexpr i32 kOverworldMinSubchunk = -4;
 inline constexpr i32 kOverworldSubchunks = 24;
 
+// Vertical range of each dimension in subchunks: the Overworld -4..19, the Nether 0..7 (y 0..127), the End 0..15
+// (y 0..255). Data3D holds one biome storage per subchunk of the range (Chunker Dimension.biomeHeight: 24, 8, 16;
+// minecraft.wiki "Bedrock Edition level format"). docs/formats/bedrock-world.md, "Dimensions".
+struct DimensionRange {
+    i32 min_subchunk;
+    i32 subchunks;
+    [[nodiscard]] constexpr i32 min_y() const noexcept { return min_subchunk * 16; }
+    [[nodiscard]] constexpr i32 max_y() const noexcept { return (min_subchunk + subchunks) * 16 - 1; }
+    [[nodiscard]] constexpr bool contains_subchunk(i32 sy) const noexcept { return sy >= min_subchunk && sy < min_subchunk + subchunks; }
+};
+[[nodiscard]] constexpr DimensionRange dimension_range(Dimension d) noexcept {
+    switch (d) {
+    case Dimension::Nether: return {0, 8};
+    case Dimension::End: return {0, 16};
+    case Dimension::Overworld: break;
+    }
+    return {kOverworldMinSubchunk, kOverworldSubchunks};
+}
+
 // Values for the pinned Bedrock version (26.50), sources in docs/formats/bedrock-world.md.
 inline constexpr u8 kChunkVersion = 42;
 inline constexpr i32 kFinalizedDone = 2;

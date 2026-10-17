@@ -58,15 +58,30 @@ per layer:
 
 ```
 256 x i16 LE heightmap, z-major (index z*16 + x)
-24 biome storages, one per subchunk from y -64 up (Overworld) [3]:
+one biome storage per subchunk of the dimension, from its bottom up (24 Overworld, 8 Nether, 16 End) [3]:
   u8 bits << 1 | 1 (runtime palette), packed words as for blocks, i32 LE palette count, i32 LE biome ids
 ```
 
 - The biome storage layout, the runtime flag and the 24 storages follow Chunker's writer [3]. Biome ids are Bedrock
   numeric ids (GeyserMC `biomes.json`: plains = 1) [5].
-- **Heightmap value:** Bridger stores `highest non-air y - (-64) + 1` (0 for an empty column). The sources disagree
+- **Heightmap value:** Bridger stores `highest non-air y - bottom + 1` (0 for an empty column; bottom -64 in the
+  Overworld, 0 in the Nether and the End). The sources disagree
   on whether this is relative to the world bottom (Chunker writes absolute values [3]). The game rebuilds lighting
   data, so a wrong value is unlikely to matter. ⚠ verify in-game against a world created by the game itself.
+
+## Dimensions
+
+| Dimension | Key field (i32 LE) | Height | Subchunks | Data3D biome storages | Fallback biome |
+|---|---|---|---|---|---|
+| Overworld | omitted | y -64..319 | -4..19 | 24 | plains (1) |
+| Nether | 1 | y 0..127 | 0..7 | 8 | hell / nether_wastes (8) |
+| End | 2 | y 0..255 | 0..15 | 16 | the_end (9) |
+
+Sources: Chunker `Dimension` (Bedrock ids 0/1/2, `biomeHeight` 24/8/16, fallback biomes) and its Data3D writer, which
+writes one storage per subchunk of the dimension [3]; `BedrockBiomeIDResolver` for the biome ids [3]; minecraft.wiki
+"Bedrock Edition level format" for the key layout [1]. A Java Nether chunk has sections up to y 255; whatever is above
+y 127 is dropped and counted ("blocks of the Nether outside the Bedrock build height"). The Caves & Cliffs
+experiment's shifted subchunk keys (chunk versions 0x16–0x1D) apply to the Overworld only.
 
 ## Block entities
 

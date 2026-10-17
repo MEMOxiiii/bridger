@@ -5,6 +5,7 @@
 
 #include <bridger/convert/pipeline.hpp>
 #include <bridger/formats/bedrock/mcworld/bedrock_world.hpp>
+#include <bridger/formats/bedrock/mcworld/bedrock_world_reader.hpp>
 #include <bridger/formats/bedrock/mcworld/chunk_key.hpp>
 #include <bridger/formats/bedrock/mcworld/leveldb_store.hpp>
 #include <bridger/formats/java/anvil/chunk_codec.hpp>
@@ -160,7 +161,7 @@ TEST_CASE("Java 26.1+ worlds keep dimensions in dimensions/ and the seed in data
     o.output = dir.path / "modern.mcworld";
     const auto summary = convert::convert(o);
     REQUIRE(summary);
-    CHECK(summary->chunks == 1);
+    CHECK(summary->chunks == 2); // the Overworld chunk and the End chunk (dimensions/minecraft/the_end)
 }
 
 TEST_CASE("A Java world converts to a valid .mcworld", "[anvil][convert][e2e]") {
@@ -171,7 +172,7 @@ TEST_CASE("A Java world converts to a valid .mcworld", "[anvil][convert][e2e]") 
     const auto summary = convert::convert(o);
     REQUIRE(summary);
     CHECK(summary->input_format == FormatId::JavaWorld);
-    CHECK(summary->chunks == 5); // (0,0) (1,0) (2,0) (0,1) (-1,0); (1,1) is partial
+    CHECK(summary->chunks == 6); // Overworld (0,0) (1,0) (2,0) (0,1) (-1,0) ((1,1) is partial) and Nether (0,0)
     CHECK(summary->block_entities == 1);
     CHECK(summary->report.total(translate::IssueKind::UnmappedBlock) == 0);
     CHECK(summary->report.total(translate::IssueKind::DroppedSecondaryLayer) == 0);
@@ -180,14 +181,15 @@ TEST_CASE("A Java world converts to a valid .mcworld", "[anvil][convert][e2e]") 
                            [&](const std::string& w) { return w.find(needle) != std::string::npos; });
     };
     CHECK(has_warning("partially generated"));
-    CHECK(has_warning("Nether"));
+    // The Nether's stone platform at y 128..143 is above the Bedrock Nether (y 0..127).
+    CHECK(has_warning("4096 blocks of the Nether outside the Bedrock build height (y 0 to 127) were dropped"));
 
     // Independent checks on the zip: the world validates, and the right keys exist.
     const auto bytes = test::read_file(o.output);
     test::TempDir check;
     bedrock::WorldWriteStats st;
     REQUIRE(bedrock::validate_mcworld(bytes, check.path, &st));
-    CHECK(st.chunks == 5);
+    CHECK(st.chunks == 6);
     auto db = bedrock::LevelDbStore::open(check.path / "db", false);
     REQUIRE(db);
     using bedrock::ChunkTag;
@@ -383,4 +385,49 @@ TEST_CASE("A chunk whose yPos does not fit a section byte is refused", "[anvil][
     const auto c = java::decode_chunk(bytes, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>());
     REQUIRE_FALSE(c);
     CHECK(c.error().code() == ErrorCode::Malformed);
+}
+
+TEST_CASE("The Nether and the End convert in both directions", "[anvil][convert][dimensions]") {
+    test::TempDir dir;
+    using bedrock::Dimension;
+    const translate::MappingData& m = **translate::MappingData::embedded();
+    const auto run = [](const std::filesystem::path& in, const std::filesystem::path& out) {
+        convert::ConvertOptions o;
+        o.input = in;
+        o.output = out;
+        return convert::convert(o);
+    };
+    // Java (DIM-1) -> Bedrock: the Nether chunk is stored under dimension 1 with subchunks 0..7 only.
+    REQUIRE(run(test::data_path("javaworld/basic"), dir.path / "nether.mcworld"));
+    {
+        test::TempDir work;
+        const auto r = bedrock::BedrockWorldReader::open_path(dir.path / "nether.mcworld", work.path);
+        REQUIRE(r);
+        REQUIRE(r->chunks(Dimension::Nether).size() == 1);
+        CHECK(r->chunks(Dimension::End).empty());
+        const auto lookup = convert::bedrock_state_lookup(m);
+        const auto air = m.find_bedrock("minecraft:air", {});
+        const auto col = r->read_column({0, 0}, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(),
+                                        m.bedrock_block_version(), lookup, *air, 8, Dimension::Nether);
+        REQUIRE(col);
+        CHECK(col->min_y == 0);
+        CHECK(col->column.size().y == 128);
+        const auto name = [&](u32 x, u32 y, u32 z) {
+            return m.bedrock(col->column.block({static_cast<i32>(x), static_cast<i32>(y), static_cast<i32>(z)})).name;
+        };
+        CHECK(name(0, 0, 0) == "minecraft:netherrack");
+        CHECK(name(8, 64, 8) == "minecraft:glowstone");
+    }
+    // ... and back to Java: DIM-1 in the 26.3 layout (dimensions/minecraft/the_nether), chunk from y 0.
+    REQUIRE(run(dir.path / "nether.mcworld", dir.path / "nether_java"));
+    const auto back = formats::java::open_java_world(dir.path / "nether_java");
+    REQUIRE(back);
+    REQUIRE(back->nether_regions.size() == 1);
+    CHECK(back->nether_regions[0].parent_path().parent_path().filename() == "the_nether");
+    // The End (26.1+ layout) -> Bedrock dimension 2.
+    REQUIRE(run(test::data_path("javaworld/modern_layout"), dir.path / "end.mcworld"));
+    test::TempDir work;
+    const auto end = bedrock::BedrockWorldReader::open_path(dir.path / "end.mcworld", work.path);
+    REQUIRE(end);
+    CHECK(end->chunks(Dimension::End).size() == 1);
 }

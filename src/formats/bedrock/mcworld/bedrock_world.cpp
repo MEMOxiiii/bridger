@@ -87,19 +87,22 @@ Status write_file(const fs::path& p, std::span<const u8> bytes) {
 }
 
 
-using BiomeStorages = std::array<std::array<u32, kSectionVolume>, kOverworldSubchunks>;
+using BiomeStorage = std::array<u32, kSectionVolume>;
 
 // Per-column accumulation shared by write_new_world and WorldBuilder.
 struct ColumnAccumulator {
     std::array<i32, 256> highest; // world y of the highest non-air block per (z<<4|x), or INT_MIN
-    std::unique_ptr<BiomeStorages> biomes = std::make_unique<BiomeStorages>();
+    Dimension dim = Dimension::Overworld;
+    DimensionRange range = dimension_range(Dimension::Overworld);
+    std::vector<BiomeStorage> biomes; // one per subchunk of the range
     u8 chunk_version = kChunkVersion; // the target version's chunk Version byte
 
-    explicit ColumnAccumulator(i32 default_biome, u8 version = kChunkVersion) : chunk_version(version) {
+    explicit ColumnAccumulator(i32 default_biome, u8 version = kChunkVersion, Dimension d = Dimension::Overworld)
+        : dim(d), range(dimension_range(d)), biomes(static_cast<usize>(range.subchunks)), chunk_version(version) {
         highest.fill(std::numeric_limits<i32>::min());
-        for (auto& b : *biomes) b.fill(static_cast<u32>(default_biome));
+        for (auto& b : biomes) b.fill(static_cast<u32>(default_biome));
     }
-    std::array<u32, kSectionVolume>& biome_storage(i32 sy) { return (*biomes)[static_cast<usize>(sy - kOverworldMinSubchunk)]; }
+    BiomeStorage& biome_storage(i32 sy) { return biomes[static_cast<usize>(sy - range.min_subchunk)]; }
 
     // Blocks/liquids in Bridger order (y*256+z*16+x). Skips empty subchunks.
     Status add_subchunk(EncodedColumn& out, i32 cx, i32 cz, i32 sy, const std::array<u32, kSectionVolume>& blocks,
@@ -122,7 +125,7 @@ struct ColumnAccumulator {
             layers.push_back(&layer1);
         }
         BRIDGER_TRY(const std::vector<u8> encoded, encode_subchunk(static_cast<i8>(sy), layers, state_nbt));
-        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::SubChunkPrefix, static_cast<i8>(sy)), encoded);
+        out.add(chunk_key(cx, cz, dim, ChunkTag::SubChunkPrefix, static_cast<i8>(sy)), encoded);
         ++out.stats.subchunks;
         return {};
     }
@@ -130,15 +133,15 @@ struct ColumnAccumulator {
     // Data3D, block entities (with their world positions), Version, FinalizedState.
     Status finish(EncodedColumn& out, i32 cx, i32 cz, std::span<const std::pair<const BlockEntity*, BlockPos>> entities,
                   BlockPos origin) {
-        // Data3D: 256 i16 heights (z-major) relative to the world bottom, then 24 biome storages.
+        // Data3D: 256 i16 heights (z-major) relative to the dimension's bottom, then one biome storage per subchunk.
         io::BinaryWriter d3(Endian::Little);
         for (usize z = 0; z < 16; ++z)
             for (usize x = 0; x < 16; ++x) {
                 const i32 h = highest[(z << 4) | x];
-                d3.write<i16>(static_cast<i16>(h == std::numeric_limits<i32>::min() ? 0 : h - kOverworldMinY + 1));
+                d3.write<i16>(static_cast<i16>(h == std::numeric_limits<i32>::min() ? 0 : h - range.min_y() + 1));
             }
-        for (const auto& storage : *biomes) write_biome_storage(d3, storage);
-        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::Data3D), d3.view());
+        for (const auto& storage : biomes) write_biome_storage(d3, storage);
+        out.add(chunk_key(cx, cz, dim, ChunkTag::Data3D), d3.view());
 
         if (!entities.empty()) {
             io::BinaryWriter bew(Endian::Little);
@@ -146,14 +149,14 @@ struct ColumnAccumulator {
                 BRIDGER_TRY_STATUS(append_block_entity(bew, *be, world, origin));
                 ++out.stats.block_entities;
             }
-            out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::BlockEntity), bew.view());
+            out.add(chunk_key(cx, cz, dim, ChunkTag::BlockEntity), bew.view());
         }
 
         const u8 version = chunk_version;
-        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::Version), std::span<const u8>(&version, 1));
+        out.add(chunk_key(cx, cz, dim, ChunkTag::Version), std::span<const u8>(&version, 1));
         std::array<u8, 4> finalized{};
         io::store_le<i32>(finalized.data(), kFinalizedDone);
-        out.add(chunk_key(cx, cz, Dimension::Overworld, ChunkTag::FinalizedState), finalized);
+        out.add(chunk_key(cx, cz, dim, ChunkTag::FinalizedState), finalized);
         ++out.stats.chunks;
         return {};
     }
@@ -309,13 +312,15 @@ Result<WorldBuilder> WorldBuilder::create(const fs::path& work_dir) {
 }
 
 Result<EncodedColumn> WorldBuilder::encode_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state,
-                                                  i32 default_biome, const StateNbtFn& state_nbt, u8 chunk_version) {
+                                                  i32 default_biome, const StateNbtFn& state_nbt, u8 chunk_version,
+                                                  Dimension dimension) {
     if (column.source().edition != Edition::Bedrock)
         return make_error(ErrorCode::InvalidArgument, "encode_column needs a Bedrock column");
     if (column.size().x != 16 || column.size().z != 16 || (min_y & 15) != 0)
         return make_error(ErrorCode::InvalidArgument, "encode_column needs a 16-wide column starting on a section boundary");
     EncodedColumn out;
-    ColumnAccumulator acc(default_biome, chunk_version);
+    ColumnAccumulator acc(default_biome, chunk_version, dimension);
+    const DimensionRange range = dimension_range(dimension);
     auto blocks = std::make_unique<std::array<u32, kSectionVolume>>();
     auto liquids = std::make_unique<std::array<u32, kSectionVolume>>();
     auto biome_tmp = std::make_unique<std::array<u32, kSectionVolume>>();
@@ -325,7 +330,7 @@ Result<EncodedColumn> WorldBuilder::encode_column(ChunkPos pos, i32 min_y, const
         const i32 sy = first_sy + i;
         const Section& sec = column.section(0, static_cast<u32>(i), 0);
         sec.blocks().copy_to(*blocks);
-        if (sy < kOverworldMinSubchunk || sy >= kOverworldMinSubchunk + kOverworldSubchunks) {
+        if (!range.contains_subchunk(sy)) {
             out.clipped_blocks +=
                 static_cast<usize>(std::count_if(blocks->begin(), blocks->end(), [&](u32 v) { return v != air_state; }));
             continue;
@@ -346,7 +351,7 @@ Result<EncodedColumn> WorldBuilder::encode_column(ChunkPos pos, i32 min_y, const
     std::vector<std::pair<const BlockEntity*, BlockPos>> bes;
     for (const BlockEntity& be : column.block_entities) {
         const BlockPos w{be.pos.x + origin.x, be.pos.y + origin.y, be.pos.z + origin.z};
-        if (w.y < kOverworldMinY || w.y > kOverworldMaxY) continue;
+        if (w.y < range.min_y() || w.y > range.max_y()) continue;
         bes.push_back({&be, w});
     }
     BRIDGER_TRY_STATUS(acc.finish(out, pos.x, pos.z, bes, origin));
@@ -412,10 +417,14 @@ Status validate_world_directory(const fs::path& work_dir, WorldWriteStats* stats
     Status failure;
     BRIDGER_TRY_STATUS(db.for_each([&](std::string_view key, std::span<const u8> value) {
         if (!failure) return;
-        if (key.size() == 10 && static_cast<u8>(key[8]) == static_cast<u8>(ChunkTag::SubChunkPrefix)) {
+        // Chunk keys: x, z (8 bytes), a dimension (4 bytes) outside the Overworld, the tag, and a subchunk index after
+        // SubChunkPrefix: 9/10 bytes in the Overworld, 13/14 elsewhere [1].
+        const bool dim = key.size() == 13 || key.size() == 14;
+        const usize tag_at = dim ? 12 : 8;
+        if ((key.size() == 10 || key.size() == 14) && static_cast<u8>(key[tag_at]) == static_cast<u8>(ChunkTag::SubChunkPrefix)) {
             if (auto d = decode_subchunk(value); !d) failure = tl::unexpected(std::move(d).error());
             else ++st.subchunks;
-        } else if (key.size() == 9 && static_cast<u8>(key[8]) == static_cast<u8>(ChunkTag::BlockEntity)) {
+        } else if ((key.size() == 9 || key.size() == 13) && static_cast<u8>(key[tag_at]) == static_cast<u8>(ChunkTag::BlockEntity)) {
             usize pos = 0;
             while (pos < value.size()) {
                 auto doc = io::nbt::NbtDocument::parse(value.subspan(pos), Endian::Little);
@@ -426,7 +435,7 @@ Status validate_world_directory(const fs::path& work_dir, WorldWriteStats* stats
                 pos += doc->consumed_bytes();
                 ++st.block_entities;
             }
-        } else if (key.size() == 9 && static_cast<u8>(key[8]) == static_cast<u8>(ChunkTag::Version)) {
+        } else if ((key.size() == 9 || key.size() == 13) && static_cast<u8>(key[tag_at]) == static_cast<u8>(ChunkTag::Version)) {
             ++st.chunks;
         }
     }));

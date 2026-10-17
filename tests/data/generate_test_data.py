@@ -665,9 +665,9 @@ def anvil_section(y, palette, indices=None, biomes=("minecraft:plains",), biome_
     return Compound({"Y": Byte(y), "block_states": states, "biomes": bio})
 
 
-def anvil_chunk(cx, cz, sections, block_entities=(), status="minecraft:full"):
+def anvil_chunk(cx, cz, sections, block_entities=(), status="minecraft:full", ypos=-4):
     return Compound({
-        "DataVersion": Int(5023), "xPos": Int(cx), "zPos": Int(cz), "yPos": Int(-4), "Status": String(status),
+        "DataVersion": Int(5023), "xPos": Int(cx), "zPos": Int(cz), "yPos": Int(ypos), "Status": String(status),
         "sections": List[Compound](sections), "block_entities": List[Compound](list(block_entities)),
     })
 
@@ -750,8 +750,17 @@ def generate_java_world():
     # Negative coordinates: chunk (-1,0) is local (31,0) of region (-1,0).
     cm1 = anvil_chunk(-1, 0, [anvil_section(-1, ["minecraft:emerald_block"])])
     write_region(world / "region" / "r.-1.0.mca", {(31, 0): (2, nbt_bytes(cm1, "", "big"), False)})
-    # A Nether folder with an empty region file: detected and reported, not converted.
-    write_raw(world / "DIM-1" / "region" / "r.0.0.mca", b"")
+    # The Nether (DIM-1): chunk (0,0) from y 0, netherrack at the bottom, glowstone at y 64 and a stone platform at
+    # y 128 above the Bedrock Nether's height (y 0..127), where it is dropped and reported.
+    nether_pal = ["minecraft:air", "minecraft:glowstone"]
+    nether_idx = [0] * 4096
+    nether_idx[(0 << 8) | (8 << 4) | 8] = 1  # glowstone at (8, 64, 8)
+    nether = anvil_chunk(0, 0, [
+        anvil_section(0, ["minecraft:netherrack"], biomes=("minecraft:nether_wastes",)),
+        anvil_section(4, nether_pal, nether_idx, biomes=("minecraft:crimson_forest",)),
+        anvil_section(8, ["minecraft:stone"], biomes=("minecraft:nether_wastes",)),
+    ], ypos=0)
+    write_region(world / "DIM-1" / "region" / "r.0.0.mca", {(0, 0): (2, nbt_bytes(nether, "", "big"), False)})
 
     # Java 26.1+ folder layout: dimensions/minecraft/overworld/region and the seed in
     # data/minecraft/world_gen_settings.dat (saved-data wrapper {DataVersion, data}).
@@ -767,7 +776,10 @@ def generate_java_world():
     cm = anvil_chunk(3, -2, [anvil_section(0, ["minecraft:lapis_block"])])
     write_region(modern / "dimensions" / "minecraft" / "overworld" / "region" / "r.0.-1.mca",
                  {(3, 30): (2, nbt_bytes(cm, "", "big"), False)})
-    write_raw(modern / "dimensions" / "minecraft" / "the_end" / "region" / "r.0.0.mca", b"")
+    # The End (26.1+ layout): chunk (0,0) with end stone in section 3 (y 48..63).
+    end = anvil_chunk(0, 0, [anvil_section(3, ["minecraft:end_stone"], biomes=("minecraft:the_end",))], ypos=0)
+    write_region(modern / "dimensions" / "minecraft" / "the_end" / "region" / "r.0.0.mca",
+                 {(0, 0): (2, nbt_bytes(end, "", "big"), False)})
 
 
 

@@ -97,9 +97,9 @@ pass `--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
 | `.schematic` (MCEdit legacy) | Java | ✓ | — |
 | `.litematic` | Java | ✓ | ✓ |
 | Structure `.nbt` | Java | ✓ | ✓ |
-| Java world (Overworld; reads Beta 1.3 – 26.3, writes 1.18 – 26.3) | Java | ✓ | ✓ |
+| Java world (all three dimensions; reads Beta 1.3 – 26.3, writes 1.18 – 26.3) | Java | ✓ | ✓ |
 | `.mcstructure` | Bedrock | ✓ | ✓ |
-| `.mcworld` or world folder (Overworld; reads Pocket Edition 0.9 – 26.52, writes 1.18.30 – 26.50) | Bedrock | ✓ | ✓ |
+| `.mcworld` or world folder (all three dimensions; reads Pocket Edition 0.9 – 26.52, writes 1.18.30 – 26.50) | Bedrock | ✓ | ✓ |
 | `.mcworld` (place into a copy of an existing world) | Bedrock | — | ✓ |
 
 ✓ means golden tests, a fuzz target, a benchmark and a recorded in-game check all pass. The pinned versions are
@@ -134,10 +134,13 @@ Against [Chunker](https://github.com/HiveGamesOSS/Chunker) 1.21.0 converting the
 
 ## Known limitations
 
-- Worlds: only the Overworld, in both directions. Java Alpha worlds (before Beta 1.3) and Pocket Edition worlds
-  before 0.9 are not read. Worlds from before 1.18 have nothing below y 0 after conversion.
-- Entities (armor stands, item frames, mobs) are not written yet; item components (enchantments, names) and sign
-  text formatting are dropped. All of it is listed in the report.
+- Worlds: the Overworld, the Nether and the End convert in both directions. Bedrock's Nether ends at y 127, so
+  blocks a Java world has on its Nether roof (y 128 and up) are dropped and reported. A server's separate
+  `world_nether` / `world_the_end` folders are not read (as in Chunker); Bridger says so. Java Alpha worlds (before
+  Beta 1.3) and Pocket Edition worlds before 0.9 are not read. Worlds from before 1.18 have nothing below y 0 after
+  conversion.
+- Entities (armor stands, item frames, mobs) and players are not written yet; text formatting (colours, bold) is
+  reduced to plain text. All of it is listed in the report.
 - Bedrock-only blocks have no Java equivalent: they are replaced and reported.
 - One Java and one Bedrock version at a time; Windows x64 only for now.
 

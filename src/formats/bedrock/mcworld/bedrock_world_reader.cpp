@@ -127,7 +127,8 @@ struct BedrockWorldReader::Impl {
     fs::path dir;
     std::optional<LevelDbStore> db;
     BedrockLevelInfo level;
-    std::vector<ChunkPos> chunks;
+    std::vector<ChunkPos> chunks;               // Overworld
+    std::vector<ChunkPos> nether, end;
     bool other_dimensions = false;
     usize entities = 0;
 };
@@ -138,7 +139,9 @@ BedrockWorldReader& BedrockWorldReader::operator=(BedrockWorldReader&&) noexcept
 BedrockWorldReader::~BedrockWorldReader() = default;
 
 const BedrockLevelInfo& BedrockWorldReader::level() const noexcept { return impl_->level; }
-const std::vector<ChunkPos>& BedrockWorldReader::overworld_chunks() const noexcept { return impl_->chunks; }
+const std::vector<ChunkPos>& BedrockWorldReader::chunks(Dimension dimension) const noexcept {
+    return dimension == Dimension::Nether ? impl_->nether : dimension == Dimension::End ? impl_->end : impl_->chunks;
+}
 bool BedrockWorldReader::has_other_dimensions() const noexcept { return impl_->other_dimensions; }
 usize BedrockWorldReader::entity_count() const noexcept { return impl_->entities; }
 
@@ -225,6 +228,10 @@ Result<BedrockWorldReader> BedrockWorldReader::open_unpacked(BedrockWorldReader 
             m.chunks.push_back({io::load_le<i32>(key.data()), io::load_le<i32>(key.data() + 4)});
         } else if (key.size() == 13 && (static_cast<u8>(key[12]) == static_cast<u8>(ChunkTag::Version) ||
                                         static_cast<u8>(key[12]) == kLegacyVersionTag)) {
+            const ChunkPos c{io::load_le<i32>(key.data()), io::load_le<i32>(key.data() + 4)};
+            const i32 dim = io::load_le<i32>(key.data() + 8);
+            if (dim == static_cast<i32>(Dimension::Nether)) m.nether.push_back(c);
+            else if (dim == static_cast<i32>(Dimension::End)) m.end.push_back(c);
             m.other_dimensions = true;
         } else if (key.starts_with("actorprefix")) {
             ++m.entities;
@@ -232,29 +239,36 @@ Result<BedrockWorldReader> BedrockWorldReader::open_unpacked(BedrockWorldReader 
             ++m.entities; // legacy storage: at least one entity
         }
     }));
-    std::sort(m.chunks.begin(), m.chunks.end(), [](ChunkPos a, ChunkPos b) { return a.z != b.z ? a.z < b.z : a.x < b.x; });
-    m.chunks.erase(std::unique(m.chunks.begin(), m.chunks.end()), m.chunks.end());
+    for (std::vector<ChunkPos>* list : {&m.chunks, &m.nether, &m.end}) {
+        std::sort(list->begin(), list->end(), [](ChunkPos a, ChunkPos b) { return a.z != b.z ? a.z < b.z : a.x < b.x; });
+        list->erase(std::unique(list->begin(), list->end()), list->end());
+    }
     m.db.emplace(std::move(db));
     return r;
 }
 
-Result<u8> BedrockWorldReader::chunk_version(ChunkPos pos) const {
-    BRIDGER_TRY(const auto v, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, ChunkTag::Version)));
+Result<u8> BedrockWorldReader::chunk_version(ChunkPos pos, Dimension dim) const {
+    BRIDGER_TRY(const auto v, impl_->db->get(chunk_key(pos.x, pos.z, dim, ChunkTag::Version)));
     if (v && !v->empty()) return (*v)[0];
-    BRIDGER_TRY(const auto legacy, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyVersionTag))));
+    BRIDGER_TRY(const auto legacy, impl_->db->get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kLegacyVersionTag))));
     if (legacy && !legacy->empty()) return (*legacy)[0];
     return u8{40}; // no version key: read as a current chunk
 }
 
-Result<SubchunkLayers> BedrockWorldReader::subchunk_layers(ChunkPos pos, i32 sy, u8 version, const LegacyTerrain* terrain) const {
+Result<SubchunkLayers> BedrockWorldReader::subchunk_layers(ChunkPos pos, i32 sy, u8 version, const LegacyTerrain* terrain,
+                                                           Dimension dim) const {
     SubchunkLayers out;
     if (terrain != nullptr) { // pre-1.0: the column holds subchunks 0-7
         if (sy < 0 || sy >= 8) return out;
         out.layers.push_back(terrain->subchunks[static_cast<usize>(sy)]);
         out.legacy = true;
     } else {
-        const i32 offset = version >= kChunkCavesCliffsOffsetFirst && version <= kChunkCavesCliffsOffsetLast ? 4 : 0;
-        BRIDGER_TRY(const auto value, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, ChunkTag::SubChunkPrefix,
+        // The Caves & Cliffs experiment shifted Overworld subchunk keys only.
+        const i32 offset = dim == Dimension::Overworld && version >= kChunkCavesCliffsOffsetFirst &&
+                                   version <= kChunkCavesCliffsOffsetLast
+                               ? 4
+                               : 0;
+        BRIDGER_TRY(const auto value, impl_->db->get(chunk_key(pos.x, pos.z, dim, ChunkTag::SubChunkPrefix,
                                                                static_cast<i8>(sy + offset))));
         if (!value) return out;
         BRIDGER_TRY(RawSubchunk sub, decode_subchunk_raw(*value));
@@ -262,7 +276,7 @@ Result<SubchunkLayers> BedrockWorldReader::subchunk_layers(ChunkPos pos, i32 sy,
         out.layers = std::move(sub.layers);
     }
     if (out.legacy && out.layers.size() == 1 && sy >= 0) {
-        BRIDGER_TRY(const auto extra, impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyExtraDataTag))));
+        BRIDGER_TRY(const auto extra, impl_->db->get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kLegacyExtraDataTag))));
         if (extra) {
             auto layers = read_extra_data(*extra, version);
             if (const auto it = layers.find(sy); it != layers.end()) out.layers.push_back(std::move(it->second));
@@ -273,13 +287,15 @@ Result<SubchunkLayers> BedrockWorldReader::subchunk_layers(ChunkPos pos, i32 sy,
 
 Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_ptr<BlockStateRegistry> blocks,
                                                       std::shared_ptr<BiomeRegistry> biomes, u32 bedrock_data_version,
-                                                      const StateLookupFn& lookup, u32 air, i32 default_biome) const {
+                                                      const StateLookupFn& lookup, u32 air, i32 default_biome,
+                                                      Dimension dim) const {
     const LevelDbStore& db = *impl_->db;
+    const DimensionRange range = dimension_range(dim);
     BedrockColumn out;
     out.pos = pos;
-    out.min_y = kOverworldMinY;
+    out.min_y = range.min_y();
     BRIDGER_TRY(out.column, Structure::create(std::move(blocks), std::move(biomes),
-                                              Extent{16, static_cast<u32>(kOverworldSubchunks * 16), 16},
+                                              Extent{16, static_cast<u32>(range.subchunks * 16), 16},
                                               {Edition::Bedrock, bedrock_data_version}));
     Structure& col = out.column;
     for (u32 i = 0; i < col.sections_y(); ++i) col.section(0, i, 0).blocks().fill(air);
@@ -307,11 +323,11 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
     };
 
     std::array<u32, kSectionVolume> values{};
-    BRIDGER_TRY(const u8 version, chunk_version(pos));
+    BRIDGER_TRY(const u8 version, chunk_version(pos, dim));
     // LegacyTerrain exists only in chunks older than 1.0 (no lookup for newer ones).
     std::optional<std::vector<u8>> legacy_terrain;
     if (version < kChunkV1_0_0) {
-        BRIDGER_TRY(legacy_terrain, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyTerrainTag))));
+        BRIDGER_TRY(legacy_terrain, db.get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kLegacyTerrainTag))));
     }
     std::optional<LegacyTerrain> terrain;
     if (legacy_terrain) {
@@ -319,15 +335,15 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
         if (t) terrain = std::move(*t);
         else out.warnings.push_back(where + ": the pre-1.0 terrain could not be read (" + t.error().describe() + "); it was left empty");
     }
-    for (i32 sy = kOverworldMinSubchunk; sy < kOverworldMinSubchunk + kOverworldSubchunks; ++sy) {
-        auto sub = subchunk_layers(pos, sy, version, terrain ? &*terrain : nullptr);
+    for (i32 sy = range.min_subchunk; sy < range.min_subchunk + range.subchunks; ++sy) {
+        auto sub = subchunk_layers(pos, sy, version, terrain ? &*terrain : nullptr, dim);
         if (!sub) {
             out.warnings.push_back(where + " subchunk " + std::to_string(sy) + " could not be read (" +
                                    sub.error().describe() + "); it was left empty");
             continue;
         }
         if (sub->layers.empty()) continue;
-        Section& sec = col.section(0, static_cast<u32>(sy - kOverworldMinSubchunk), 0);
+        Section& sec = col.section(0, static_cast<u32>(sy - range.min_subchunk), 0);
         for (usize l = 0; l < sub->layers.size() && l < 2; ++l) {
             const RawSubchunkLayer& layer = sub->layers[l];
             std::vector<u64> uses(layer.palette.size(), 0);
@@ -347,14 +363,14 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
     }
 
     // Biomes (Data3D): heightmap (512 bytes), then one storage per subchunk from the bottom.
-    BRIDGER_TRY(const auto d3, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData3DTag))));
+    BRIDGER_TRY(const auto d3, db.get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kData3DTag))));
     // 2D biomes (before 1.18) are looked up only when there is no Data3D.
     std::optional<std::vector<u8>> d2, d2l;
     if (!d3) {
-        BRIDGER_TRY(d2, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DTag))));
+        BRIDGER_TRY(d2, db.get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kData2DTag))));
     }
     if (!d3 && !d2) {
-        BRIDGER_TRY(d2l, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kData2DLegacyTag))));
+        BRIDGER_TRY(d2l, db.get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kData2DLegacyTag))));
     }
     std::array<u32, 256> ids2d{};
     if (d3 && d3->size() >= 512) {
@@ -387,7 +403,7 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
     }
 
     // Block entities: concatenated LE NBT roots with absolute positions.
-    BRIDGER_TRY(const auto bes, db.get(chunk_key(pos.x, pos.z, Dimension::Overworld, ChunkTag::BlockEntity)));
+    BRIDGER_TRY(const auto bes, db.get(chunk_key(pos.x, pos.z, dim, ChunkTag::BlockEntity)));
     if (bes) {
         const std::span<const u8> all(*bes);
         usize p = 0;
@@ -428,15 +444,15 @@ Result<BedrockColumn> BedrockWorldReader::read_column(ChunkPos pos, std::shared_
 
 std::optional<std::array<u32, kSectionVolume>> BedrockWorldReader::read_subchunk_blocks(ChunkPos pos, i32 sy,
                                                                                        const StateLookupFn& lookup,
-                                                                                       u32 air) const {
-    const auto version = chunk_version(pos);
+                                                                                       u32 air, Dimension dim) const {
+    const auto version = chunk_version(pos, dim);
     if (!version) return std::nullopt;
     std::optional<LegacyTerrain> terrain;
     if (sy >= 0 && sy < 8 && *version < kChunkV1_0_0) {
-        if (const auto t = impl_->db->get(chunk_key(pos.x, pos.z, Dimension::Overworld, static_cast<ChunkTag>(kLegacyTerrainTag))); t && *t)
+        if (const auto t = impl_->db->get(chunk_key(pos.x, pos.z, dim, static_cast<ChunkTag>(kLegacyTerrainTag))); t && *t)
             if (auto d = decode_legacy_terrain(**t)) terrain = std::move(*d);
     }
-    auto sub = subchunk_layers(pos, sy, *version, terrain ? &*terrain : nullptr);
+    auto sub = subchunk_layers(pos, sy, *version, terrain ? &*terrain : nullptr, dim);
     if (!sub || sub->layers.empty()) return std::nullopt;
     const RawSubchunkLayer& layer = sub->layers[0];
     std::vector<u32> map(layer.palette.size(), air);

@@ -17,6 +17,12 @@ versions follow the release plan in `docs/release.md`.
   Sculk blocks, trial spawners, vaults, beehives, creaking hearts and end portals are written as Chunker writes
   them; bees in hives and a vault's rewarded players are reported.
 
+- The Nether and the End convert in both directions and within an edition (Java `DIM-1`/`DIM1` or
+  `dimensions/minecraft/the_nether`/`the_end`; Bedrock dimensions 1 and 2). Blocks on a Java Nether roof (y 128 and
+  up) have no place in Bedrock's Nether (y 0..127): they are dropped and reported. A server's separate
+  `world_nether`/`world_the_end` folders are reported, not read (as in Chunker). `bridger info` counts the chunks of
+  every dimension.
+
 ### Fixed
 
 - Items with names from before 1.21.9 (`chain`) or older (`scute`, `grass`, ...) in old worlds were dropped.

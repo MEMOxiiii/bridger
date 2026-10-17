@@ -1,6 +1,6 @@
 # Java world (Anvil)
 
-Editions/versions covered: Java Edition worlds from **Beta 1.3 (McRegion) to 26.3**, read for the Overworld;
+Editions/versions covered: Java Edition worlds from **Beta 1.3 (McRegion) to 26.3**, all three dimensions;
 blocks and biomes of older versions are upgraded to the pinned target, Java 26.3 (DataVersion 5023,
 `docs/versions.md`). See "Old worlds" for everything before 1.18. Alpha worlds (before Beta 1.3) are refused
 with a message asking the user to open them once in a later version, which converts them.
@@ -18,10 +18,11 @@ the 26.1+ one is detected by `dimensions/minecraft/overworld/`.
 |---|---|---|---|
 | `level.dat` | same | gzip big-endian NBT, root → `Data` | read: name, DataVersion, version name, spawn (and seed before 26.1) |
 | `data/minecraft/world_gen_settings.dat` | `level.dat` → `Data.WorldGenSettings` | gzip NBT; 26.1+: saved-data wrapper `{DataVersion, data: {seed, generate_structures, bonus_chest, dimensions}}` | read: seed |
-| `dimensions/minecraft/overworld/region/r.<x>.<z>.mca` | `region/` | Overworld chunks, 32 × 32 per file | read |
+| `dimensions/minecraft/overworld/region/r.<x>.<z>.mca` | `region/` | Overworld chunks, 32 × 32 per file (sections y -4..19) | read and written |
 | `…/region/c.<x>.<z>.mcc` | same | oversized chunk payload (absolute chunk coordinates) | read |
 | `dimensions/minecraft/overworld/entities/` | `entities/` | entities (1.17+) | not converted — reported |
-| `dimensions/minecraft/the_nether`, `…/the_end` | `DIM-1`, `DIM1` | Nether, End | not converted — reported |
+| `dimensions/minecraft/the_nether/region`, `…/the_end/region` | `DIM-1/region`, `DIM1/region` | Nether, End chunks (`yPos` 0, sections 0..15, y 0..255) [3] | read and written (Anvil only) |
+| `<world>_nether/DIM-1`, `<world>_the_end/DIM1` next to the world | | a Bukkit/Spigot/Paper server's separate Nether and End worlds | not read, as in Chunker (`JavaLevelDirectoryResolver`) — reported |
 
 The field names in `world_gen_settings.dat` (`seed`, `generate_structures`, `bonus_chest`) and the saved-data
 wrapper key `data` were read from the string constants of the 26.3 server's `WorldOptions` and

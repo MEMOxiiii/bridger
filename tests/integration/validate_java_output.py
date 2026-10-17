@@ -127,8 +127,10 @@ def check_world(path):
             fail("level.dat: spawn.pos missing")
     elif not all(k in level for k in ("SpawnX", "SpawnY", "SpawnZ")):
         fail("level.dat: SpawnX/Y/Z missing")
+    # Each dimension: its region folder and its section range (Overworld y -64..319, the Nether and the End y 0..255).
     if dv >= 4786:
-        region_dir = path / "dimensions" / "minecraft" / "overworld" / "region"
+        dims = [(name, path / "dimensions" / "minecraft" / folder / "region", lo)
+                for name, folder, lo in (("Overworld", "overworld", -4), ("Nether", "the_nether", 0), ("End", "the_end", 0))]
     else:
         wgs = level.get("WorldGenSettings")
         if wgs is None or "seed" not in wgs or len(wgs["dimensions"]) != 3:
@@ -136,7 +138,17 @@ def check_world(path):
         for name, dim in wgs["dimensions"].items():
             if dim["generator"]["type"] != "minecraft:noise" or "biome_source" not in dim["generator"]:
                 fail(f"level.dat: dimension {name} has no noise generator")
-        region_dir = path / "region"
+        dims = [("Overworld", path / "region", -4), ("Nether", path / "DIM-1" / "region", 0), ("End", path / "DIM1" / "region", 0)]
+    counts = {}
+    for dim_name, region_dir, min_section in dims:
+        counts[dim_name] = check_regions(region_dir, dv, min_section)
+    if counts["Overworld"] == 0:
+        fail("world has no Overworld chunks")
+    extra = "".join(f", {n} {d} chunks" for d, n in counts.items() if d != "Overworld" and n)
+    return f"java world '{level['LevelName']}', {counts['Overworld']} chunks{extra}"
+
+
+def check_regions(region_dir, dv, min_section):
     chunks = 0
     for rp in sorted(region_dir.glob("r.*.*.mca")):
         rx, rz = (int(v) for v in rp.name.split(".")[1:3])
@@ -161,7 +173,11 @@ def check_world(path):
                 fail(f"{rp.name}: chunk {i} DataVersion {int(c['DataVersion'])} differs from level.dat's {dv}")
             if int(c["xPos"]) != rx * 32 + i % 32 or int(c["zPos"]) != rz * 32 + i // 32:
                 fail(f"{rp.name}: chunk {i} has wrong coordinates")
+            if int(c["yPos"]) != min_section:
+                fail(f"{rp.name}: chunk {i} yPos {int(c['yPos'])}, expected {min_section} for this dimension")
             for sec in c["sections"]:
+                if not min_section <= int(sec["Y"]) < min_section + (24 if min_section < 0 else 16):
+                    fail(f"{rp.name}: chunk {i} section Y {int(sec['Y'])} outside the dimension")
                 pal = sec["block_states"]["palette"]
                 if len(pal) > 1:
                     idx = unpack(sec["block_states"]["data"], max(4, (len(pal) - 1).bit_length()), 4096)
@@ -176,9 +192,7 @@ def check_world(path):
                 if int(be["x"]) >> 4 != int(c["xPos"]) or int(be["z"]) >> 4 != int(c["zPos"]):
                     fail("block entity outside its chunk")
             chunks += 1
-    if chunks == 0:
-        fail("world has no chunks")
-    return f"java world '{level['LevelName']}', {chunks} chunks"
+    return chunks
 
 
 def main():

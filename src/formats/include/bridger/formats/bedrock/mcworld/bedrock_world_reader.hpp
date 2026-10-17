@@ -7,6 +7,7 @@
 #include <bridger/core/result.hpp>
 #include <bridger/core/structure.hpp>
 #include <bridger/formats/bedrock/mcstructure.hpp>
+#include <bridger/formats/bedrock/mcworld/chunk_key.hpp>
 
 #include <array>
 #include <filesystem>
@@ -56,27 +57,30 @@ public:
     ~BedrockWorldReader();
 
     [[nodiscard]] const BedrockLevelInfo& level() const noexcept;
-    [[nodiscard]] const std::vector<ChunkPos>& overworld_chunks() const noexcept; // sorted (z, x)
+    [[nodiscard]] const std::vector<ChunkPos>& chunks(Dimension dimension) const noexcept; // sorted (z, x)
+    [[nodiscard]] const std::vector<ChunkPos>& overworld_chunks() const noexcept { return chunks(Dimension::Overworld); }
     [[nodiscard]] bool has_other_dimensions() const noexcept;
     [[nodiscard]] usize entity_count() const noexcept; // actors (digp/actorprefix) + legacy entities
 
     // Thread-safe. `lookup` resolves palette entries to pinned-palette indices.
     [[nodiscard]] Result<BedrockColumn> read_column(ChunkPos pos, std::shared_ptr<BlockStateRegistry> blocks,
                                                     std::shared_ptr<BiomeRegistry> biomes, u32 bedrock_data_version,
-                                                    const StateLookupFn& lookup, u32 air_state, i32 default_biome) const;
+                                                    const StateLookupFn& lookup, u32 air_state, i32 default_biome,
+                                                    Dimension dimension = Dimension::Overworld) const;
 
     // Thread-safe. Layer-1 blocks of one subchunk (Bridger order), for neighbour lookups across
     // column borders; nullopt if the subchunk is absent or unreadable (unknown entries read as air).
     [[nodiscard]] std::optional<std::array<u32, kSectionVolume>> read_subchunk_blocks(ChunkPos pos, i32 subchunk_y,
                                                                                     const StateLookupFn& lookup,
-                                                                                    u32 air_state) const;
+                                                                                    u32 air_state,
+                                                                                    Dimension dimension = Dimension::Overworld) const;
 
 private:
     BedrockWorldReader();
     [[nodiscard]] static Result<BedrockWorldReader> open_unpacked(BedrockWorldReader r, const std::vector<u8>& level_bytes);
-    [[nodiscard]] Result<u8> chunk_version(ChunkPos pos) const;
+    [[nodiscard]] Result<u8> chunk_version(ChunkPos pos, Dimension dim) const;
     [[nodiscard]] Result<SubchunkLayers> subchunk_layers(ChunkPos pos, i32 subchunk_y, u8 version,
-                                                                const LegacyTerrain* terrain) const;
+                                                                const LegacyTerrain* terrain, Dimension dim) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

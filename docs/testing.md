@@ -54,7 +54,8 @@ people's worlds.
   `.schematic` with `AddBlocks`, unknown ids, an old-style chest and a 1.12 bed.
 - `tests/data/javaworld/basic/`: a Java world (level.dat + two region files) with zlib, gzip, uncompressed and
   external (`.mcc`) chunks, both palette spellings, a waterlogged block, biomes, a block entity, negative chunk
-  coordinates, a partially generated chunk and a Nether folder.
+  coordinates, a partially generated chunk, a Nether chunk (with a platform above y 127) and, in the 26.1+ layout,
+  an End chunk.
 - `tests/data/javaworld/v1_16/`, `v1_12/`, `mcregion/`, `alpha/`: worlds in the layouts before 1.18 (1.13 spanning and
   1.16 packed palettes with 256- and 1024-entry biome arrays; 1.12 numeric ids with every state 1.13 moved; a McRegion
   column; an Alpha chunk file, refused). Old Bedrock layouts (LegacyTerrain, subchunk versions 0, 1 and 8 with old
@@ -169,6 +170,7 @@ Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3
 | 16 | The convert page shows "Saved by" with the right version for a `.schem` from an older WorldEdit, a 1.20 Java world, a `.mcworld` and a `.schematic`; the "Game version" list offers every target, newest first, and the line under it reads "source → target". |
 | 17 | Target versions in the game: a world converted for Java 1.20.1 and one for 1.18.2 open in those versions (launcher installations) with the build and chests intact; a `.schem` written for 1.20.1 pastes in WorldEdit on 1.20.1. A `.mcworld` written for an older Bedrock version opens in the current Bedrock (which upgrades it). |
 | 18 | Same edition: a 26.3 Java world converted to a Java 1.19.4 world opens in 1.19.4 with cherry wood as birch and a crafter as a dropper with its items; a `.mcworld` converted to 1.20.0 and back to 26.50 opens with every block intact. ⚠ Bedrock "unknown" placeholder: a world with cherry planks written for 1.19.80 still shows cherry planks after the current Bedrock opens it (the kept block comes back). |
+| 19 | Dimensions: a Java world with a built-up Nether and End converted to Bedrock: going through a Nether portal and the End portal reaches the converted builds (not new terrain), Nether biomes (crimson forest, soul sand valley) look right, nothing is missing below y 128 in the Nether. The `.mcworld` converted back to Java opens with the same Nether and End. ⚠ |
 
 ### Procedure
 

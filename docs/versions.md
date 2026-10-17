@@ -81,8 +81,8 @@ versions compute; those are not reported).
 **Same edition.** A world or file can also be converted to another version of its own edition, up or down: a
 `.mcworld` (or Bedrock world folder) to a `.mcworld`, a Java world to a Java world folder, and every structure format
 to any other within an edition (`.schem` → `.schem` for 1.18.2, `.mcstructure` → `.mcstructure`, ...). The input is
-read and upgraded to the pinned version as usual, then written for the target. Whole worlds convert the Overworld
-only and do not write entities yet (both are warned about, as for cross-edition worlds). The output may never be the
+read and upgraded to the pinned version as usual, then written for the target. Whole worlds convert all three
+dimensions and do not write entities yet (warned about, as for cross-edition worlds). The output may never be the
 input or lie inside it (`docs/safety.md`).
 
 **Experimental blocks (Java).** Mojang's reports list blocks of experimental features in the releases where they were

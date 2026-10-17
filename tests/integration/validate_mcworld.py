@@ -139,22 +139,42 @@ def main():
 
         db = leveldb.LevelDB(str(Path(tmp, "db")), create_if_missing=False)
         chunks = subchunks = block_entities = 0
+        per_dim = {0: 0, 1: 0, 2: 0}
+        # Subchunk range per dimension: Overworld -4..19, Nether 0..7, End 0..15 (minecraft.wiki "Bedrock Edition level
+        # format"; Chunker Dimension).
+        ranges = {0: range(-4, 20), 1: range(0, 8), 2: range(0, 16)}
         blocks_by_y = {}
         for key, value in db.iterate():
-            if len(key) == 10 and key[8] == 0x2F:
+            # Chunk keys: x, z (8 bytes), a dimension (4 bytes) outside the Overworld, the tag, a subchunk index.
+            if len(key) in (13, 14):
+                dim = struct.unpack("<i", key[8:12])[0]
+                tag, rest = key[12], key[13:]
+            elif len(key) in (9, 10):
+                dim, tag, rest = 0, key[8], key[9:]
+            else:
+                continue
+            if dim not in ranges:
+                fail(f"unknown dimension {dim}")
+            if tag == 0x2F and len(rest) == 1:
                 y, non_air = decode_subchunk(value, palette_keys, block_version)
-                if y != struct.unpack("<b", key[9:10])[0]:
+                if y != struct.unpack("<b", rest)[0]:
                     fail("subchunk y index does not match key")
-                blocks_by_y[y] = blocks_by_y.get(y, 0) + non_air
+                if y not in ranges[dim]:
+                    fail(f"subchunk {y} outside dimension {dim}")
+                if dim == 0:
+                    blocks_by_y[y] = blocks_by_y.get(y, 0) + non_air
                 subchunks += 1
-            elif len(key) == 9 and key[8] == 0x2C:
+            elif rest:
+                continue
+            elif tag == 0x2C:
                 if value != bytes([args.chunk_version]):
                     fail(f"chunk version {value!r}")
                 chunks += 1
-            elif len(key) == 9 and key[8] == 0x36:
+                per_dim[dim] += 1
+            elif tag == 0x36:
                 if struct.unpack("<i", value)[0] != 2:
                     fail("FinalizedState")
-            elif len(key) == 9 and key[8] == 0x31:
+            elif tag == 0x31:
                 cx, cz = struct.unpack("<ii", key[:8])
                 buf = io.BytesIO(value)
                 while buf.tell() < len(value):
@@ -165,12 +185,13 @@ def main():
                     if "id" not in be:
                         fail("block entity without id")
                     block_entities += 1
-            elif len(key) == 9 and key[8] == 0x2B:
+            elif tag == 0x2B:
                 if len(value) < 512:
                     fail("Data3D too short")
         db.close()
 
-    print(f"valid: {chunks} chunks, {subchunks} subchunks, {block_entities} block entities, "
+    dims = "".join(f", {n} {name} chunks" for d, name in ((1, "Nether"), (2, "End")) if (n := per_dim[d]))
+    print(f"valid: {chunks} chunks{dims}, {subchunks} subchunks, {block_entities} block entities, "
           f"level '{level['LevelName']}'")
     if args.report:
         report = json.loads(Path(args.report).read_text(encoding="utf-8"))

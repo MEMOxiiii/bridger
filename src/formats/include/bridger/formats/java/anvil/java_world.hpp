@@ -1,8 +1,8 @@
 #pragma once
 
-// A Java world folder (docs/formats/anvil.md): level.dat (gzip NBT, root.Data) and the
-// Overworld's region files: dimensions/minecraft/overworld/region/ (Java 26.1+) or region/
-// (older). The Nether and the End are detected and reported, not converted.
+// A Java world folder (docs/formats/anvil.md): level.dat (gzip NBT, root.Data) and the region files of each
+// dimension: dimensions/minecraft/<overworld|the_nether|the_end>/region/ (Java 26.1+), or region/, DIM-1/region/ and
+// DIM1/region/ (older).
 
 #include <bridger/core/result.hpp>
 #include <bridger/core/types.hpp>
@@ -31,8 +31,14 @@ struct JavaWorld {
     std::filesystem::path root;
     JavaLevelInfo level;
     std::vector<std::filesystem::path> overworld_regions; // sorted
+    std::vector<std::filesystem::path> nether_regions;    // sorted
+    std::vector<std::filesystem::path> end_regions;       // sorted
     bool has_nether = false;
     bool has_end = false;
+    // Bukkit/Spigot/Paper servers keep the Nether and the End in separate worlds next to this one
+    // (<name>_nether/DIM-1, <name>_the_end/DIM1); they are not read (as Chunker), only reported.
+    bool server_nether_folder = false;
+    bool server_end_folder = false;
     bool has_entity_regions = false; // entities/ (1.17+): not converted
     bool modern_layout = false;      // dimensions/ folder layout (Java 26.1+)
 };

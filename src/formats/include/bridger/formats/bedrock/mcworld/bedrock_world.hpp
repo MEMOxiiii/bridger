@@ -60,7 +60,7 @@ struct WorldWriteStats {
 struct EncodedColumn {
     std::vector<std::pair<std::string, std::vector<u8>>> entries;
     WorldWriteStats stats;
-    usize clipped_blocks = 0; // blocks outside the Overworld build height, dropped
+    usize clipped_blocks = 0; // blocks outside the dimension's build height, dropped
 
     void add(std::string key, std::span<const u8> value) { entries.emplace_back(std::move(key), std::vector<u8>(value.begin(), value.end())); }
 };
@@ -75,9 +75,12 @@ public:
     // Thread-safe when `state_nbt` is: encodes a column without touching the database,
     // so workers can encode in parallel while one thread stores columns with put() in a
     // fixed order (identical output for any thread count).
+    // `dimension` selects the keys and the build height (dimension_range); blocks outside it are counted in
+    // clipped_blocks.
     [[nodiscard]] static Result<EncodedColumn> encode_column(ChunkPos pos, i32 min_y, const Structure& column, u32 air_state,
                                                              i32 default_biome, const StateNbtFn& state_nbt,
-                                                             u8 chunk_version = kChunkVersion);
+                                                             u8 chunk_version = kChunkVersion,
+                                                             Dimension dimension = Dimension::Overworld);
     [[nodiscard]] Status put(const EncodedColumn& column);
 
     // `column`: a Bedrock-domain 16 x h x 16 structure whose local (0,0,0) is world

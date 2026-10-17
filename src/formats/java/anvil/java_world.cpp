@@ -78,8 +78,27 @@ Result<JavaWorld> open_java_world(const fs::path& path) {
         }
     }
     std::sort(w.overworld_regions.begin(), w.overworld_regions.end());
-    w.has_nether = fs::is_directory(w.root / "DIM-1" / "region", ec) || fs::is_directory(modern / "the_nether" / "region", ec);
-    w.has_end = fs::is_directory(w.root / "DIM1" / "region", ec) || fs::is_directory(modern / "the_end" / "region", ec);
+    // The Nether and the End: Anvil files only (McRegion-era Nether folders are read by any newer version first).
+    const auto list_mca = [&](const fs::path& dir, std::vector<fs::path>& out) -> Status {
+        if (!fs::is_directory(dir, ec)) return {};
+        for (const auto& e : fs::directory_iterator(dir, ec)) {
+            if (!e.is_regular_file()) continue;
+            BRIDGER_TRY(const std::string name, platform::path_to_utf8(e.path().filename()));
+            if (name.starts_with("r.") && name.ends_with(".mca")) out.push_back(e.path());
+        }
+        if (ec) return make_error(ErrorCode::IoError, "cannot list " + platform::path_to_utf8(dir).value_or("?") + ": " + ec.message());
+        std::sort(out.begin(), out.end());
+        return {};
+    };
+    BRIDGER_TRY_STATUS(list_mca(w.modern_layout ? modern / "the_nether" / "region" : w.root / "DIM-1" / "region", w.nether_regions));
+    BRIDGER_TRY_STATUS(list_mca(w.modern_layout ? modern / "the_end" / "region" : w.root / "DIM1" / "region", w.end_regions));
+    w.has_nether = !w.nether_regions.empty();
+    w.has_end = !w.end_regions.empty();
+    // A server's separate Nether/End worlds sit next to the world folder.
+    const fs::path parent = w.root.parent_path();
+    const fs::path stem = w.root.filename();
+    w.server_nether_folder = fs::is_directory(parent / (stem.native() + fs::path("_nether").native()) / "DIM-1" / "region", ec);
+    w.server_end_folder = fs::is_directory(parent / (stem.native() + fs::path("_the_end").native()) / "DIM1" / "region", ec);
     w.has_entity_regions = fs::is_directory(overworld / "entities", ec) && !fs::is_empty(overworld / "entities", ec);
 
     // 26.1+: the seed moved from level.dat to data/minecraft/world_gen_settings.dat, a saved-data

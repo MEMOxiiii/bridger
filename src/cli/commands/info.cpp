@@ -208,7 +208,8 @@ int info_mcworld(const std::string& name, const std::filesystem::path& path) {
         line("Chunk area:", std::format("x {}..{}, z {}..{} (blocks x {}..{}, z {}..{})", x0, x1, z0, z1, x0 * 16, x1 * 16 + 15,
                                         z0 * 16, z1 * 16 + 15));
     }
-    line("Nether / End:", reader->has_other_dimensions() ? "present (not converted)" : "none");
+    line("Nether:", std::format("{} chunks", reader->chunks(formats::bedrock::Dimension::Nether).size()));
+    line("End:", std::format("{} chunks", reader->chunks(formats::bedrock::Dimension::End).size()));
     line("Entities:", std::to_string(reader->entity_count()));
     return kExitOk;
 }
@@ -219,11 +220,15 @@ int info_java_world(const std::string& name, const std::filesystem::path& path) 
         log::error("{}", world.error().with_file(name).describe());
         return kExitError;
     }
-    usize chunks = 0;
-    for (const auto& rp : world->overworld_regions)
-        if (auto r = formats::java::RegionFile::open(rp))
-            for (u32 lz = 0; lz < 32; ++lz)
-                for (u32 lx = 0; lx < 32; ++lx) chunks += r->has_chunk(lx, lz) ? 1 : 0;
+    const auto count_chunks = [](const std::vector<std::filesystem::path>& regions) {
+        usize n = 0;
+        for (const auto& rp : regions)
+            if (auto r = formats::java::RegionFile::open(rp))
+                for (u32 lz = 0; lz < 32; ++lz)
+                    for (u32 lx = 0; lx < 32; ++lx) n += r->has_chunk(lx, lz) ? 1 : 0;
+        return n;
+    };
+    const usize chunks = count_chunks(world->overworld_regions);
     const auto& lv = world->level;
     line("Folder:", name);
     line("Format:", world->modern_layout ? "Java world (26.1+ folder layout)" : "Java world (Anvil)");
@@ -233,8 +238,10 @@ int info_java_world(const std::string& name, const std::filesystem::path& path) 
     line("Seed:", lv.seed ? std::to_string(*lv.seed) : std::string("(unknown)"));
     if (lv.spawn) line("Spawn:", std::format("{}, {}, {}", lv.spawn->x, lv.spawn->y, lv.spawn->z));
     line("Overworld:", std::format("{} region files, {} chunks", world->overworld_regions.size(), chunks));
-    line("Nether:", world->has_nether ? "present (not converted)" : "none");
-    line("End:", world->has_end ? "present (not converted)" : "none");
+    line("Nether:", std::format("{} region files, {} chunks", world->nether_regions.size(), count_chunks(world->nether_regions)));
+    line("End:", std::format("{} region files, {} chunks", world->end_regions.size(), count_chunks(world->end_regions)));
+    if (world->server_nether_folder || world->server_end_folder)
+        line("Server folders:", "the Nether / End are in separate server folders next to this world (not converted)");
     return kExitOk;
 }
 

@@ -297,6 +297,51 @@ struct JavaWorldInfo {
 
 // Writes level.dat (and, from 26.1, world_gen_settings.dat) into the Java world built in `temp` for `target`, checks
 // that every chunk re-reads, and renames the folder to o.output. `keep` is set once the folder must not be removed.
+using formats::bedrock::Dimension;
+constexpr std::array<Dimension, 3> kDimensions{Dimension::Overworld, Dimension::Nether, Dimension::End};
+
+std::string_view dimension_name(Dimension d) {
+    return d == Dimension::Nether ? "the Nether" : d == Dimension::End ? "the End" : "the Overworld";
+}
+
+// A dimension's region folder in a Java world: dimensions/minecraft/<name>/region (26.1+), else region, DIM-1/region,
+// DIM1/region (docs/formats/anvil.md).
+fs::path java_region_dir(const fs::path& root, bool modern_layout, Dimension d) {
+    if (modern_layout)
+        return root / "dimensions" / "minecraft" / (d == Dimension::Nether ? "the_nether" : d == Dimension::End ? "the_end" : "overworld") /
+               "region";
+    return d == Dimension::Nether ? root / "DIM-1" / "region" : d == Dimension::End ? root / "DIM1" / "region" : root / "region";
+}
+
+const std::vector<fs::path>& java_regions(const formats::java::JavaWorld& w, Dimension d) {
+    return d == Dimension::Nether ? w.nether_regions : d == Dimension::End ? w.end_regions : w.overworld_regions;
+}
+
+// Bedrock biome a column of a dimension falls back to (Chunker Dimension.fallbackBiome; Bedrock ids from
+// BedrockBiomeIDResolver: hell 8, the_end 9).
+i32 bedrock_default_biome(Dimension d) {
+    return d == Dimension::Nether ? 8 : d == Dimension::End ? 9 : translate::kDefaultBedrockBiome;
+}
+
+// Warnings for the Nether and the End a server keeps in separate world folders (not read, as Chunker).
+void warn_server_dimensions(const formats::java::JavaWorld& w, ConvertSummary& summary) {
+    if (w.server_nether_folder)
+        summary.warnings.push_back("the Nether is in a separate server folder (" + platform::path_to_utf8(w.root.filename()).value_or("world") +
+                                   "_nether) and was not converted");
+    if (w.server_end_folder)
+        summary.warnings.push_back("the End is in a separate server folder (" + platform::path_to_utf8(w.root.filename()).value_or("world") +
+                                   "_the_end) and was not converted");
+}
+
+void warn_clipped(const std::array<usize, 3>& clipped, ConvertSummary& summary) {
+    for (const Dimension d : kDimensions)
+        if (const usize n = clipped[static_cast<usize>(d)]; n > 0) {
+            const auto range = formats::bedrock::dimension_range(d);
+            summary.warnings.push_back(std::format("{} blocks of {} outside the Bedrock build height (y {} to {}) were dropped", n,
+                                                   dimension_name(d), range.min_y(), range.max_y()));
+        }
+}
+
 Result<ConvertSummary> finish_java_world(const ConvertOptions& o, ConvertSummary summary, const fs::path& temp, bool& keep,
                                          const OutputTarget& target, const JavaWorldInfo& info, usize chunks, usize block_entities,
                                          const std::vector<std::string>& experiments) {
@@ -330,7 +375,8 @@ Result<ConvertSummary> finish_java_world(const ConvertOptions& o, ConvertSummary
     {
         BRIDGER_TRY(const formats::java::JavaWorld back, formats::java::open_java_world(temp));
         usize reread = 0;
-        for (const fs::path& rp : back.overworld_regions) {
+        for (const Dimension d : kDimensions)
+        for (const fs::path& rp : java_regions(back, d)) {
             BRIDGER_TRY(const formats::java::RegionFile rf, formats::java::RegionFile::open(rp));
             for (u32 lz = 0; lz < 32; ++lz)
                 for (u32 lx = 0; lx < 32; ++lx) {
@@ -386,8 +432,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
         summary.warnings.push_back(std::format("world DataVersion {} is newer than the pinned Java version's {} ({}); unknown "
                                                "blocks are reported",
                                                *world.level.data_version, mapping->java_data_version(), mapping->java_version()));
-    if (world.has_nether) summary.warnings.push_back("the Nether was not converted: only the Overworld is supported");
-    if (world.has_end) summary.warnings.push_back("the End was not converted: only the Overworld is supported");
+    warn_server_dimensions(world, summary);
     if (world.has_entity_regions) summary.warnings.push_back("entities (entities/*.mca) were not converted: entities are not written yet");
     if (world.overworld_regions.empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld region files");
 
@@ -408,7 +453,8 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     const auto state_fn = target_state_nbt(target, *mapping, state_nbt.fn());
     translate::TranslateOptions topt;
     topt.fallback = o.fallback;
-    usize skipped_partial = 0, clipped = 0;
+    usize skipped_partial = 0;
+    std::array<usize, 3> clipped{}; // per dimension
     std::map<std::string, usize> failures; // reason -> chunk count
     std::string first_failure;
 
@@ -426,8 +472,10 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     constexpr usize kBatch = 128; // chunk slots in flight: bounds memory to ~kBatch encoded columns
     std::vector<ChunkResult> results(kBatch);
     usize regions_done = 0;
-    for (const fs::path& region_path : world.overworld_regions) {
-        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(regions_done++) / static_cast<float>(world.overworld_regions.size()), "Converting chunks"));
+    const usize total_regions = world.overworld_regions.size() + world.nether_regions.size() + world.end_regions.size();
+    for (const Dimension dim : kDimensions)
+    for (const fs::path& region_path : java_regions(world, dim)) {
+        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(regions_done++) / static_cast<float>(total_regions), "Converting chunks"));
         auto region = formats::java::RegionFile::open(region_path);
         if (!region) {
             ++failures[region.error().describe()];
@@ -436,7 +484,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
         }
         for (usize batch = 0; batch < 1024; batch += kBatch) {
             BRIDGER_TRY_STATUS(step(o, 0.85f * (static_cast<float>(regions_done - 1) + static_cast<float>(batch) / 1024.0f) /
-                                           static_cast<float>(world.overworld_regions.size()),
+                                           static_cast<float>(total_regions),
                                     "Converting chunks"));
             parallel_for(kBatch, o.threads, [&](usize i) {
                 ChunkResult& r = results[i];
@@ -465,8 +513,8 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
                     !rw)
                     return fail(std::move(rw).error());
                 auto encoded = formats::bedrock::WorldBuilder::encode_column(chunk->pos, chunk->min_y, *bedrock, *air,
-                                                                             translate::kDefaultBedrockBiome, state_fn,
-                                                                             static_cast<u8>(target.bedrock->chunk_version));
+                                                                             bedrock_default_biome(dim), state_fn,
+                                                                             static_cast<u8>(target.bedrock->chunk_version), dim);
                 if (!encoded) return fail(std::move(encoded).error());
                 r.encoded = std::move(*encoded);
                 r.kind = ChunkResult::Kind::Done;
@@ -486,7 +534,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
                     summary.warnings.insert(summary.warnings.end(), r.warnings.begin(), r.warnings.end());
                     summary.blocks += r.blocks;
                     summary.report.merge(r.report);
-                    clipped += r.encoded.clipped_blocks;
+                    clipped[static_cast<usize>(dim)] += r.encoded.clipped_blocks;
                     BRIDGER_TRY_STATUS(builder.put(r.encoded));
                     break;
                 }
@@ -497,7 +545,7 @@ Result<ConvertSummary> convert_java_world(const ConvertOptions& o, ConvertSummar
     if (skipped_partial > 0)
         summary.warnings.push_back(std::format("{} partially generated chunks were skipped (the game generates them)",
                                                skipped_partial));
-    if (clipped > 0) summary.warnings.push_back(std::format("{} blocks outside the Bedrock build height were dropped", clipped));
+    warn_clipped(clipped, summary);
     for (const auto& [reason, n] : failures)
         summary.warnings.push_back(std::format("{} chunks could not be read ({})", n, reason));
     if (!first_failure.empty()) summary.warnings.push_back("first unreadable chunk: " + first_failure);
@@ -716,8 +764,6 @@ Result<ConvertSummary> convert_bedrock_world_to_bedrock(const ConvertOptions& o,
     BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(o.input, unpacked.path()));
     if (reader.overworld_chunks().empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld chunks");
     summary.source_version = bedrock_world_version_info(reader.level().last_opened_version);
-    if (reader.has_other_dimensions())
-        summary.warnings.push_back("the Nether and the End were not converted: only the Overworld is supported");
     if (reader.entity_count() > 0)
         summary.warnings.push_back(std::format("{} entities were not converted: entities are not written yet", reader.entity_count()));
     BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::McWorld, summary));
@@ -746,20 +792,24 @@ Result<ConvertSummary> convert_bedrock_world_to_bedrock(const ConvertOptions& o,
         u64 blocks = 0;
         bool done = false;
     };
-    const std::vector<ChunkPos>& all = reader.overworld_chunks();
     constexpr usize kBatch = 128;
     std::vector<ColumnResult> results(kBatch);
     std::map<std::string, usize> failures;
     std::string first_failure;
+    const usize total = reader.chunks(Dimension::Overworld).size() + reader.chunks(Dimension::Nether).size() +
+                        reader.chunks(Dimension::End).size();
+    usize done_before = 0;
+    for (const Dimension dim : kDimensions) {
+    const std::vector<ChunkPos>& all = reader.chunks(dim);
     for (usize start = 0; start < all.size(); start += kBatch) {
-        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(start) / static_cast<float>(all.size()), "Converting chunks"));
+        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(done_before + start) / static_cast<float>(total), "Converting chunks"));
         const usize count = std::min(kBatch, all.size() - start);
         parallel_for(count, o.threads, [&](usize i) {
             ColumnResult& r = results[i];
             r = ColumnResult{};
             const ChunkPos c = all[start + i];
             auto col = reader.read_column(c, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(), m.bedrock_block_version(),
-                                          lookup, air, translate::kDefaultBedrockBiome);
+                                          lookup, air, bedrock_default_biome(dim), dim);
             if (!col) {
                 r.error = std::move(col).error();
                 return;
@@ -772,8 +822,8 @@ Result<ConvertSummary> convert_bedrock_world_to_bedrock(const ConvertOptions& o,
                 r.error = std::move(rw).error();
                 return;
             }
-            auto encoded = formats::bedrock::WorldBuilder::encode_column(c, col->min_y, col->column, air, translate::kDefaultBedrockBiome,
-                                                                         state_fn, static_cast<u8>(target.bedrock->chunk_version));
+            auto encoded = formats::bedrock::WorldBuilder::encode_column(c, col->min_y, col->column, air, bedrock_default_biome(dim),
+                                                                         state_fn, static_cast<u8>(target.bedrock->chunk_version), dim);
             if (!encoded) {
                 r.error = std::move(encoded).error();
                 return;
@@ -797,6 +847,8 @@ Result<ConvertSummary> convert_bedrock_world_to_bedrock(const ConvertOptions& o,
             }
             r = ColumnResult{};
         }
+    }
+    done_before += all.size();
     }
     for (const auto& [reason, n] : failures) summary.warnings.push_back(std::format("{} chunks could not be converted ({})", n, reason));
     if (!first_failure.empty()) summary.warnings.push_back("first failed chunk: " + first_failure);
@@ -826,8 +878,7 @@ Result<ConvertSummary> convert_java_world_to_java(const ConvertOptions& o, Conve
     BRIDGER_TRY(const translate::MappingData* mapping, translate::MappingData::embedded());
     summary.source_data_version = world.level.data_version;
     summary.source_version = java_version_info(FormatId::JavaWorld, world.level.data_version, world.level.version_name, world.level.storage_format);
-    if (world.has_nether) summary.warnings.push_back("the Nether was not converted: only the Overworld is supported");
-    if (world.has_end) summary.warnings.push_back("the End was not converted: only the Overworld is supported");
+    warn_server_dimensions(world, summary);
     if (world.has_entity_regions) summary.warnings.push_back("entities (entities/*.mca) were not converted: entities are not written yet");
     if (world.overworld_regions.empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld region files");
     BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::JavaWorld, summary));
@@ -842,8 +893,7 @@ Result<ConvertSummary> convert_java_world_to_java(const ConvertOptions& o, Conve
         }
     } tree{temp};
     const bool modern_layout = target.java->data_version >= formats::java::kJava26_1;
-    const fs::path region_dir = modern_layout ? temp / "dimensions" / "minecraft" / "overworld" / "region" : temp / "region";
-    fs::create_directories(region_dir);
+    fs::create_directories(java_region_dir(temp, modern_layout, Dimension::Overworld));
     if (modern_layout) fs::create_directories(temp / "data" / "minecraft");
     const formats::java::LegacyTables legacy = legacy_tables(*mapping);
     const BlockState fallback_state = java_fallback(o.fallback);
@@ -864,9 +914,12 @@ Result<ConvertSummary> convert_java_world_to_java(const ConvertOptions& o, Conve
     std::vector<std::string> experiments;
     std::map<std::string, usize> failures;
     std::string first_failure;
-    for (const fs::path& region_path : world.overworld_regions) {
-        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(regions_done++) / static_cast<float>(world.overworld_regions.size()),
-                                "Converting chunks"));
+    const usize total_regions = world.overworld_regions.size() + world.nether_regions.size() + world.end_regions.size();
+    for (const Dimension dim : kDimensions)
+    for (const fs::path& region_path : java_regions(world, dim)) {
+        const fs::path region_dir = java_region_dir(temp, modern_layout, dim);
+        fs::create_directories(region_dir);
+        BRIDGER_TRY_STATUS(step(o, 0.85f * static_cast<float>(regions_done++) / static_cast<float>(total_regions), "Converting chunks"));
         auto region = formats::java::RegionFile::open(region_path);
         if (!region) {
             ++failures[region.error().describe()];
@@ -954,8 +1007,6 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     BRIDGER_TRY(const formats::bedrock::BedrockWorldReader reader, formats::bedrock::BedrockWorldReader::open_path(o.input, unpacked.path()));
     if (reader.overworld_chunks().empty()) return make_error(ErrorCode::Malformed, "the world has no Overworld chunks");
     summary.source_version = bedrock_world_version_info(reader.level().last_opened_version);
-    if (reader.has_other_dimensions())
-        summary.warnings.push_back("the Nether and the End were not converted: only the Overworld is supported");
     if (reader.entity_count() > 0)
         summary.warnings.push_back(std::format("{} entities were not converted: entities are not written yet", reader.entity_count()));
 
@@ -971,21 +1022,13 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     } tree{temp};
     BRIDGER_TRY(const OutputTarget target, resolve_target(o, FormatId::JavaWorld, summary));
     const bool modern_layout = target.java->data_version >= formats::java::kJava26_1; // dimensions/ folders since 26.1
-    const fs::path region_dir = modern_layout ? temp / "dimensions" / "minecraft" / "overworld" / "region" : temp / "region";
-    fs::create_directories(region_dir);
+    fs::create_directories(java_region_dir(temp, modern_layout, Dimension::Overworld));
     if (modern_layout) fs::create_directories(temp / "data" / "minecraft");
     const BlockState java_fallback_state = java_fallback(o.fallback);
 
     const auto lookup = bedrock_lookup(m);
     translate::TranslateOptions topt;
     topt.fallback = o.fallback;
-    std::map<std::pair<i32, i32>, std::vector<ChunkPos>> regions;
-    for (const ChunkPos c : reader.overworld_chunks()) regions[{c.x >> 5, c.z >> 5}].push_back(c);
-    const std::set<std::pair<i32, i32>> existing = [&] {
-        std::set<std::pair<i32, i32>> s;
-        for (const ChunkPos c : reader.overworld_chunks()) s.insert({c.x, c.z});
-        return s;
-    }();
 
     struct ColumnResult {
         std::optional<Error> error;
@@ -1001,16 +1044,29 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
     std::vector<std::string> experiments;
     std::map<std::string, usize> failures;
     std::string first_failure;
-    usize regions_done = 0;
+    usize regions_done = 0, total_regions = 0;
+    for (const Dimension dim : kDimensions) {
+        std::set<std::pair<i32, i32>> r;
+        for (const ChunkPos c : reader.chunks(dim)) r.insert({c.x >> 5, c.z >> 5});
+        total_regions += r.size();
+    }
+    for (const Dimension dim : kDimensions) {
+    std::map<std::pair<i32, i32>, std::vector<ChunkPos>> regions;
+    for (const ChunkPos c : reader.chunks(dim)) regions[{c.x >> 5, c.z >> 5}].push_back(c);
+    std::set<std::pair<i32, i32>> existing;
+    for (const ChunkPos c : reader.chunks(dim)) existing.insert({c.x, c.z});
+    const auto range = formats::bedrock::dimension_range(dim);
+    const fs::path region_dir = java_region_dir(temp, modern_layout, dim);
+    if (!regions.empty()) fs::create_directories(region_dir);
     for (const auto& [rpos, cols] : regions) {
-        BRIDGER_TRY_STATUS(step(o, 0.9f * static_cast<float>(regions_done++) / static_cast<float>(regions.size()), "Converting chunks"));
+        BRIDGER_TRY_STATUS(step(o, 0.9f * static_cast<float>(regions_done++) / static_cast<float>(total_regions), "Converting chunks"));
         formats::java::RegionWriter region(rpos.first, rpos.second);
         std::vector<ColumnResult> results(cols.size());
         parallel_for(cols.size(), o.threads, [&](usize i) {
             ColumnResult& r = results[i];
             const ChunkPos c = cols[i];
             auto col = reader.read_column(c, std::make_shared<BlockStateRegistry>(), std::make_shared<BiomeRegistry>(),
-                                          m.bedrock_block_version(), lookup, air, translate::kDefaultBedrockBiome);
+                                          m.bedrock_block_version(), lookup, air, bedrock_default_biome(dim), dim);
             if (!col) {
                 r.error = std::move(col).error();
                 return;
@@ -1024,10 +1080,10 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
             local.bedrock_outside = [&](BlockPos p) -> std::optional<u32> {
                 const i32 wx = c.x * 16 + p.x, wy = col->min_y + p.y, wz = c.z * 16 + p.z;
                 const i32 ncx = wx >> 4, ncz = wz >> 4, sy = wy >> 4;
-                if (wy < formats::bedrock::kOverworldMinY || wy > formats::bedrock::kOverworldMaxY) return std::nullopt;
+                if (wy < range.min_y() || wy > range.max_y()) return std::nullopt;
                 if (!existing.contains({ncx, ncz})) return std::nullopt;
                 auto& slot = cache[{ncx, ncz, sy}];
-                if (!slot) slot = reader.read_subchunk_blocks({ncx, ncz}, sy, lookup, air).value_or(std::array<u32, kSectionVolume>{});
+                if (!slot) slot = reader.read_subchunk_blocks({ncx, ncz}, sy, lookup, air, dim).value_or(std::array<u32, kSectionVolume>{});
                 return (*slot)[section_index(wx & 15, wy & 15, wz & 15)];
             };
             r.report.set_origin({c.x * 16, col->min_y, c.z * 16});
@@ -1071,6 +1127,7 @@ Result<ConvertSummary> convert_bedrock_world(const ConvertOptions& o, ConvertSum
             r = ColumnResult{};
         }
         if (region.chunk_count() > 0) BRIDGER_TRY_STATUS(region.write(region_dir));
+    }
     }
     for (const auto& [reason, n] : failures) summary.warnings.push_back(std::format("{} chunks could not be converted ({})", n, reason));
     if (!first_failure.empty()) summary.warnings.push_back("first failed chunk: " + first_failure);
