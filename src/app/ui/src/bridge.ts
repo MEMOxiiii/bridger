@@ -76,6 +76,7 @@ export interface Settings {
   render_distance: number
   distant_terrain: number
   recent: string[]
+  check_updates: boolean
 }
 
 export interface Stats {
@@ -128,6 +129,11 @@ export type Incoming =
   | { type: 'textures_progress'; fraction: number; step: string }
   | { type: 'textures_done' }
   | { type: 'textures_failed'; message: string; cancelled: boolean }
+  | { type: 'update_available'; version: string; current: string; notes: string; size: number; installable: boolean }
+  | { type: 'update_none'; current: string }
+  | { type: 'update_progress'; fraction: number; step: string }
+  | { type: 'update_ready'; version: string }
+  | { type: 'update_failed'; message: string; cancelled: boolean }
 
 export interface ConvertRequest {
   output: string
@@ -163,8 +169,14 @@ export type Outgoing =
   | { type: 'pick_client_jar' }
   | { type: 'download_textures' }
   | { type: 'cancel_textures' }
+  | { type: 'update_check' }
+  | { type: 'update_install' }
+  | { type: 'update_cancel' }
+  | { type: 'update_skip' }
+  | { type: 'update_restart' }
+  | { type: 'update_page' }
   | { type: 'add_pack' }
-  | { type: 'settings'; client_jar?: string; packs?: string[]; render_distance?: number; distant_terrain?: number }
+  | { type: 'settings'; client_jar?: string; packs?: string[]; render_distance?: number; distant_terrain?: number; check_updates?: boolean }
 
 interface WebView {
   postMessage(message: unknown): void

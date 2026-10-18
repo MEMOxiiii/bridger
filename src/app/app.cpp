@@ -2,6 +2,7 @@
 
 #include "settings.hpp"
 #include "ui_bundle.hpp"
+#include "updater.hpp"
 #include "viewer.hpp"
 #include "win32/compositor.hpp"
 #include "win32/shell.hpp"
@@ -12,6 +13,7 @@
 #include <bridger/core/block_registry.hpp>
 #include <bridger/core/log.hpp>
 #include <bridger/platform/paths.hpp>
+#include <bridger/platform/process.hpp>
 #include <bridger/render/asset_download.hpp>
 #include <bridger/render/renderer.hpp>
 #include <bridger/render/scene.hpp>
@@ -217,6 +219,14 @@ struct App::Impl {
     std::atomic<bool> download_cancel{false};
     bool downloading = false;
     bool using_downloaded_jar = false;
+    // Self-update (updater.hpp, docs/app/updates.md): the latest release found, the package staged next to the program,
+    // and whether it was installed already (then the app restarts or quits).
+    std::thread update_worker;
+    std::atomic<bool> update_cancel{false};
+    bool update_busy = false;
+    std::optional<update::Release> update_release;
+    std::optional<fs::path> update_package;
+    bool update_installed = false;
     std::vector<fs::path> asset_paths; // client jar + resource packs of `models` (distant terrain cache key)
     // Time to first frame (docs/performance.md): from open() to the first frame showing the document,
     // and for worlds until every chunk in the render distance is on screen.
@@ -232,8 +242,10 @@ struct App::Impl {
     ~Impl() {
         convert_cancel = true;
         download_cancel = true;
+        update_cancel = true;
         if (convert_worker.joinable()) convert_worker.join();
         if (download_worker.joinable()) download_worker.join();
+        if (update_worker.joinable()) update_worker.join();
         if (open_worker.joinable()) open_worker.join();
         doc.streaming.reset();
         doc.view_world.reset();
@@ -273,7 +285,7 @@ struct App::Impl {
 
     json settings_json() const {
         return {{"client_jar", settings.client_jar}, {"packs", settings.packs}, {"render_distance", settings.render_distance},
-                {"distant_terrain", settings.distant_terrain}, {"recent", settings.recent}};
+                {"distant_terrain", settings.distant_terrain}, {"recent", settings.recent}, {"check_updates", settings.check_updates}};
     }
 
     void send_hello() {
@@ -297,6 +309,23 @@ struct App::Impl {
             for (auto& s : outbox) web->post_json(s);
             outbox.clear();
             if (!pending_open.empty()) open(std::exchange(pending_open, {}));
+            check_for_update(false);
+        } else if (type == "update_check") {
+            check_for_update(true);
+        } else if (type == "update_install") {
+            start_update_download();
+        } else if (type == "update_cancel") {
+            update_cancel = true;
+        } else if (type == "update_skip") {
+            if (update_release) {
+                settings.skipped_version = update_release->version.str();
+                save_settings(settings);
+            }
+        } else if (type == "update_restart") {
+            install_update(true);
+        } else if (type == "update_page") {
+            if (update_release && update_release->page_url.starts_with("https://github.com/" + std::string(update::kRepository) + "/"))
+                open_url(update_release->page_url);
         } else if (type == "orbit") {
             viewer.orbit(num("dx"), num("dy"));
         } else if (type == "pan") {
@@ -412,6 +441,7 @@ struct App::Impl {
             settings.render_distance = std::clamp(m["render_distance"].get<int>(), 2, 48);
         if (m.contains("distant_terrain") && m["distant_terrain"].is_number_integer())
             settings.distant_terrain = std::clamp(m["distant_terrain"].get<int>(), 0, 96);
+        if (m.contains("check_updates") && m["check_updates"].is_boolean()) settings.check_updates = m["check_updates"].get<bool>();
         apply_view_distance();
         settings_changed(assets_changed);
     }
@@ -855,6 +885,104 @@ struct App::Impl {
         });
     }
 
+    // ---- Self-update (docs/app/updates.md) ---------------------------------------------------
+
+    static std::optional<fs::path> app_dir() {
+        const auto exe = platform::executable_path();
+        if (!exe) return std::nullopt;
+        return exe->parent_path();
+    }
+
+    // Automatic checks run at most once a day and only when enabled; `manual` (Settings, "Check now") always runs and
+    // also reports "up to date" and errors.
+    void check_for_update(bool manual) {
+        if (update_busy) return;
+        const i64 now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        if (!manual && (!settings.check_updates || now - settings.last_update_check < 24 * 3600)) return;
+        if (!manual) {
+            settings.last_update_check = now;
+            save_settings(settings);
+        }
+        if (update_worker.joinable()) update_worker.join();
+        update_busy = true;
+        update_worker = std::thread([this, manual] {
+            auto r = update::fetch_latest();
+            tasks.post([this, manual, r = std::move(r)]() mutable {
+                update_busy = false;
+                const auto current = update::Version::parse(BRIDGER_VERSION_STRING).value_or(update::Version{});
+                if (!r) {
+                    log::warn("update check: {}", r.error().describe());
+                    if (manual) send({{"type", "update_failed"}, {"message", "Could not check for updates: " + r.error().describe()}, {"cancelled", false}});
+                    return;
+                }
+                if (!(current < r->version) || (!manual && r->version.str() == settings.skipped_version)) {
+                    if (manual) send({{"type", "update_none"}, {"current", current.str()}});
+                    return;
+                }
+                update_release = std::move(*r);
+                send({{"type", "update_available"},
+                      {"version", update_release->version.str()},
+                      {"current", current.str()},
+                      {"notes", update_release->notes},
+                      {"size", update_release->zip_size},
+                      {"installable", !update_release->sha256.empty() || !update_release->sha256_url.empty()}});
+            });
+        });
+    }
+
+    void start_update_download() {
+        if (update_busy || !update_release || update_package) return;
+        const auto dir = app_dir();
+        if (!dir) return send({{"type", "update_failed"}, {"message", "The program's folder is unknown."}, {"cancelled", false}});
+        if (update_worker.joinable()) update_worker.join();
+        update_busy = true;
+        update_cancel = false;
+        send({{"type", "update_progress"}, {"fraction", 0.0}, {"step", "Starting"}});
+        update_worker = std::thread([this, release = *update_release, staging = update::staging_dir(*dir)] {
+            std::error_code ec;
+            fs::remove_all(staging, ec); // an unfinished earlier attempt (only Bridger writes there)
+            auto last = std::make_shared<float>(-1.0f);
+            auto r = update::download_and_stage(release, staging, [this, last](float f, std::string_view step) {
+                if (f - *last >= 0.005f || f >= 0.9f) {
+                    *last = f;
+                    tasks.post([this, f, step = std::string(step)] { send({{"type", "update_progress"}, {"fraction", f}, {"step", step}}); });
+                }
+                return !update_cancel.load();
+            });
+            if (!r) fs::remove_all(staging, ec);
+            tasks.post([this, r = std::move(r)] {
+                update_busy = false;
+                if (!r) {
+                    const bool cancelled = r.error().code() == ErrorCode::Cancelled;
+                    send({{"type", "update_failed"}, {"message", r.error().describe()}, {"cancelled", cancelled}});
+                    return;
+                }
+                update_package = *r;
+                send({{"type", "update_ready"}, {"version", update_release->version.str()}});
+            });
+        });
+    }
+
+    // Swaps the program's files; with `restart` the new version is started and this one quits. Without it (the app is
+    // closing) the new version starts next time.
+    void install_update(bool restart) {
+        if (!update_package || update_installed) return;
+        if (restart && converting) return toast("info", "Bridger restarts after the conversion finishes. Try again then.");
+        const auto dir = app_dir();
+        if (!dir) return;
+        if (const auto st = update::install(*update_package, *dir); !st) {
+            update_package.reset();
+            return send({{"type", "update_failed"}, {"message", st.error().describe()}, {"cancelled", false}});
+        }
+        update_installed = true;
+        if (!restart) return;
+        if (const auto st = platform::launch_detached(*dir / "bridger-gui.exe", {}); !st) {
+            toast("error", "Bridger was updated; start it again to use the new version.");
+            return;
+        }
+        running = false;
+    }
+
     // ---- Fly mode --------------------------------------------------------------------------
 
     void set_fly(bool on) {
@@ -1002,6 +1130,7 @@ struct App::Impl {
     }
 
     int run(const std::string& open_path) {
+        if (const auto dir = app_dir()) update::cleanup(*dir); // files left by an update installed last time
         if (!init()) return 1;
         if (bundle.empty()) return fatal("The user interface is missing from this build.") ? 0 : 1;
         start_web();
@@ -1076,6 +1205,7 @@ struct App::Impl {
                 log::info("render distance loaded: {:.0f} ms, {} chunks, {} quads", since_open(), st.loaded, st.quads);
             }
         }
+        install_update(false); // a downloaded update the user did not restart for: installed on the way out
         return 0;
     }
 };

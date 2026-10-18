@@ -18,6 +18,9 @@ struct Settings {
     int render_distance = 12;        // chunks around the camera (worlds)
     int distant_terrain = 32;        // simplified terrain out to this many chunks; <= render_distance: off
     std::vector<std::string> recent; // most recent first
+    bool check_updates = true;       // look for a new release once a day (docs/app/updates.md)
+    i64 last_update_check = 0;       // Unix seconds of the last automatic check
+    std::string skipped_version;     // "1.1.0": not offered again automatically
 
     static constexpr usize kMaxRecent = 6;
     void add_recent(const std::string& path);

@@ -34,9 +34,23 @@ export interface TexturesState {
   error: string
 }
 
+export interface UpdateState {
+  phase: 'idle' | 'checking' | 'none' | 'available' | 'running' | 'ready' | 'failed'
+  version: string
+  current: string
+  notes: string
+  size: number
+  installable: boolean
+  fraction: number
+  step: string
+  error: string
+  dismissed: boolean // the card was closed ("Later"); Settings still shows the state
+}
+
 export interface State {
   splash: boolean
   textures: TexturesState
+  update: UpdateState
   view: View
   previewReady: boolean // the 3D model of the open file is built (worlds: always)
   reportOpen: boolean
@@ -66,6 +80,7 @@ const initialConvert: ConvertState = {
 let state: State = {
   splash: true,
   textures: { phase: 'idle', fraction: 0, step: '', error: '' },
+  update: { phase: 'idle', version: '', current: '', notes: '', size: 0, installable: false, fraction: 0, step: '', error: '', dismissed: false },
   view: 'file',
   previewReady: false,
   reportOpen: false,
@@ -179,6 +194,28 @@ onMessage((m) => {
     case 'textures_failed':
       setState({ textures: { phase: m.cancelled ? 'idle' : 'failed', fraction: 0, step: '', error: m.message } })
       if (m.cancelled) toast('info', 'Download cancelled. Nothing was saved.')
+      break
+    case 'update_available':
+      setState({
+        update: { ...state.update, phase: 'available', version: m.version, current: m.current, notes: m.notes, size: m.size, installable: m.installable, error: '', dismissed: false },
+      })
+      break
+    case 'update_none':
+      setState({ update: { ...state.update, phase: 'none', current: m.current } })
+      break
+    case 'update_progress':
+      setState({ update: { ...state.update, phase: 'running', fraction: m.fraction, step: m.step, dismissed: false } })
+      break
+    case 'update_ready':
+      setState({ update: { ...state.update, phase: 'ready', fraction: 1, dismissed: false } })
+      break
+    case 'update_failed':
+      if (m.cancelled) {
+        setState({ update: { ...state.update, phase: 'available', fraction: 0 } })
+        toast('info', 'Update download cancelled. Nothing was changed.')
+      } else {
+        setState({ update: { ...state.update, phase: 'failed', error: m.message, dismissed: false } })
+      }
       break
   }
 })

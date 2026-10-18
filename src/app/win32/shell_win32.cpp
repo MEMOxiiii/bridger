@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 #include <ShlObj.h>
+#include <shellapi.h>
 #include <dwmapi.h>
 
 namespace bridger::app {
@@ -33,5 +34,12 @@ bool window_is_foreground(void* hwnd) {
 }
 
 void focus_window(void* hwnd) { SetFocus(static_cast<HWND>(hwnd)); }
+
+void open_url(std::string_view utf8_url) {
+    if (!utf8_url.starts_with("https://")) return;
+    const auto url = platform::path_from_utf8(utf8_url); // UTF-8 -> UTF-16 (not used as a path)
+    if (!url) return;
+    ShellExecuteW(nullptr, L"open", url->c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
 
 } // namespace bridger::app

@@ -16,5 +16,7 @@ void style_title_bar(void* hwnd, u32 rgb);
 [[nodiscard]] bool window_is_foreground(void* hwnd);
 // Gives the keyboard focus back to the app window (fly mode reads WASD natively).
 void focus_window(void* hwnd);
+// Opens an https URL in the default browser.
+void open_url(std::string_view utf8_url);
 
 } // namespace bridger::app

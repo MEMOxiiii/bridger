@@ -46,6 +46,9 @@ Settings load_settings() {
                 if (v.is_string()) out.push_back(v.get<std::string>());
     }
     if (s.recent.size() > Settings::kMaxRecent) s.recent.resize(Settings::kMaxRecent);
+    if (auto it = j.find("check_updates"); it != j.end() && it->is_boolean()) s.check_updates = it->get<bool>();
+    if (auto it = j.find("last_update_check"); it != j.end() && it->is_number_integer()) s.last_update_check = it->get<i64>();
+    if (auto it = j.find("skipped_version"); it != j.end() && it->is_string()) s.skipped_version = it->get<std::string>();
     return s;
 }
 
@@ -55,7 +58,8 @@ void save_settings(const Settings& s) {
     std::error_code ec;
     std::filesystem::create_directories(path->parent_path(), ec);
     const nlohmann::json j = {{"client_jar", s.client_jar}, {"packs", s.packs}, {"render_distance", s.render_distance},
-                              {"distant_terrain", s.distant_terrain}, {"recent", s.recent}};
+                              {"distant_terrain", s.distant_terrain}, {"recent", s.recent}, {"check_updates", s.check_updates},
+                              {"last_update_check", s.last_update_check}, {"skipped_version", s.skipped_version}};
     std::ofstream out(*path, std::ios::binary | std::ios::trunc);
     out << j.dump(2);
     if (!out) log::warn("settings: could not write {}", platform::path_to_utf8(*path).value_or("settings.json"));

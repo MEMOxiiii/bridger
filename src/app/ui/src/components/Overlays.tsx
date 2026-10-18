@@ -130,6 +130,7 @@ export function SettingsDialog() {
   const assets = useStore((s) => s.assets)
   const version = useStore((s) => s.version)
   const gpu = useStore((s) => s.gpu)
+  const update = useStore((s) => s.update)
   const ref = useRef<HTMLDivElement>(null)
   const card = useRef<HTMLDivElement>(null)
   const mounted = useAnimatedPresence(open, ref, { autoAlpha: 0 }, { autoAlpha: 0 })
@@ -232,6 +233,34 @@ export function SettingsDialog() {
               <Icon name="plus" size={16} />
               Add a resource pack…
             </button>
+          </section>
+          <section className="modal-section">
+            <h3>Updates</h3>
+            <label className="check">
+              <input type="checkbox" checked={settings.check_updates} onChange={(e) => send({ type: 'settings', check_updates: e.target.checked })} />
+              <span>Check for a new version once a day</span>
+            </label>
+            <p className="muted small">
+              Bridger asks GitHub for the latest release; it downloads nothing until you agree, and checks the download's SHA-256.
+            </p>
+            <div className="textures-row">
+              <span className="muted small" aria-live="polite">
+                {update.phase === 'none' && `Bridger ${update.current} is the latest version.`}
+                {update.phase === 'checking' && 'Checking…'}
+                {['available', 'running', 'ready'].includes(update.phase) && `Bridger ${update.version} is available.`}
+                {update.phase === 'failed' && update.error}
+              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={update.phase === 'checking' || update.phase === 'running'}
+                onClick={() => {
+                  setState({ update: { ...update, phase: 'checking', dismissed: false } })
+                  send({ type: 'update_check' })
+                }}
+              >
+                Check now
+              </button>
+            </div>
           </section>
           <section className="modal-section about">
             <h3>About</h3>

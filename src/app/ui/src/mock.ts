@@ -10,7 +10,7 @@ const bedrockVersions: TargetVersion[] = ['26.50', '26.40', '26.30', '1.21.130',
   name,
   checked: i === 0 ? 'game' : 'data',
 }))
-const settings: Settings = { client_jar: '', packs: [], render_distance: 12, distant_terrain: 32, recent: ['C:\\Builds\\castle.schem', 'C:\\Builds\\village.mcstructure'] }
+const settings: Settings = { client_jar: '', packs: [], render_distance: 12, distant_terrain: 32, recent: ['C:\\Builds\\castle.schem', 'C:\\Builds\\village.mcstructure'], check_updates: true }
 
 const doc: Doc = {
   kind: 'structure',
@@ -80,12 +80,22 @@ export function handle(m: Outgoing, dispatch: (m: Incoming) => void) {
       })
       break
     }
+    case 'update_check':
+      later(600, { type: 'update_none', current: '1.0.0' })
+      break
+    case 'update_install':
+      ;[0.1, 0.4, 0.75, 0.92, 0.95].forEach((f, i) =>
+        later(200 + i * 350, { type: 'update_progress', fraction: f, step: f < 0.9 ? 'Downloading' : f < 0.94 ? 'Checking' : 'Unpacking' }),
+      )
+      later(2100, { type: 'update_ready', version: '1.1.0' })
+      break
     default:
       break
   }
 }
 
-// Screenshot scripts for design review: index.html#doc, #report, #view, #convert, #running, #done, #failed, #settings, #fly, #drop.
+// Screenshot scripts for design review: index.html#doc, #report, #view, #convert, #running, #done, #failed, #settings, #update,
+// #fly, #drop.
 function demo(name: string, dispatch: (m: Incoming) => void) {
   if (!name) return
   if (name === 'drop') return void setTimeout(() => dispatch({ type: 'drop', state: 'enter' }), 200)
@@ -98,6 +108,15 @@ function demo(name: string, dispatch: (m: Incoming) => void) {
   setState({ splash: false })
   if (name === 'home') return
   if (name === 'settings') return void setTimeout(() => setState({ settingsOpen: true }), 300)
+  if (name === 'update')
+    return void setTimeout(
+      () =>
+        dispatch({
+          type: 'update_available', version: '1.1.0', current: '1.0.0', size: 26_500_000, installable: true,
+          notes: '### Added\n\n- The Nether and the End convert in both directions.\n- Item frames, paintings and the player convert.\n- Bridger updates itself.',
+        }),
+      300,
+    )
   setTimeout(() => dispatch({ type: 'opened', doc, settings }), 100)
   setTimeout(() => dispatch({ type: 'preview_ready', missing_models: 0 }), 150)
   const at = (ms: number, f: () => void) => setTimeout(f, ms)

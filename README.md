@@ -113,6 +113,8 @@ pass `--clip` or `--shift-to-fit` ([docs/safety.md](docs/safety.md)).
   (`--target-version`, or the "Game version" list in the app); what an older version cannot hold is reported
   ([target versions](docs/versions.md#target-versions-what-a-conversion-writes)). The newest versions are checked in
   the game; the older ones against their exact block data.
+- **Updates itself** (desktop app): once a day it looks for a new release on GitHub, asks before downloading, and
+  installs it only after checking its SHA-256 ([docs/app/updates.md](docs/app/updates.md); Settings turns it off).
 - **Converts within an edition** too: a `.mcworld` to an older or newer `.mcworld`, a Java world to a Java world for
   another release, a `.schem` for 1.18.2, ... Blocks the older version does not have stay as Bedrock's "unknown"
   block (and come back in a newer version) or become the closest Java block, and are reported.

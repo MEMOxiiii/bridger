@@ -2,6 +2,7 @@ add_executable(bridger_gui WIN32
     main.cpp app.cpp app.hpp
     settings.cpp settings.hpp
     ui_bundle.cpp ui_bundle.hpp
+    updater.cpp updater.hpp
     viewer.cpp viewer.hpp
     win32/compositor.cpp win32/compositor.hpp
     win32/shell_win32.cpp win32/shell.hpp

@@ -91,18 +91,24 @@ Result<std::vector<u8>> https_get(std::string_view url, u64 max_bytes, const Dow
     return out;
 }
 
-Result<std::string> sha1_hex(std::span<const u8> data) {
-    u8 digest[20] = {};
-    const NTSTATUS st = BCryptHash(BCRYPT_SHA1_ALG_HANDLE, nullptr, 0, const_cast<PUCHAR>(data.data()), static_cast<ULONG>(data.size()),
-                                   digest, sizeof(digest));
+namespace {
+template <usize N>
+Result<std::string> hash_hex(BCRYPT_ALG_HANDLE alg, std::span<const u8> data) {
+    if (data.size() > 0xFFFFFFFFull) return make_error(ErrorCode::LimitExceeded, "too much data to hash at once");
+    u8 digest[N] = {};
+    const NTSTATUS st = BCryptHash(alg, nullptr, 0, const_cast<PUCHAR>(data.data()), static_cast<ULONG>(data.size()), digest, N);
     if (st < 0) return make_error(ErrorCode::IoError, "hashing failed");
     static constexpr char kHex[] = "0123456789abcdef";
-    std::string hex(40, '0');
-    for (usize i = 0; i < 20; ++i) {
+    std::string hex(N * 2, '0');
+    for (usize i = 0; i < N; ++i) {
         hex[i * 2] = kHex[digest[i] >> 4];
         hex[i * 2 + 1] = kHex[digest[i] & 15];
     }
     return hex;
 }
+} // namespace
+
+Result<std::string> sha1_hex(std::span<const u8> data) { return hash_hex<20>(BCRYPT_SHA1_ALG_HANDLE, data); }
+Result<std::string> sha256_hex(std::span<const u8> data) { return hash_hex<32>(BCRYPT_SHA256_ALG_HANDLE, data); }
 
 } // namespace bridger::platform

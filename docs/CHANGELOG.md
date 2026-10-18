@@ -29,6 +29,10 @@ versions follow the release plan in `docs/release.md`.
 - The single-player player converts in both directions: position, rotation, dimension, game mode, inventory, armor
   and offhand. Ender chest, experience and effects are reported, as in Chunker.
 
+- The desktop app updates itself: once a day it asks GitHub for the latest release (Settings → Updates turns this off;
+  "Check now" asks at once), offers it with its notes, and only after the user agrees downloads it, checks its
+  SHA-256, swaps the program's files with rollback and restarts. Releases now publish a `.sha256` file next to the zip.
+
 ### Fixed
 
 - Items with names from before 1.21.9 (`chain`) or older (`scute`, `grass`, ...) in old worlds were dropped.

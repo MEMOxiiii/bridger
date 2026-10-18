@@ -1,3 +1,4 @@
+import { UpdateCard } from './components/UpdateCard'
 import { useEffect, useRef } from 'react'
 import { send } from './bridge'
 import { Splash } from './components/Brand'
@@ -50,6 +51,7 @@ export function App() {
       <FlyHint />
       <DropOverlay />
       <SettingsDialog />
+      {!splash && <UpdateCard />}
       <Toasts />
       {splash && <Splash />}
     </div>

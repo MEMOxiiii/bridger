@@ -1,9 +1,10 @@
 #pragma once
 
-// HTTPS downloads and SHA-1 hashing, through the operating system (WinHTTP and BCrypt on Windows).
-// Bridger uses the network for one thing only: downloading the Minecraft client jar from Mojang's
-// servers when the user asks for it (docs/safety.md, "Network access"). Callers decide which hosts
-// are allowed; this layer only refuses anything that is not HTTPS.
+// HTTPS downloads and SHA-1/SHA-256 hashing, through the operating system (WinHTTP and BCrypt on Windows).
+// Bridger uses the network for two things only (docs/safety.md, "Network access"): downloading the Minecraft client
+// jar from Mojang's servers when the user asks for it, and the desktop app's update check and update download from
+// the project's GitHub releases. Callers decide which hosts are allowed; this layer only refuses anything that is not
+// HTTPS.
 
 #include <bridger/core/result.hpp>
 
@@ -25,5 +26,7 @@ using DownloadProgress = std::function<bool(u64 received, u64 total)>;
 
 // SHA-1 of `data` as 40 lowercase hex digits.
 [[nodiscard]] Result<std::string> sha1_hex(std::span<const u8> data);
+// SHA-256 of `data` as 64 lowercase hex digits.
+[[nodiscard]] Result<std::string> sha256_hex(std::span<const u8> data);
 
 } // namespace bridger::platform

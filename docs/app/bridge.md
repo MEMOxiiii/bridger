@@ -28,6 +28,12 @@ Unknown types and malformed messages are ignored on both sides.
 | `pick_client_jar`, `add_pack` | | Dialogs for the textures' client jar / a resource pack. |
 | `download_textures` | | Download the client jar from Mojang (only offered when `assets.can_download`); answered by `textures_progress`, then `textures_done` or `textures_failed`. |
 | `cancel_textures` | | Stop the download; nothing is saved. |
+| `update_check` | | Look for a new release now (Settings, "Check now"). |
+| `update_install` | | Download, verify and unpack the offered release. |
+| `update_cancel` | | Stop the update download. |
+| `update_skip` | | Do not offer this version again automatically. |
+| `update_restart` | | Install the unpacked update and restart (refused while converting). |
+| `update_page` | | Open the release page in the browser. |
 | `settings` | `client_jar?`, `packs?`, `render_distance?`, `distant_terrain?` | Change and save settings (`%APPDATA%/Bridger/settings.json`). `distant_terrain`: simplified terrain out to this many chunks (0–96; not above `render_distance` = off). |
 
 ## App → UI
@@ -52,6 +58,11 @@ Unknown types and malformed messages are ignored on both sides.
 | `textures_progress` | `fraction`, `step` | Texture download progress. |
 | `textures_done` | | The jar is saved and loaded (a `settings` message with the new `assets` comes first). |
 | `textures_failed` | `message`, `cancelled` | |
+| `update_available` | `version`, `current`, `notes`, `size`, `installable` | A newer release was found (`docs/app/updates.md`); `installable` is false when it has no checksum (then only the release page is offered). |
+| `update_none` | `current` | "Check now": Bridger is up to date. |
+| `update_progress` | `fraction`, `step` | Downloading, checking or unpacking the update. |
+| `update_ready` | `version` | The update is verified and unpacked; it is installed on "Restart now" or when the app closes. |
+| `update_failed` | `message`, `cancelled` | The check (manual only), the download or the install failed; nothing was changed. |
 
 `report` objects map an issue kind (`translate::to_string(IssueKind)`, e.g. `"lossy block"`) to a list of
 `{subject, count, examples: [[x,y,z], ...]}`. Example positions are in the document's coordinates, so the UI

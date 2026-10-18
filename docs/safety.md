@@ -109,8 +109,17 @@ Changing any default here is a data-safety change and needs maintainer approval.
 
 ## 6. Network access
 
-Bridger never uses the network on its own. The single exception is a user action: in the desktop app, when the
-textures for the 3D preview are missing, the user can press **Download from Mojang**. Then
+The command-line tool never uses the network. The desktop app uses it for two things only, both described here.
+
+**Update check** (the maintainer's decision, 2026-10-17; details in `docs/app/updates.md`): at most once a day at
+start, and only while Settings → Updates → "Check for a new version once a day" is on (the default; off stops every
+automatic request), the app asks `https://api.github.com/repos/MEMOxiiii/bridger/releases/latest`. An update is
+downloaded only when the user presses **Download and install**, only from this repository's GitHub release downloads,
+and installed only after its SHA-256 matches the digest GitHub publishes for it (or the release's `.sha256` file);
+without a checksum it is refused. The new files are swapped in with rollback; user data outside the program folder is
+never touched.
+
+**Textures**: when the textures for the 3D preview are missing, the user can press **Download from Mojang**. Then
 (`src/render/asset_download.cpp`, `src/platform/win32/net_win32.cpp`):
 
 - Only `https://` URLs on Mojang's download hosts are contacted (`piston-meta.mojang.com`,
@@ -123,8 +132,8 @@ textures for the 3D preview are missing, the user can press **Download from Moja
   and is **never executed**.
 - Cancelling stops the download; nothing is saved.
 
-Windows' own components do the work (WinHTTP for HTTPS, BCrypt for SHA-1); no third-party networking code is
-shipped.
+Windows' own components do the work (WinHTTP for HTTPS, BCrypt for SHA-1 and SHA-256); no third-party networking
+code is shipped.
 
 ## 7. Untrusted input
 

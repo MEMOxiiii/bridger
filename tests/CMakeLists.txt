@@ -18,8 +18,8 @@ target_link_libraries(bridger_unit_tests PRIVATE
     Catch2::Catch2WithMain nlohmann_json::nlohmann_json)
 if(BRIDGER_BUILD_RENDER)
     target_link_libraries(bridger_unit_tests PRIVATE bridger::render)
-    # The desktop app's camera controller is OS-free: tested directly from its source.
-    target_sources(bridger_unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/app/viewer.cpp")
+    # The desktop app's camera controller and updater are OS-free: tested directly from their sources.
+    target_sources(bridger_unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/app/viewer.cpp" "${PROJECT_SOURCE_DIR}/src/app/updater.cpp")
     target_include_directories(bridger_unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/app")
 endif()
 target_compile_definitions(bridger_unit_tests PRIVATE

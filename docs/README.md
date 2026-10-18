@@ -18,6 +18,7 @@
 | [testing.md](testing.md) | Test layers, the in-game checklist and the desktop app checklist, with run logs |
 | [performance.md](performance.md) | Benchmarks, baselines and how to measure |
 | [app/bridge.md](app/bridge.md) | Messages between the desktop app's interface and its native core |
+| [app/updates.md](app/updates.md) | How the desktop app finds, verifies and installs a new version |
 
 ## Architecture decisions
 

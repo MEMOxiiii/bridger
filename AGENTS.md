@@ -128,6 +128,9 @@ additions to it are recorded here as required:
   `tests/unit/render/lod_test.cpp`.
 - `platform/net.hpp` + `win32/net_win32.cpp` (HTTPS via WinHTTP, SHA-1 via BCrypt) and `render/asset_download.hpp`
   (the client jar download on request; `docs/safety.md`, "Network access").
+- Self-update: `src/app/updater.{hpp,cpp}` (OS-free, unit-tested from `tests/unit/app/updater_test.cpp`), the UI's
+  `components/UpdateCard.tsx`, `platform/process.hpp` + `win32/process_win32.cpp` (own path, start a process),
+  `docs/app/updates.md`.
 - Phase 8 (`app`): `viewer.*` (camera controller, OS-free, unit-tested from `tests/unit/app/`), `settings.*`,
   `ui_bundle.*` (the embedded UI zip), `win32/compositor.*`, `win32/webview_host.*`, `win32/shell*`; the UI
   in `src/app/ui/` (`package.json`, `package-lock.json`, `vite.config.ts`, `src/**`); `cmake/NpmInstall.cmake`;
