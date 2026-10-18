@@ -5,6 +5,8 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-19
+
 ### Added
 
 - Item data in containers converts to Bedrock: enchantments (also on books), damage, names and lore, repair cost,
@@ -44,6 +46,16 @@ versions follow the release plan in `docs/release.md`.
 - Bedrock → Java: potted dead bushes (Bedrock names the plant `deadbush`) and living sea pickles in water (reported as
   losing their water although the Java state is waterlogged).
 - Items with names from before 1.21.9 (`chain`) or older (`scute`, `grass`, ...) in old worlds were dropped.
+
+### Known limitations
+
+- Entities: item frames and paintings convert; mobs, villagers, armor stands and minecarts are not written yet (listed
+  in the report by type). A server's `playerdata` and its separate `world_nether` / `world_the_end` folders are not
+  read (as in Chunker); Bridger says so.
+- Bedrock's Nether ends at y 127: blocks on a Java Nether roof are dropped and reported.
+- The self-updater needs a writable program folder; 1.0.0 has no updater, so 1.1.0 is installed by hand once.
+- The Nether/End, item frames, paintings and the player still await their in-game check (`docs/testing.md`, rows 19
+  and 20). Windows x64 only; portable zip only.
 
 ## [1.0.0] - 2026-10-16
 
@@ -193,6 +205,7 @@ Edition 26.3** (DataVersion 5023) and **Bedrock Edition 26.52** (palette 26.50).
 - One Java and one Bedrock version at a time.
 - Windows x64 only.
 
+[1.1.0]: https://github.com/MEMOxiiii/bridger/releases/tag/v1.1.0
 [1.0.0]: https://github.com/MEMOxiiii/bridger/releases/tag/v1.0.0
 [0.4.2]: https://github.com/MEMOxiiii/bridger/releases/tag/v0.4.2
 [0.4.1]: https://github.com/MEMOxiiii/bridger/releases/tag/v0.4.1

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(bridger
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "High-performance Minecraft format converter and 3D viewer"
     LANGUAGES C CXX)
 
