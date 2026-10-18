@@ -68,6 +68,55 @@ inline constexpr std::array<Pair, 10> kMarkers{{{"minecraft:campfire", "Campfire
                                                {"minecraft:conduit", "Conduit"},
                                                {"minecraft:enchanting_table", "EnchantTable"}}};
 
+// Loot tables Bedrock still names the old way (Chunker BedrockRandomizableContainerBlockEntityHandler): {Java, Bedrock}.
+inline constexpr std::array<Pair, 5> kLootTableRenames{{
+    {"minecraft:chests/buried_treasure", "minecraft:chests/buriedtreasure"},
+    {"minecraft:chests/jungle_temple_dispenser", "minecraft:chests/dispenser_trap"},
+    {"minecraft:chests/shipwreck_map", "minecraft:chests/shipwreck"},
+    {"minecraft:chests/shipwreck_supply", "minecraft:chests/shipwrecksupply"},
+    {"minecraft:chests/shipwreck_treasure", "minecraft:chests/shipwrecktreasure"},
+}};
+
+// Entities named differently in the two editions (Chunker JavaEntityTypeResolver / BedrockEntityTypeResolver):
+// {Java, Bedrock}. Everything else has the same id.
+inline constexpr std::array<Pair, 17> kEntityRenames{{
+    {"minecraft:breeze_wind_charge", "minecraft:breeze_wind_charge_projectile"},
+    {"minecraft:end_crystal", "minecraft:ender_crystal"},
+    {"minecraft:evoker", "minecraft:evocation_illager"},
+    {"minecraft:evoker_fangs", "minecraft:evocation_fang"},
+    {"minecraft:experience_bottle", "minecraft:xp_bottle"},
+    {"minecraft:experience_orb", "minecraft:xp_orb"},
+    {"minecraft:eye_of_ender", "minecraft:eye_of_ender_signal"},
+    {"minecraft:firework_rocket", "minecraft:fireworks_rocket"},
+    {"minecraft:fishing_bobber", "minecraft:fishing_hook"},
+    {"minecraft:oak_boat", "minecraft:boat"},
+    {"minecraft:oak_chest_boat", "minecraft:chest_boat"},
+    {"minecraft:trident", "minecraft:thrown_trident"},
+    {"minecraft:tropical_fish", "minecraft:tropicalfish"},
+    {"minecraft:villager", "minecraft:villager_v2"},
+    {"minecraft:wind_charge", "minecraft:wind_charge_projectile"},
+    {"minecraft:zombie_villager", "minecraft:zombie_villager_v2"},
+    {"minecraft:zombified_piglin", "minecraft:zombie_pigman"},
+}};
+
+// Beacon effects by Bedrock id (Chunker BedrockEffectIDResolver); Java names them (1.20.2+) or uses the same numbers.
+inline constexpr std::array<std::string_view, 12> kBeaconEffects{"",         "speed",          "slowness",       "haste",
+                                                                "mining_fatigue", "strength", "instant_health", "instant_damage",
+                                                                "jump_boost",     "nausea",   "regeneration",   "resistance"};
+
+// Block entities written with their id only in both directions (Chunker EmptyBlockEntityHandler): {Java, Bedrock}.
+inline constexpr std::array<Pair, 9> kEmptyBlockEntities{{
+    {"minecraft:sculk_catalyst", "SculkCatalyst"},
+    {"minecraft:sculk_shrieker", "SculkShrieker"},
+    {"minecraft:calibrated_sculk_sensor", "CalibratedSculkSensor"},
+    {"minecraft:trial_spawner", "TrialSpawner"},
+    {"minecraft:vault", "Vault"},
+    {"minecraft:creaking_heart", "CreakingHeart"},
+    {"minecraft:end_portal", "EndPortal"},
+    {"minecraft:beehive", "Beehive"},
+    {"minecraft:conduit", "Conduit"},
+}};
+
 // Bedrock SkullType by Java block (Chunker BedrockSkullBlockEntityHandler.SKULL_TO_ID).
 struct Skull {
     std::string_view floor, wall;

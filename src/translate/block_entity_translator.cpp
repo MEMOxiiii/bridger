@@ -147,19 +147,8 @@ void write_sign_face(NbtWriter& w, std::string_view name, NbtView java_face, std
 
 // Block entities Chunker writes with their id only (BedrockBlockEntityResolver, EmptyBlockEntityHandler).
 std::optional<std::string_view> empty_block_entity(std::string_view java_id) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 9> kEmpty{{
-        {"minecraft:sculk_catalyst", "SculkCatalyst"},
-        {"minecraft:sculk_shrieker", "SculkShrieker"},
-        {"minecraft:calibrated_sculk_sensor", "CalibratedSculkSensor"},
-        {"minecraft:trial_spawner", "TrialSpawner"},
-        {"minecraft:vault", "Vault"},
-        {"minecraft:creaking_heart", "CreakingHeart"},
-        {"minecraft:end_portal", "EndPortal"},
-        {"minecraft:beehive", "Beehive"},
-        {"minecraft:conduit", "Conduit"},
-    }};
-    for (const auto& [java, bedrock] : kEmpty)
-        if (java == java_id) return bedrock;
+    for (const tables::Pair& e : tables::kEmptyBlockEntities)
+        if (e.java == java_id) return e.bedrock;
     return std::nullopt;
 }
 
@@ -177,17 +166,10 @@ i16 number(NbtCompoundView c, std::string_view name, std::string_view old, i32 f
 // Java loot table id -> Bedrock path: "minecraft:chests/simple_dungeon" -> "loot_tables/chests/simple_dungeon.json",
 // with the tables Bedrock still names the old way (Chunker BedrockRandomizableContainerBlockEntityHandler).
 std::optional<std::string> bedrock_loot_table(std::string_view java) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 5> kRenamed{{
-        {"minecraft:chests/buried_treasure", "minecraft:chests/buriedtreasure"},
-        {"minecraft:chests/jungle_temple_dispenser", "minecraft:chests/dispenser_trap"},
-        {"minecraft:chests/shipwreck_map", "minecraft:chests/shipwreck"},
-        {"minecraft:chests/shipwreck_supply", "minecraft:chests/shipwrecksupply"},
-        {"minecraft:chests/shipwreck_treasure", "minecraft:chests/shipwrecktreasure"},
-    }};
     if (java.empty() || java == "minecraft:chests/village/village_fisher") return std::nullopt; // no Bedrock table
     std::string id(java);
-    for (const auto& [from, to] : kRenamed)
-        if (id == from) id = std::string(to);
+    for (const tables::Pair& r : tables::kLootTableRenames)
+        if (id == r.java) id = std::string(r.bedrock);
     std::string path = id.starts_with("minecraft:") ? "loot_tables/" + id.substr(10) : "loot_tables/" + id;
     if (!path.ends_with(".json")) path += ".json";
     return path;
@@ -202,30 +184,11 @@ void write_loot_table(NbtWriter& w, NbtCompoundView c, ConversionReport& report,
 
 // Java entity id -> Bedrock entity id where they differ (Chunker JavaEntityTypeResolver / BedrockEntityTypeResolver).
 std::optional<std::string> bedrock_entity(std::string_view java) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 17> kDiffer{{
-        {"minecraft:breeze_wind_charge", "minecraft:breeze_wind_charge_projectile"},
-        {"minecraft:end_crystal", "minecraft:ender_crystal"},
-        {"minecraft:evoker", "minecraft:evocation_illager"},
-        {"minecraft:evoker_fangs", "minecraft:evocation_fang"},
-        {"minecraft:experience_bottle", "minecraft:xp_bottle"},
-        {"minecraft:experience_orb", "minecraft:xp_orb"},
-        {"minecraft:eye_of_ender", "minecraft:eye_of_ender_signal"},
-        {"minecraft:firework_rocket", "minecraft:fireworks_rocket"},
-        {"minecraft:fishing_bobber", "minecraft:fishing_hook"},
-        {"minecraft:oak_boat", "minecraft:boat"},
-        {"minecraft:oak_chest_boat", "minecraft:chest_boat"},
-        {"minecraft:trident", "minecraft:thrown_trident"},
-        {"minecraft:tropical_fish", "minecraft:tropicalfish"},
-        {"minecraft:villager", "minecraft:villager_v2"},
-        {"minecraft:wind_charge", "minecraft:wind_charge_projectile"},
-        {"minecraft:zombie_villager", "minecraft:zombie_villager_v2"},
-        {"minecraft:zombified_piglin", "minecraft:zombie_pigman"},
-    }};
     // Java-only entities (Chunker has no Bedrock id for them).
     static constexpr std::array<std::string_view, 6> kJavaOnly{"minecraft:giant", "minecraft:illusioner", "minecraft:marker",
                                                               "minecraft:interaction", "minecraft:spectral_arrow", "minecraft:mannequin"};
-    for (const auto& [from, to] : kDiffer)
-        if (java == from) return std::string(to);
+    for (const tables::Pair& r : tables::kEntityRenames)
+        if (java == r.java) return std::string(r.bedrock);
     for (const std::string_view j : kJavaOnly)
         if (java == j || java.ends_with("_display")) return std::nullopt;
     return std::string(java);
@@ -256,13 +219,10 @@ void write_spawner(NbtWriter& w, NbtCompoundView c, ConversionReport& report, Bl
 
 // Bedrock beacon effect ids (Chunker BedrockEffectIDResolver); Java stores names (1.20.2+) or the same numbers.
 i32 beacon_effect(NbtView name, NbtView number) {
-    static constexpr std::array<std::string_view, 12> kEffects{"",         "speed",          "slowness",       "haste",
-                                                               "mining_fatigue", "strength", "instant_health", "instant_damage",
-                                                               "jump_boost",     "nausea",   "regeneration",   "resistance"};
     if (const auto s = name.as_string()) {
         const std::string_view n = s->starts_with("minecraft:") ? s->substr(10) : *s;
-        for (usize i = 1; i < kEffects.size(); ++i)
-            if (kEffects[i] == n) return static_cast<i32>(i);
+        for (usize i = 1; i < tables::kBeaconEffects.size(); ++i)
+            if (tables::kBeaconEffects[i] == n) return static_cast<i32>(i);
         return 0;
     }
     return number.as_int().value_or(0);

@@ -368,8 +368,28 @@ Result<Structure> translate_to_java(const Structure& bedrock, const MappingData&
         case Rule::Pot: {
             const auto doc = be_doc(pos);
             if (!doc) return j;
-            const auto plant = doc->root().entries().find("PlantBlock").entries().find("name").as_string();
+            const io::nbt::NbtCompoundView plant_tag = doc->root().entries().find("PlantBlock").entries();
+            const auto plant = plant_tag.find("name").as_string();
             if (!plant || plant->empty()) return j;
+            // The plant as a Bedrock state -> its Java block -> potted_<block> (e.g. Bedrock "deadbush" -> Java
+            // potted_dead_bush); names that do not resolve fall back to the name itself.
+            {
+                std::vector<BedrockProperty> props;
+                for (const io::nbt::NbtEntry& e : plant_tag.find("states").entries()) {
+                    BedrockProperty pr;
+                    pr.key = e.name;
+                    if (const auto b = e.value.as_byte()) { pr.type = NbtValueType::Byte; pr.int_value = *b; }
+                    else if (const auto i = e.value.as_int()) { pr.type = NbtValueType::Int; pr.int_value = *i; }
+                    else if (const auto str = e.value.as_string()) { pr.type = NbtValueType::String; pr.str_value = *str; }
+                    props.push_back(pr);
+                }
+                if (const auto b = m.find_bedrock(*plant, props))
+                    if (const auto jp = m.java_of_bedrock(*b)) {
+                        std::string block(m.java_block_name(*jp));
+                        if (block.starts_with("minecraft:")) block.erase(0, 10);
+                        if (const auto r = m.find_java_state(BlockState("minecraft:potted_" + block, {}))) return *r;
+                    }
+            }
             std::string p(*plant);
             if (p.starts_with("minecraft:")) p.erase(0, 10);
             if (p == "azalea") p = "azalea_bush";
@@ -443,8 +463,8 @@ Result<Structure> translate_to_java(const Structure& bedrock, const MappingData&
                                         const Rev lr = rev(l2);
                                         if (lr.java != kNone) j = lr.java;
                                         else report.add(IssueKind::DroppedSecondaryLayer, bedrock_desc(l2), pos);
-                                    } else if (water && implies_water(name)) {
-                                        // already under water in Java
+                                    } else if (water && (implies_water(name) || m.property(j, "waterlogged") == "true")) {
+                                        // already under water in Java (a living sea pickle is waterlogged by its state)
                                     } else if (const JavaStateId wl = water ? set_prop(j, "waterlogged", "true") : j; wl != j) {
                                         j = wl;
                                     } else {

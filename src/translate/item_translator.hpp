@@ -34,8 +34,12 @@ void write_items(io::nbt::NbtWriter& w, std::string_view name, io::nbt::NbtView 
 bool write_item(io::nbt::NbtWriter& w, std::string_view name, io::nbt::NbtCompoundView java_item, const MappingData& m,
                 ConversionReport& report, BlockPos pos);
 
-// One Bedrock item {Name, Damage, Count, tag} -> a Java item compound {id, count} written as `name` (Bedrock -> Java,
-// reverse_block_entities.cpp). Returns false when the item has no Java counterpart (reported).
+// Bedrock -> Java (26.3 components: enchantments, damage, names, potions, books, container contents, fireworks, trims,
+// banner patterns, ...; data Java cannot hold is reported). A Bedrock item list (items with "Slot") -> a Java list.
+void write_java_items(io::nbt::NbtWriter& w, std::string_view name, io::nbt::NbtView bedrock_items, const MappingData& m,
+                      ConversionReport& report, BlockPos pos, SlotMap slot_map = nullptr);
+// One Bedrock item {Name, Damage, Count, tag} -> a Java item compound {id, count, components} written as `name`. Returns
+// false when the item has no Java counterpart (reported).
 bool write_java_item(io::nbt::NbtWriter& w, std::string_view name, io::nbt::NbtCompoundView bedrock_item, const MappingData& m,
                      ConversionReport& report, BlockPos pos);
 

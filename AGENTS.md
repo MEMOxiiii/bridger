@@ -151,8 +151,8 @@ additions to it are recorded here as required:
   region, level.dat and world_gen_settings.dat writing. `formats/bedrock/mcworld/bedrock_world_reader.hpp`.
 - `src/translate/entity_translator.{hpp,cpp}` (item frames and paintings, both directions) and
   `translate/player.hpp` + `player.cpp` (the single-player player, both directions).
-- `src/translate/item_translator.{hpp,cpp}` (Java → Bedrock item data, shared by every block entity) and
-  `tests/unit/translate/item_test.cpp`.
+- `src/translate/item_translator.{hpp,cpp}` (item data in both directions, shared by every block entity),
+  `tests/unit/translate/item_test.cpp` and `reverse_item_test.cpp`.
 - `src/translate/reverse_translator.cpp`, `reverse_block_entities.cpp` (Bedrock → Java) and `tables.hpp`
   (internal tables shared by both directions); `tools/mapgen/overrides/reverse_blocks.json`.
 - `src/core/parallel.cpp` implements `core/parallel.hpp`.

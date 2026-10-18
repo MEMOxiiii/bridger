@@ -133,3 +133,29 @@ TEST_CASE("Flower pots, banners, skulls and beds take their Java block from the 
     }
     CHECK(banner_checked);
 }
+
+TEST_CASE("Potted plants with old Bedrock names and sea pickles in water convert exactly", "[translate][reverse]") {
+    Structure s = bedrock_structure({2, 1, 1});
+    s.set_block({0, 0, 0}, bedrock_state("minecraft:flower_pot"));
+    s.block_entities.push_back(be({0, 0, 0}, "FlowerPot", [](io::nbt::NbtWriter& w) {
+        w.begin_compound("PlantBlock");
+        w.write_string("name", "minecraft:deadbush"); // Bedrock's name for the dead bush
+        w.begin_compound("states");
+        w.end_compound();
+        w.end_compound();
+    }));
+    // A living sea pickle (dead_bit 0) with water in layer 2: Java's waterlogged=true already holds the water.
+    s.set_block({1, 0, 0}, bedrock_state("minecraft:sea_pickle", [](const translate::BedrockState& b) {
+                     return int_prop(b, "dead_bit") == 0 && int_prop(b, "cluster_count") == 0;
+                 }));
+    const u32 air = *mapping().find_bedrock("minecraft:air", {});
+    const translate::BedrockProperty still{"liquid_depth", translate::NbtValueType::Int, 0, {}};
+    (void)s.section(0, 0, 0).ensure_secondary(air);
+    s.set_secondary({1, 0, 0}, *mapping().find_bedrock("minecraft:water", std::span<const translate::BedrockProperty>(&still, 1)));
+    translate::ConversionReport report;
+    auto java = translate::translate_to_java(s, mapping(), {}, report);
+    REQUIRE(java);
+    CHECK(report.exact());
+    CHECK(at(*java, {0, 0, 0}) == "minecraft:potted_dead_bush");
+    CHECK(at(*java, {1, 0, 0}).find("waterlogged=true") != std::string::npos);
+}

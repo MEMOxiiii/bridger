@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <tuple>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -615,6 +616,292 @@ void write_item_body(NbtWriter& w, const Resolved& r, NbtCompoundView c, Ctx& x)
     for (const std::string& what : x.lost) x.report.add(IssueKind::LossyBlock, "item data not converted: " + what, x.pos);
 }
 
+
+// ---- Bedrock -> Java (26.3 components; java_block_entity_downgrade.cpp adapts them for older targets) -----------------
+
+struct RevCtx {
+    const MappingData& m;
+    ConversionReport& report;
+    BlockPos pos;
+    int depth;
+    std::vector<std::string> lost;
+};
+
+std::string utf8_text(std::string_view mutf8) { return io::nbt::mutf8_to_utf8(mutf8).value_or(std::string(mutf8)); }
+
+template <class Table, class V>
+auto lookup_key(const Table& table, V value) -> std::optional<std::string_view> {
+    for (const auto& [k, v] : table)
+        if (v == value) return k;
+    return std::nullopt;
+}
+
+// A Bedrock item -> its Java id and the data its data value carries (potions, arrows, horns, bottles, stews).
+struct RevItem {
+    std::string java_id;
+    i32 count = 1;
+    std::optional<std::string> potion;  // potion_contents.potion
+    std::optional<std::string> horn;    // instrument
+    std::optional<i32> ominous;         // ominous_bottle_amplifier
+    std::optional<std::pair<std::string_view, i32>> stew;
+};
+
+std::optional<RevItem> rev_resolve(NbtCompoundView c, RevCtx& x) {
+    const auto name = c.find("Name").as_string();
+    if (!name || name->empty()) return std::nullopt; // an empty slot
+    const std::string bedrock = utf8_text(*name);
+    const i16 damage = c.find("Damage").as_short().value_or(0);
+    RevItem r;
+    r.count = std::max<i32>(1, c.find("Count").as_byte().value_or(1));
+    const auto java_of = [&](i16 d) { return x.m.java_item_of_bedrock(bedrock, d); };
+    // Data values that carry data (BedrockItemIdentifierResolver): the item itself is the one with value 0.
+    if (bedrock == "minecraft:potion" || bedrock == "minecraft:splash_potion" || bedrock == "minecraft:lingering_potion") {
+        if (const auto p = lookup_key(kPotions, static_cast<i32>(damage))) r.potion = "minecraft:" + std::string(*p);
+        else x.lost.push_back("potion " + std::to_string(damage));
+        if (const auto j = java_of(0)) r.java_id = std::string(*j);
+    } else if (bedrock == "minecraft:arrow" && damage > 0) {
+        r.java_id = "minecraft:tipped_arrow"; // Bedrock tipped arrows: potion id + 1
+        if (const auto p = lookup_key(kPotions, static_cast<i32>(damage - 1))) r.potion = "minecraft:" + std::string(*p);
+    } else if (bedrock == "minecraft:goat_horn") {
+        if (damage >= 0 && static_cast<usize>(damage) < kHorns.size()) r.horn = "minecraft:" + std::string(kHorns[static_cast<usize>(damage)]);
+        if (const auto j = java_of(0)) r.java_id = std::string(*j);
+    } else if (bedrock == "minecraft:ominous_bottle") {
+        r.ominous = std::clamp<i32>(damage, 0, 4);
+        if (const auto j = java_of(0)) r.java_id = std::string(*j);
+    } else if (bedrock == "minecraft:suspicious_stew") {
+        for (const Stew& st : kStews)
+            if (st.data == damage) r.stew = std::pair{st.effect, st.duration};
+        if (const auto j = java_of(0)) r.java_id = std::string(*j);
+    } else if (const auto j = java_of(damage)) {
+        r.java_id = std::string(*j);
+    } else if (const auto j0 = java_of(0)) {
+        r.java_id = std::string(*j0);
+        x.lost.push_back("data value " + std::to_string(damage) + " of " + bedrock);
+    }
+    if (r.java_id.empty()) {
+        x.report.add(IssueKind::UnmappedBlockEntity, "item " + bedrock, x.pos, static_cast<u64>(r.count));
+        return std::nullopt;
+    }
+    return r;
+}
+
+void rev_write_item_body(NbtWriter& w, const RevItem& r, NbtCompoundView c, RevCtx& x);
+
+// A Bedrock item list (with "Slot") -> Java: container component entries {slot, item} or plain items with Slot.
+void rev_write_list(NbtWriter& w, std::string_view name, NbtView list, bool component, RevCtx& x, SlotMap slot_map = nullptr) {
+    if (x.depth >= kMaxItemDepth) {
+        if (!list.items().empty()) x.lost.push_back("items nested too deep");
+        return;
+    }
+    std::vector<std::tuple<i8, RevItem, NbtCompoundView>> items;
+    for (const NbtView e : list.items()) {
+        const NbtCompoundView c = e.entries();
+        if (auto r = rev_resolve(c, x)) items.emplace_back(c.find("Slot").as_byte().value_or(static_cast<i8>(items.size())), std::move(*r), c);
+    }
+    w.begin_list(name, items.empty() ? TagType::End : TagType::Compound, items.size());
+    for (auto& [slot, r, c] : items) {
+        const i8 s = slot_map ? slot_map(slot) : slot;
+        RevCtx inner{x.m, x.report, x.pos, x.depth + 1, {}};
+        w.begin_compound();
+        if (component) {
+            w.write_int("slot", s);
+            w.begin_compound("item");
+            rev_write_item_body(w, r, c, inner);
+            w.end_compound();
+        } else {
+            w.write_byte("Slot", s);
+            rev_write_item_body(w, r, c, inner);
+        }
+        w.end_compound();
+        x.lost.insert(x.lost.end(), inner.lost.begin(), inner.lost.end());
+    }
+    w.end_list();
+}
+
+void rev_write_explosion(NbtWriter& w, std::string_view name, NbtCompoundView e) {
+    w.begin_compound(name);
+    const usize shape = static_cast<usize>(std::clamp<i32>(e.find("FireworkType").as_byte().value_or(0), 0, 4));
+    w.write_string("shape", kFireworkShapes[shape]);
+    // Bedrock colours are reversed dye indexes; Java stores the dye's Java firework RGB (ChunkerDyeColor.getJavaRGB).
+    const auto colors = [&](std::string_view bedrock, std::string_view java) {
+        std::vector<i32> rgb;
+        if (const auto bytes = e.find(bedrock).as_byte_array())
+            for (const u8 b : *bytes)
+                if (b < 16) rgb.push_back(static_cast<i32>(kDyeRgb[15u - b].second));
+        w.write_int_array(java, rgb);
+    };
+    colors("FireworkColor", "colors");
+    colors("FireworkFade", "fade_colors");
+    w.write_byte("has_trail", e.find("FireworkTrail").as_byte().value_or(0) != 0 ? 1 : 0);
+    w.write_byte("has_twinkle", e.find("FireworkFlicker").as_byte().value_or(0) != 0 ? 1 : 0);
+    w.end_compound();
+}
+
+// Writes the Java "components" of one item into separate bytes; nothing when the item has no data.
+std::optional<std::vector<u8>> rev_components(const RevItem& r, NbtCompoundView c, RevCtx& x) {
+    NbtWriter w(Endian::Big);
+    w.begin_root_compound();
+    usize written = 0;
+    if (r.potion) {
+        w.begin_compound("minecraft:potion_contents");
+        w.write_string("potion", *r.potion);
+        w.end_compound();
+        ++written;
+    }
+    if (r.horn) {
+        w.write_string("minecraft:instrument", *r.horn);
+        ++written;
+    }
+    if (r.ominous && *r.ominous > 0) {
+        w.write_int("minecraft:ominous_bottle_amplifier", *r.ominous);
+        ++written;
+    }
+    if (r.stew) {
+        w.begin_list("minecraft:suspicious_stew_effects", TagType::Compound, 1);
+        w.begin_compound();
+        w.write_string("id", "minecraft:" + std::string(r.stew->first));
+        w.write_int("duration", r.stew->second);
+        w.end_compound();
+        w.end_list();
+        ++written;
+    }
+    const bool book = r.java_id == "minecraft:enchanted_book";
+    for (const io::nbt::NbtEntry& e : c.find("tag").entries()) {
+        const std::string_view n = e.name;
+        if (n == "Damage") {
+            if (const i32 d = e.value.as_int().value_or(0); d != 0) {
+                w.write_int("minecraft:damage", d);
+                ++written;
+            }
+        } else if (n == "RepairCost") {
+            w.write_int("minecraft:repair_cost", e.value.as_int().value_or(0));
+            ++written;
+        } else if (n == "ench") {
+            std::vector<std::pair<std::string_view, i32>> list;
+            for (const NbtView en : e.value.items()) {
+                const NbtCompoundView ec = en.entries();
+                const i32 id = ec.find("id").as_short().value_or(-1);
+                if (const auto java = lookup_key(kEnchantments, id)) list.emplace_back(*java, ec.find("lvl").as_short().value_or(1));
+                else x.lost.push_back("enchantment " + std::to_string(id));
+            }
+            if (!list.empty()) {
+                w.begin_compound(book ? "minecraft:stored_enchantments" : "minecraft:enchantments");
+                for (const auto& [id, lvl] : list) w.write_int("minecraft:" + std::string(id), lvl);
+                w.end_compound();
+                ++written;
+            }
+        } else if (n == "display") {
+            const NbtCompoundView d = e.value.entries();
+            if (const auto name = d.find("Name").as_string()) {
+                w.write_string("minecraft:custom_name", *name); // a plain String is a literal text component (1.21.5+)
+                ++written;
+            }
+            if (const NbtView lore = d.find("Lore"); !lore.items().empty()) {
+                w.begin_list("minecraft:lore", TagType::String, lore.items().size());
+                for (const NbtView l : lore.items()) w.write_string({}, l.as_string().value_or(""));
+                w.end_list();
+                ++written;
+            }
+        } else if (n == "customColor") {
+            w.write_int("minecraft:dyed_color", static_cast<i32>(static_cast<u32>(e.value.as_int().value_or(0)) & 0xFFFFFFu));
+            ++written;
+        } else if (n == "pages") {
+            const bool written_book = r.java_id == "minecraft:written_book";
+            w.begin_compound(written_book ? "minecraft:written_book_content" : "minecraft:writable_book_content");
+            w.begin_list("pages", e.value.items().empty() ? TagType::End : TagType::Compound, e.value.items().size());
+            for (const NbtView pg : e.value.items()) {
+                w.begin_compound();
+                w.write_string("raw", pg.entries().find("text").as_string().value_or(""));
+                w.end_compound();
+            }
+            w.end_list();
+            if (written_book) {
+                w.begin_compound("title");
+                w.write_string("raw", c.find("tag").entries().find("title").as_string().value_or(""));
+                w.end_compound();
+                w.write_string("author", c.find("tag").entries().find("author").as_string().value_or(""));
+            }
+            w.end_compound();
+            ++written;
+        } else if (n == "title" || n == "author") {
+            continue; // written with the pages
+        } else if (n == "Items") {
+            rev_write_list(w, "minecraft:container", e.value, true, x);
+            ++written;
+        } else if (n == "storage_item_component_content") {
+            // Bundles: the items in order (Java keeps no slots in bundle_contents).
+            NbtWriter one(Endian::Big);
+            rev_write_list(w, "minecraft:bundle_contents", e.value, false, x);
+            ++written;
+        } else if (n == "Fireworks") {
+            const NbtCompoundView f = e.value.entries();
+            w.begin_compound("minecraft:fireworks");
+            w.write_byte("flight_duration", f.find("Flight").as_byte().value_or(1));
+            const NbtView ex = f.find("Explosions");
+            w.begin_list("explosions", ex.items().empty() ? TagType::End : TagType::Compound, ex.items().size());
+            for (const NbtView one : ex.items()) rev_write_explosion(w, {}, one.entries());
+            w.end_list();
+            w.end_compound();
+            ++written;
+        } else if (n == "FireworksItem") {
+            rev_write_explosion(w, "minecraft:firework_explosion", e.value.entries());
+            ++written;
+        } else if (n == "Trim") {
+            const NbtCompoundView t = e.value.entries();
+            w.begin_compound("minecraft:trim");
+            w.write_string("material", "minecraft:" + std::string(t.find("Material").as_string().value_or("iron")));
+            w.write_string("pattern", "minecraft:" + std::string(t.find("Pattern").as_string().value_or("coast")));
+            w.end_compound();
+            ++written;
+        } else if (n == "Patterns") {
+            std::vector<std::pair<std::string, std::string_view>> layers;
+            for (const NbtView pt : e.value.items()) {
+                const NbtCompoundView pc = pt.entries();
+                const auto code = pc.find("Pattern").as_string();
+                const i32 color = pc.find("Color").as_int().value_or(-1);
+                std::optional<std::string_view> java;
+                if (code)
+                    for (const tables::Pair& t : tables::kBannerPatterns)
+                        if (t.bedrock == *code) java = t.java;
+                if (!java || color < 0 || color > 15) {
+                    x.lost.push_back("banner pattern");
+                    continue;
+                }
+                layers.emplace_back("minecraft:" + std::string(*java), tables::kDyeColors[static_cast<usize>(15 - color)]);
+            }
+            if (!layers.empty()) {
+                w.begin_list("minecraft:banner_patterns", TagType::Compound, layers.size());
+                for (const auto& [pattern, color] : layers) {
+                    w.begin_compound();
+                    w.write_string("pattern", pattern);
+                    w.write_string("color", color);
+                    w.end_compound();
+                }
+                w.end_list();
+                ++written;
+            }
+        } else {
+            x.lost.push_back(std::string(n));
+        }
+    }
+    w.end_compound();
+    if (written == 0) return std::nullopt;
+    auto bytes = std::move(w).finish();
+    if (!bytes) return std::nullopt;
+    return std::move(*bytes);
+}
+
+void rev_write_item_body(NbtWriter& w, const RevItem& r, NbtCompoundView c, RevCtx& x) {
+    w.write_string("id", r.java_id);
+    w.write_int("count", r.count);
+    if (const auto comps = rev_components(r, c, x))
+        if (const auto doc = io::nbt::NbtDocument::parse(*comps, Endian::Big)) w.write_view("components", doc->root()); // a view of *comps
+    std::sort(x.lost.begin(), x.lost.end());
+    x.lost.erase(std::unique(x.lost.begin(), x.lost.end()), x.lost.end());
+    for (const std::string& what : x.lost) x.report.add(IssueKind::LossyBlock, "item data not converted: " + what, x.pos);
+    x.lost.clear();
+}
+
 std::string json_text(std::string_view json, bool& lossy) {
     // Minimal scan for "text":"..." values in order; enough for names, lore, pages and sign lines.
     std::string out;
@@ -707,6 +994,23 @@ bool write_item(NbtWriter& w, std::string_view name, NbtCompoundView java_item, 
     w.begin_compound(name);
     Ctx x{m, report, pos, 0, r->java_id, r->mapping.damage, {}};
     write_item_body(w, *r, java_item, x);
+    w.end_compound();
+    return true;
+}
+
+void write_java_items(NbtWriter& w, std::string_view name, NbtView bedrock_items, const MappingData& m, ConversionReport& report,
+                      BlockPos pos, SlotMap slot_map) {
+    RevCtx x{m, report, pos, 0, {}};
+    rev_write_list(w, name, bedrock_items, false, x, slot_map);
+}
+
+bool write_java_item(NbtWriter& w, std::string_view name, NbtCompoundView bedrock_item, const MappingData& m, ConversionReport& report,
+                     BlockPos pos) {
+    RevCtx x{m, report, pos, 0, {}};
+    const auto r = rev_resolve(bedrock_item, x);
+    if (!r) return false;
+    w.begin_compound(name);
+    rev_write_item_body(w, *r, bedrock_item, x);
     w.end_compound();
     return true;
 }

@@ -96,7 +96,14 @@ switched on).
 swamp → swamp (before Java 1.19 / Bedrock 1.19.0), cherry grove → meadow (before 1.20 / 1.20.0), pale garden →
 dark forest (before Java 1.21.4 / Bedrock 1.21.50).
 
-**Block entities.** Java: item stacks `{id, Count: Byte}` without components before 1.20.5, items the target lacks
+**Block entities.** Java: item components in their 1.20.5 – 1.21.4 shapes for those releases (enchantments inside
+`levels`, `dyed_color` as `{rgb}`, names, lore and book pages as JSON; components that did not exist yet are reported),
+and before 1.20.5 the old `tag` (`Enchantments`, `display {Name, Lore, color}`, `Damage`, `Potion`, `pages`, `title`,
+`author`, `BlockEntityTag {Items}` and `{Patterns}`, `Fireworks`, `Explosion`, `Trim`, `instrument`; Chunker's
+`JavaItemStackResolver`); furnaces as Shorts before 26.3 and `BurnTime`/`CookTime`/`CookTimeTotal` before 1.21.4, the
+brewing stand's `BrewTime` Short and `Fuel` Byte before 26.3, decorated pot sherds as a list before 26.3 (`shards`
+before 1.20, no item before 1.20.3), beacon effects as numbers before 1.20.2 (Chunker's Java handlers). Item stacks
+`{id, Count: Byte}` before 1.20.5, items the target lacks
 dropped (reported), text as JSON strings before 1.21.5, signs as `Text1`–`Text4`/`Color`/`GlowingText` before 1.20,
 banner patterns as `{Pattern: code, Color: dye}` before 1.20.5; block entities of substituted blocks as above. Bedrock: signs with the front face at the root before 1.19.80; item ids, data values and the items' `Block`
 tag in the target's spelling.

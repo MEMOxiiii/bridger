@@ -258,8 +258,8 @@ inside one top-level folder are accepted: the shortest path ending in `level.dat
 copy of `db/` is opened.
 
 - **Chunks:** every key of 9 bytes ending in `Version` (`0x2C`) or the pre-1.16.100 `LegacyVersion` (`0x76`) [1] is
-  an Overworld chunk; 13-byte keys belong to other dimensions (reported, not converted). `actorprefix` keys and
-  legacy `Entity` keys are counted and reported (entities are not converted yet).
+  an Overworld chunk; 13-byte keys carry the dimension (1 Nether, 2 End). Actors come from `digp`/`actorprefix` and the
+  legacy `Entity` key ("Entities" above).
 - **Subchunks** (every version, see "Old worlds") are decoded with their palette entries kept as raw NBT; each
   distinct entry is upgraded if it is old and resolved once against the pinned palette. Entries the palette does not know are read as air and reported as
   unmapped blocks with their names. Layer 2 is kept as the secondary layer.
@@ -268,7 +268,18 @@ copy of `db/` is opened.
   data for that subchunk (both as read by Chunker's `PaletteUtil.readChunkPalette` [3]). For "no data", Bridger
   keeps the biomes of the subchunk below (its own choice, not a format fact).
 - **Block entities:** concatenated NBT roots with absolute `x/y/z`; they become column-local, and so do
-  `pairx`/`pairz`. `isMovable` is dropped.
+  `pairx`/`pairz`. `isMovable` is dropped. Translation to Java (`reverse_block_entities.cpp`) is the table in "Block
+  entities" read backwards: loot table paths become ids again (`loot_tables/chests/shipwrecksupply.json` →
+  `minecraft:chests/shipwreck_supply`), `EntityIdentifier` becomes `SpawnData {entity: {id}}`, brewing stand slots move
+  back, `disabled_slots` becomes an Int array, `Item1`–`Item4` become `Items` + `CookingTimes`, `page` × 2 becomes
+  `Page`, beacon ids become effect names, sherds become `{back: {id}, left, right, front}`, furnace times become
+  `lit_time_remaining` / `cooking_time_spent` / `lit_total_time` (Chunker's Java handlers, 26.3 forms [3]).
+- **Items** (`item_translator.cpp`, "Items" read backwards): `tag.ench` → `minecraft:enchantments` (or
+  `stored_enchantments` on books), `Damage` → `damage`, `display` → `custom_name` / `lore` (plain strings), potions,
+  tipped arrows (data value − 1), goat horns, ominous bottles and stews from the data value, `pages`/`title`/`author`
+  → book contents, `Items` → `container`, `storage_item_component_content` → `bundle_contents`, `Fireworks` /
+  `FireworksItem` (dye indexes → the dye's Java RGB), `Trim`, `Patterns` → `banner_patterns`. Everything else in an
+  item's `tag` is reported by name.
 - **level.dat:** `LevelName`, `SpawnX/Y/Z`, `RandomSeed`, `Generator` are read (8-byte header skipped).
 
 ## Old worlds (reading)
