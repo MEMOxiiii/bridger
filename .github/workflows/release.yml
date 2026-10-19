@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the portable zip for a version tag (docs/release.md, steps 8-9) and publishes the
-# GitHub release with the matching docs/CHANGELOG.md section.
+# Builds the portable Windows zip and the Linux/macOS command-line archives for a version tag (docs/release.md,
+# steps 8-9) and publishes the GitHub release with the matching docs/CHANGELOG.md section.
 
 on:
   push:
@@ -21,7 +21,106 @@ env:
   MCDATA_COMMIT: "dd01127457231e7da629d645b3c6738068018eb0"
 
 jobs:
+  # The command line for Linux and macOS (no desktop app there yet): bridger-<version>-<os>.tar.gz + .sha256.
+  posix:
+    name: package ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux-x64
+          - os: macos-15
+            name: macos-arm64
+    env:
+      # macOS: run on 13.3 and later (the oldest with the C++20 library features Bridger uses), dependencies included.
+      MACOSX_DEPLOYMENT_TARGET: "13.3"
+      VCPKG_KEEP_ENV_VARS: MACOSX_DEPLOYMENT_TARGET
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip unzip pkg-config
+          else
+            brew install ninja pkg-config
+          fi
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-${{ matrix.os }}-release-pkg
+          restore-keys: |
+            vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-${{ matrix.os }}-
+            vcpkg-${{ env.VCPKG_TAG }}-${{ matrix.os }}-
+
+      - name: Bootstrap vcpkg
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE" "$VCPKG_DOWNLOADS"
+          git -c advice.detachedHead=false clone --depth 1 --branch "$VCPKG_TAG" https://github.com/microsoft/vcpkg.git "$BRIDGER_VCPKG_DIR"
+          "$BRIDGER_VCPKG_DIR/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$BRIDGER_VCPKG_DIR" >> "$GITHUB_ENV"
+
+      - name: Configure, build, test
+        run: |
+          # Linux: libstdc++ and libgcc linked in, so the binary needs only glibc.
+          extra=()
+          if [ "$RUNNER_OS" = "Linux" ]; then extra=("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"); fi
+          cmake --preset posix-release "${extra[@]}"
+          cmake --build --preset posix-release
+          ctest --preset posix-release
+
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="bridger-$version-${{ matrix.name }}"
+          dir="dist/$name"
+          mkdir -p "$dir/licenses"
+          cp build/posix-release/bin/bridger "$dir/"
+          strip "$dir/bridger"
+          cp README.md docs/CHANGELOG.md docs/THIRD_PARTY.md "$dir/"
+          cp LICENSE "$dir/licenses/bridger-MPL-2.0.txt"
+          share=$(dirname "$(ls -d build/vcpkg_installed_*/*/share/zlib | head -1)")
+          for port in libdeflate minizip-ng zlib tbb tl-expected xxhash spdlog fmt cli11; do
+            [ -f "$share/$port/copyright" ] || { echo "missing license for $port"; exit 1; }
+            cp "$share/$port/copyright" "$dir/licenses/$port.txt"
+          done
+          cp third_party/leveldb-mcpe/LICENSE "$dir/licenses/leveldb-mcpe.txt"
+          cp tools/mapgen/sources/geyser-mappings/LICENSE "$dir/licenses/geysermc-mappings.txt"
+          curl -sSfL "https://raw.githubusercontent.com/GeyserMC/Geyser/$GEYSER_COMMIT/LICENSE" -o "$dir/licenses/geysermc-geyser.txt"
+          # minecraft-data has no LICENSE file; its README states the license. Ship that section verbatim.
+          { echo "PrismarineJS/minecraft-data, commit $MCDATA_COMMIT (data/pc/common/legacy.json)"
+            echo "https://github.com/PrismarineJS/minecraft-data"; echo "License section of its README:"; echo
+            curl -sSfL "https://raw.githubusercontent.com/PrismarineJS/minecraft-data/$MCDATA_COMMIT/README.md" | tr -d '\r' | grep -A6 -x '## License'
+          } > "$dir/licenses/minecraft-data.txt"
+          grep -q '## License' "$dir/licenses/minecraft-data.txt" || { echo "minecraft-data README has no License section"; exit 1; }
+          "$dir/bridger" --version
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            ldd "$dir/bridger"
+            ! ldd "$dir/bridger" | grep -q 'libstdc++' || { echo "libstdc++ must be linked in"; exit 1; }
+            echo "newest glibc symbol: $(objdump -T "$dir/bridger" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)"
+          else
+            otool -L "$dir/bridger"
+            vtool -show-build "$dir/bridger" | grep -E 'minos|platform'
+          fi
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+
   release:
+    needs: posix
     runs-on: windows-2022
     timeout-minutes: 180
     steps:
@@ -158,10 +257,18 @@ jobs:
           $section = if ($end) { $rest[0..($end - 2)] } else { $rest }
           Set-Content -Encoding utf8 dist/notes.md $section
 
+      - name: Download the Linux and macOS packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/posix
+          merge-multiple: true
+
       - name: Publish the GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" $env:ZIP $env:SHA --title "Bridger ${{ github.ref_name }}" --notes-file dist/notes.md --verify-tag
+          $posix = Get-ChildItem dist/posix -File | ForEach-Object { $_.FullName }
+          if ($posix.Count -ne 4) { throw "expected 4 Linux/macOS files, found $($posix.Count)" }
+          gh release create "${{ github.ref_name }}" $env:ZIP $env:SHA @posix --title "Bridger ${{ github.ref_name }}" --notes-file dist/notes.md --verify-tag
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

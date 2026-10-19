@@ -5,13 +5,23 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-19
+
 ### Added
 
-- The command line (`bridger info`, `bridger convert`) builds and runs on Linux and macOS, with every format, world
-  and option of the Windows version except `bridger render`. Output is committed the same way: a temp file or folder
+- The command line (`bridger info`, `bridger convert`) runs on Linux and macOS, with every format, world and option
+  of the Windows version except `bridger render`. Releases include `bridger-<version>-linux-x64.tar.gz` (glibc 2.38
+  or newer: Ubuntu 24.04, Debian 13, Fedora 39 and later) and `bridger-<version>-macos-arm64.tar.gz` (Apple Silicon,
+  macOS 13.3 or newer, not signed), each with a `.sha256` file. Output is committed the same way: a temp file or folder
   next to the destination, flushed, validated, then renamed without replacing (`renameat2(RENAME_NOREPLACE)` on
   Linux, `renamex_np(RENAME_EXCL)` on macOS) and the folder synced (`docs/safety.md`). CI builds and tests Ubuntu
   24.04 (release and ASan + UBSan) and macOS 15.
+
+### Known limitations
+
+- Linux and macOS: the command line only (no desktop app, no `bridger render`). The macOS binary is not signed or
+  notarized: after downloading, run `xattr -d com.apple.quarantine bridger` once, or macOS refuses to start it. No
+  Intel Mac build.
 
 ## [1.1.0] - 2026-10-19
 

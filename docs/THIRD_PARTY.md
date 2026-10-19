@@ -37,6 +37,12 @@ distributed. Release zips include the license texts of all shipped components (`
 
 `vulkan-1.dll` is never linked or shipped: volk loads the GPU driver's loader at runtime.
 
+The Linux command line links GCC's `libstdc++` and `libgcc` statically (`-static-libstdc++ -static-libgcc`), so it
+needs only the system's glibc. Both are under GPL-3.0 with the GCC Runtime Library Exception, which allows this for
+programs compiled with GCC under any license. The Linux and macOS archives ship the license files of the libraries
+above that the command line uses (libdeflate, minizip-ng, zlib, oneTBB, tl-expected, xxHash, spdlog, fmt, CLI11,
+leveldb-mcpe) and of the mapping data.
+
 ## Web user interface (npm, embedded in `bridger-gui.exe`)
 
 Built from `src/app/ui` with the versions pinned in `src/app/ui/package-lock.json`, bundled by Vite and
