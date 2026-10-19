@@ -4,12 +4,12 @@
 
 | Layer | Where | Runs in CI |
 |---|---|---|
-| Unit tests (Catch2) | `tests/unit/<module>/` | yes: `msvc-asan`, `msvc-release`, `clangcl-release` |
+| Unit tests (Catch2) | `tests/unit/<module>/` | yes: `msvc-asan`, `msvc-release`, `clangcl-release`; Ubuntu `posix-release` and `posix-asan`, macOS `posix-release` |
 | Golden tests | `tests/golden/` + inputs in `tests/data/` | yes (from Phase 2) |
 | Round-trip tests | `tests/roundtrip/` | yes (from Phase 6) |
 | Integration (large real worlds) | `tests/integration/`, path in `BRIDGER_INTEGRATION_DATA` | no, local only |
 | Fuzzing (libFuzzer, clang-cl, static CRT) | `fuzz/` | 30 s smoke per target; longer budgets locally |
-| Benchmarks | `bench/` | smoke run in `msvc-release` |
+| Benchmarks | `bench/` | smoke run in `msvc-release` and Ubuntu `posix-release` |
 | **In-game checks** | manual, recorded below | no, required for every writer |
 
 ASan: MSVC `/fsanitize=address` (preset `msvc-asan`) and clang-cl. Third-party (vcpkg) libraries are not
@@ -21,6 +21,9 @@ Instrumented targets therefore define `_DISABLE_STRING_ANNOTATION` and `_DISABLE
 catch reads or writes in the unused capacity of a `std::string` / `std::vector` (between `size()` and
 `capacity()`). If that gap matters later, the fix is a custom vcpkg triplet that builds the dependencies with
 ASan.
+
+ASan on Linux and macOS (`posix-asan`) is `-fsanitize=address,undefined`: UBSan runs with it, and libstdc++ has no
+annotation mismatch, so the limitation above is Windows-only.
 
 **Determinism test (from Phase 3):** converting with 1 thread and with N threads must produce semantically
 identical output after decoding. Whole-world conversion is the parallel path: `tests/unit/formats/anvil_test.cpp`

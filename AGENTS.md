@@ -9,8 +9,8 @@ formats (`.schem`, `.schematic`, `.litematic`, structure `.nbt`, Anvil worlds) a
 (`.mcstructure`, `.mcworld`), and renders them in 3D. Speed is a core feature, and every speed claim needs a
 benchmark behind it. A conversion must never corrupt or silently lose user data.
 **Released: 1.1.0. Current phase: after 1.0 (items and block entities in both directions, the Nether and the End,
-item frames, paintings and the player, the self-updater; next: Linux/macOS command line), on top of the Vulkan viewer
-and the desktop app `bridger-gui.exe` (ADR 0009).** All
+item frames, paintings and the player, the self-updater, the command line on Linux and macOS), on top of the Vulkan
+viewer and the desktop app `bridger-gui.exe` (ADR 0009, Windows only).** All
 automated checks pass; the in-game and app checklists (`docs/testing.md`) gate release 0.4.0. Phase 0.5's questions are folded
 into that checklist (`docs/formats/bedrock-world.md`, "Open questions").
 
@@ -40,6 +40,13 @@ in `src/app/ui`.
 | Screenshot | `build\msvc-release\bin\bridger.exe render <file or world> out.png` (needs the 26.3 client jar) |
 
 clang-cl presets need the VS component "C++ Clang Compiler for Windows" (Microsoft.VisualStudio.Component.VC.Llvm.Clang).
+
+**Linux and macOS** (the command line, the libraries, tests and benchmarks; no renderer or app yet): GCC 13+ or
+Apple Clang 16+, CMake 3.28+, Ninja, `zip`, `unzip`, `pkg-config` and the same vcpkg tag. Presets `posix-debug`,
+`posix-release`, `posix-asan` (ASan + UBSan), e.g. `cmake --preset posix-release && cmake --build --preset
+posix-release && ctest --preset posix-release`; binaries land in `build/posix-release/bin/`. GCC builds drop its
+optimizer-based warnings (`-Wnull-dereference`, `-Wmaybe-uninitialized`, `-Wstringop-*`), which give false
+positives inside libstdc++ (`cmake/CompilerWarnings.cmake`).
 
 ## Architecture
 
@@ -75,7 +82,7 @@ Folders are created when their phase arrives. Never add files outside this layou
 CMakeLists.txt  CMakePresets.json  vcpkg.json  vcpkg-configuration.json   # build; vcpkg baseline pinned
 cmake/          CompilerWarnings, Sanitizers, Shaders, EmbedResource, BridgerModule (.cmake)
 third_party/    leveldb-mcpe (git submodule) + CMakeLists.txt
-src/<module>/   include/bridger/<module>/*.hpp, *.cpp, CMakeLists.txt   (platform: win32/, posix/ later)
+src/<module>/   include/bridger/<module>/*.hpp, *.cpp, CMakeLists.txt   (platform: win32/, posix/)
 src/render/shaders/   GLSL, compiled to SPIR-V and embedded at build time
 src/cli/        bridger.exe — main.cpp, commands/{info,convert,render}.cpp
 src/app/        bridger-gui.exe — main.cpp, app.{hpp,cpp}, viewer, settings, ui_bundle, win32/, ui/ (React, npm)
@@ -106,7 +113,7 @@ additions to it are recorded here as required:
 - `src/io/zip_archive.cpp`, `src/convert/placement.cpp`, `src/cli/commands/convert.cpp` as listed in the module
   tables of the original specification.
 - `src/platform/win32/paths_win32.cpp`: Windows implementation files carry a `_win32` suffix so their object
-  files never clash with a future `posix/` twin.
+  files never clash with their `posix/` twin (`src/platform/posix/*_posix.cpp`: Linux and macOS).
 - `src/formats/include/bridger/formats/structure_file.hpp` (+ `structure_file.cpp`): the common result of every
   Java structure reader, so the pipeline does not depend on which reader ran. `src/formats/java/nbt_helpers.hpp`:
   internal helpers shared by the Java readers (not installed, not public).

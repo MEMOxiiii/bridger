@@ -41,6 +41,8 @@ and unzip it anywhere. No installer; the Visual C++ runtime is included.
   Windows 10). The 3D preview needs a GPU with Vulkan 1.3; without one the app still opens and converts files.
 - **`bridger.exe`** — the command line, for scripts and batch jobs.
 
+On Linux and macOS the command line builds from source (below); there are no prebuilt downloads or desktop app yet.
+
 ## Desktop app
 
 <p align="center">
@@ -145,7 +147,8 @@ Against [Chunker](https://github.com/HiveGamesOSS/Chunker) 1.21.0 converting the
   are listed in the report by type. The single-player player converts (inventory, armor, position); a server's
   `playerdata` is not read. Text formatting (colours, bold) is reduced to plain text.
 - Bedrock-only blocks have no Java equivalent: they are replaced and reported.
-- One Java and one Bedrock version at a time; Windows x64 only for now.
+- One Java and one Bedrock version at a time. The desktop app and `bridger render` are Windows x64 only; the
+  command line also runs on Linux and macOS (built from source).
 
 ## Building from source
 
@@ -166,6 +169,19 @@ ctest --preset msvc-release
 
 The first configure builds every dependency with vcpkg, which takes a while. Other presets: `msvc-debug`,
 `msvc-asan`, `clangcl-release`, `clangcl-fuzz`.
+
+**Linux and macOS** (command line only): GCC 13+ or Apple Clang 16+, CMake 3.28+, Ninja, `zip`, `unzip`,
+`pkg-config` and vcpkg at the same tag.
+
+```sh
+git clone --recursive https://github.com/MEMOxiiii/bridger.git
+cd bridger
+export VCPKG_ROOT=~/vcpkg
+cmake --preset posix-release
+cmake --build --preset posix-release
+ctest --preset posix-release
+build/posix-release/bin/bridger --help
+```
 
 ## Documentation
 

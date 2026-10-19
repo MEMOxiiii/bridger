@@ -5,6 +5,14 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+### Added
+
+- The command line (`bridger info`, `bridger convert`) builds and runs on Linux and macOS, with every format, world
+  and option of the Windows version except `bridger render`. Output is committed the same way: a temp file or folder
+  next to the destination, flushed, validated, then renamed without replacing (`renameat2(RENAME_NOREPLACE)` on
+  Linux, `renamex_np(RENAME_EXCL)` on macOS) and the folder synced (`docs/safety.md`). CI builds and tests Ubuntu
+  24.04 (release and ASan + UBSan) and macOS 15.
+
 ## [1.1.0] - 2026-10-19
 
 ### Added

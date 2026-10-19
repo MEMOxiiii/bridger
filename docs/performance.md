@@ -263,3 +263,27 @@ Writing for an older version adds one palette-stage pass per chunk (blocks, biom
 "New World" (4243 chunks with terrain) converted to `.mcworld`, two alternating rounds: default (26.50) 16.7 s / 16.1 s,
 `--target-version 1.20.80` 16.5 s / 8.8 s. The machine was busy (the same command varied by up to 2x), so the
 measurement only shows that the pass is not a visible cost; no number is claimed for it.
+
+### Linux (2026-10-19, Machine A under WSL2, `posix-release`, medians of 3)
+
+The same laptop as Machine A, running Ubuntu 24.04 in WSL2 (16 threads, 15 GB given to the VM, files on the VM's
+ext4 disk), GCC 13.3, `-O3` (CMake `Release`). Every `bridger_bench_*` with
+`--benchmark_repetitions=3 --benchmark_report_aggregates_only=true`. This shows the port has no performance gap; it
+is not a Linux vs. Windows comparison (different compiler, a VM).
+
+| Benchmark | Result |
+|---|---|
+| `BM_SchemRead/1` (gzip) / `/0` (raw) | 40.7 ms = 206 M blocks/s / 29.8 ms = 282 M blocks/s |
+| `BM_NbtParse/0` / `BM_NbtParse/1` | 1.41 GiB/s / 1.40 GiB/s |
+| `BM_NbtMaterialize` / `BM_NbtWrite` | 269 MiB/s / 989 MiB/s |
+| `BM_GzipDecompress` | 809 MiB/s |
+| `BM_TranslateStructure` / `BM_TranslateToJava` | 21.5 ms = 95.3 k sections/s / 57.4 ms = 35.7 k sections/s |
+| `BM_ChunkDecode` / `BM_ChunkEncode` | 0.77 ms = 1.30 k chunks/s / 0.41 ms = 2.44 k chunks/s |
+| `BM_ChunkDecodeTranslateWrite` | 2.11 ms = 475 chunks/s |
+| `BM_BedrockWorldRead` | 215 ms = 1.22 k chunks/s |
+| `BM_SchemToMcworld` (incl. validation re-read and the atomic move) | 221 ms (1 M blocks) |
+| `BM_StructureNbtRead` / `Write` | 213 ms / 294 ms |
+| `BM_LitematicRead` / `Write` | 30.2 ms / 75.7 ms |
+| `BM_McStructureRead` / `Write` | 46.2 ms / 63.5 ms |
+| `BM_LegacySchematicRead` | 33.0 ms |
+| `BM_DecodeVarint32/1048576/5000` / `BM_LoadBigEndianU64` | 279 M items/s / 22.9 GiB/s |

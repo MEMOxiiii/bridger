@@ -54,6 +54,18 @@ lies inside an input world folder, or is a folder that contains the input (`chec
 5. The backup is removed only after the final destination passes validation.
 6. If automatic recovery fails, Bridger stops and prints exactly which file is where: temp, backup, destination.
 
+**Linux and macOS** (`src/platform/posix/file_ops_posix.cpp`) follow the same steps with the POSIX calls:
+
+- Step 2 is `fsync` on the temp file. A rename is durable only once its directory is synced, so every rename below
+  is followed by `fsync` on the destination's folder.
+- New destination: `renameat2(..., RENAME_NOREPLACE)` (Linux 3.15+) or `renamex_np(..., RENAME_EXCL)` (macOS 10.12+),
+  which fail without touching anything if the name exists. On a file system without them (`EINVAL`, `ENOTSUP`):
+  `link()` + `unlink()` for a file (also refuses an existing name), and for a Java world folder a check that the name
+  is free right before `rename()` (a folder created in that instant would be replaced only if it is empty).
+- Existing destination: the old file gets the backup name as a hard link first (`link()`), then the temp file takes
+  the destination's name with one `rename()`, which POSIX defines as atomic. If the link fails, nothing changed
+  (`RemoveReplacedFailed`); if the rename fails, the destination is unchanged (`MoveReplacementFailed`).
+
 **Cancelling** (the desktop app's Cancel, `ConvertOptions::cancel`): the request is checked between steps and
 chunk batches, and **one last time after the output was validated, immediately before step 4**: a separate
 gate (`platform::MoveGate`) that the atomic writer calls exactly once, before the move, and never again after it
@@ -79,6 +91,9 @@ What the OS does and does not promise:
   absent.
 - `FlushFileBuffers` relies on the drive honouring flush requests. Drives with volatile write caches that ignore
   flushes can still lose data on power loss.
+- On Linux and macOS, `fsync` has the same dependency on the drive. On macOS it does not force the drive's own
+  cache (`F_FULLFSYNC` would); Bridger uses plain `fsync`, like most programs. Hard links (the backup when
+  overwriting) need a file system that has them; on FAT32/exFAT overwriting fails before anything changes.
 - A `.mcworld` is a zip. The guarantees cover the zip file as a whole, not its internal entries.
 - Java world output is a folder of many files. The folder appears at its destination in one rename, but the files
   inside are written with ordinary writes before that rename; Bridger does not flush each one individually.
