@@ -49,7 +49,7 @@ std::vector<u8> make_document(Endian endian) {
     for (auto& b : bytes) b = static_cast<u8>(rng() & 0x3F);
     w.write_byte_array("BlockData", bytes);
     std::vector<i64> longs(64 * 1024);
-    for (auto& l : longs) l = static_cast<i64>(rng()) << 32 | rng();
+    for (auto& l : longs) l = static_cast<i64>((static_cast<u64>(rng()) << 32) | rng());
     w.write_long_array("States", longs);
     w.end_compound();
     return std::move(w).finish().value();

@@ -26,7 +26,7 @@ std::vector<u8> make_schem(bool compressed) {
     for (int y = 0; y < kH; ++y)
         for (int z = 0; z < kL; ++z)
             for (int x = 0; x < kW; ++x) {
-                const u32 idx = y > 64 ? 0 : 1 + ((x / 4 + z / 4 + y) % (kPalette - 1));
+                const u32 idx = y > 64 ? 0u : static_cast<u32>(1 + ((x / 4 + z / 4 + y) % (kPalette - 1)));
                 io::encode_varint32((rng() % 50 == 0) ? static_cast<u32>(rng() % kPalette) : idx, data);
             }
     NbtWriter w(Endian::Big);

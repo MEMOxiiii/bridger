@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
                 if (!target_of[j]) continue;
                 const auto theirs = props_of(j);
                 usize score = 1;
-                for (const auto& p : mine) score += std::count(theirs.begin(), theirs.end(), p) ? 1 : 0;
+                for (const auto& p : mine) score += std::count(theirs.begin(), theirs.end(), p) ? 1u : 0u;
                 if (score > best_score) { best_score = score; best = j; }
             }
             if (best < n) {

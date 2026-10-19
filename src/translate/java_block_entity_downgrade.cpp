@@ -240,7 +240,7 @@ std::optional<std::vector<u8>> legacy_tag(NbtCompoundView comps, Ctx& c, int dep
             NbtView levels = e.value.entries().find("levels");
             if (!levels) levels = e.value;
             usize count = 0;
-            for (const io::nbt::NbtEntry& l : levels.entries()) count += l.value.as_int() ? 1 : 0;
+            for (const io::nbt::NbtEntry& l : levels.entries()) count += l.value.as_int() ? 1u : 0u;
             w.begin_list(n == "minecraft:enchantments" ? "Enchantments" : "StoredEnchantments", count ? TagType::Compound : TagType::End, count);
             for (const io::nbt::NbtEntry& l : levels.entries()) {
                 if (!l.value.as_int()) continue;

@@ -55,8 +55,8 @@ Result<StructureFile> read_legacy_schematic(std::span<const u8> file_bytes, std:
         const u32 key = (u32{id} << 4) | dv;
         if (const auto it = cache.find(key); it != cache.end()) return it->second;
         std::optional<std::string> text = tables.block(id, dv);
-        if (!text && (dv & 8)) { text = tables.block(id, static_cast<u8>(dv & 7)); approximated += text ? 1 : 0; }
-        if (!text && dv != 0) { text = tables.block(id, 0); approximated += text ? 1 : 0; }
+        if (!text && (dv & 8)) { text = tables.block(id, static_cast<u8>(dv & 7)); approximated += text ? 1u : 0u; }
+        if (!text && dv != 0) { text = tables.block(id, 0); approximated += text ? 1u : 0u; }
         StateId sid;
         if (text) {
             auto parsed = BlockState::parse(*text);

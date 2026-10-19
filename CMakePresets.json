@@ -1,6 +1,10 @@
 {
   "version": 8,
-  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -13,32 +17,49 @@
         "VCPKG_HOST_TRIPLET": "x64-windows-static-md",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/build/vcpkg_installed"
       },
-      "architecture": { "value": "x64", "strategy": "external" },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
     },
     {
       "name": "msvc",
       "hidden": true,
       "inherits": "base",
-      "cacheVariables": { "CMAKE_C_COMPILER": "cl", "CMAKE_CXX_COMPILER": "cl" }
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
     },
     {
       "name": "clangcl",
       "hidden": true,
       "inherits": "base",
-      "cacheVariables": { "CMAKE_C_COMPILER": "clang-cl", "CMAKE_CXX_COMPILER": "clang-cl" }
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl"
+      }
     },
     {
       "name": "msvc-debug",
       "displayName": "MSVC Debug",
       "inherits": "msvc",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     },
     {
       "name": "msvc-release",
       "displayName": "MSVC Release",
       "inherits": "msvc",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     },
     {
       "name": "msvc-asan",
@@ -54,7 +75,9 @@
       "name": "clangcl-release",
       "displayName": "clang-cl Release",
       "inherits": "clangcl",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     },
     {
       "name": "clangcl-fuzz",
@@ -74,25 +97,133 @@
         "BRIDGER_BUILD_APP": "OFF",
         "BRIDGER_BUILD_RENDER": "OFF"
       }
+    },
+    {
+      "name": "posix",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build/vcpkg_installed_${hostSystemName}",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;benchmarks",
+        "BRIDGER_BUILD_APP": "OFF",
+        "BRIDGER_BUILD_RENDER": "OFF"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "posix-debug",
+      "displayName": "Linux/macOS Debug (command line and tests)",
+      "inherits": "posix",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "posix-release",
+      "displayName": "Linux/macOS Release (command line and tests)",
+      "inherits": "posix",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "posix-asan",
+      "displayName": "Linux/macOS RelWithDebInfo + AddressSanitizer/UBSan",
+      "inherits": "posix",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "BRIDGER_ENABLE_ASAN": "ON",
+        "BRIDGER_BUILD_BENCHMARKS": "OFF"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "msvc-debug", "configurePreset": "msvc-debug" },
-    { "name": "msvc-release", "configurePreset": "msvc-release" },
-    { "name": "msvc-asan", "configurePreset": "msvc-asan" },
-    { "name": "clangcl-release", "configurePreset": "clangcl-release" },
-    { "name": "clangcl-fuzz", "configurePreset": "clangcl-fuzz" }
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug"
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc-release"
+    },
+    {
+      "name": "msvc-asan",
+      "configurePreset": "msvc-asan"
+    },
+    {
+      "name": "clangcl-release",
+      "configurePreset": "clangcl-release"
+    },
+    {
+      "name": "clangcl-fuzz",
+      "configurePreset": "clangcl-fuzz"
+    },
+    {
+      "name": "posix-debug",
+      "configurePreset": "posix-debug"
+    },
+    {
+      "name": "posix-release",
+      "configurePreset": "posix-release"
+    },
+    {
+      "name": "posix-asan",
+      "configurePreset": "posix-asan"
+    }
   ],
   "testPresets": [
     {
       "name": "test-base",
       "hidden": true,
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
     },
-    { "name": "msvc-debug", "inherits": "test-base", "configurePreset": "msvc-debug" },
-    { "name": "msvc-release", "inherits": "test-base", "configurePreset": "msvc-release" },
-    { "name": "msvc-asan", "inherits": "test-base", "configurePreset": "msvc-asan" },
-    { "name": "clangcl-release", "inherits": "test-base", "configurePreset": "clangcl-release" }
+    {
+      "name": "msvc-debug",
+      "inherits": "test-base",
+      "configurePreset": "msvc-debug"
+    },
+    {
+      "name": "msvc-release",
+      "inherits": "test-base",
+      "configurePreset": "msvc-release"
+    },
+    {
+      "name": "msvc-asan",
+      "inherits": "test-base",
+      "configurePreset": "msvc-asan"
+    },
+    {
+      "name": "clangcl-release",
+      "inherits": "test-base",
+      "configurePreset": "clangcl-release"
+    },
+    {
+      "name": "posix-debug",
+      "inherits": "test-base",
+      "configurePreset": "posix-debug"
+    },
+    {
+      "name": "posix-release",
+      "inherits": "test-base",
+      "configurePreset": "posix-release"
+    },
+    {
+      "name": "posix-asan",
+      "inherits": "test-base",
+      "configurePreset": "posix-asan"
+    }
   ]
 }

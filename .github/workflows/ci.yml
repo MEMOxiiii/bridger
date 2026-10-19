@@ -166,3 +166,84 @@ jobs:
             ${{ env.BRIDGER_VCPKG_DIR }}/buildtrees/**/*.log
             build/${{ matrix.preset }}/vcpkg-manifest-install.log
           if-no-files-found: ignore
+
+  # Linux and macOS: the command-line tool, the libraries and their tests (no renderer or desktop app yet).
+  posix:
+    name: ${{ matrix.os }} ${{ matrix.preset }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            preset: posix-release   # unit tests + benchmark smoke run
+            bench: true
+          - os: ubuntu-24.04
+            preset: posix-asan      # unit tests under AddressSanitizer + UBSan
+          - os: macos-15
+            preset: posix-release   # unit tests (Apple Silicon)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip unzip pkg-config
+          else
+            brew install ninja pkg-config
+          fi
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-${{ matrix.os }}-${{ matrix.preset }}
+          restore-keys: |
+            vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-${{ matrix.os }}-
+            vcpkg-${{ env.VCPKG_TAG }}-${{ matrix.os }}-
+
+      - name: Bootstrap vcpkg
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE" "$VCPKG_DOWNLOADS"
+          git -c advice.detachedHead=false clone --depth 1 --branch "$VCPKG_TAG" https://github.com/microsoft/vcpkg.git "$BRIDGER_VCPKG_DIR"
+          "$BRIDGER_VCPKG_DIR/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$BRIDGER_VCPKG_DIR" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} 2>&1 | tee -a ci-step.log; exit ${PIPESTATUS[0]}
+        shell: bash
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} -- -k 0 2>&1 | tee -a ci-step.log; exit ${PIPESTATUS[0]}
+        shell: bash
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }} 2>&1 | tee -a ci-step.log; exit ${PIPESTATUS[0]}
+        shell: bash
+
+      - name: Benchmark smoke run
+        if: matrix.bench
+        shell: bash
+        run: |
+          for b in build/${{ matrix.preset }}/bin/bridger_bench_*; do "$b" --benchmark_min_time=0.05s || exit 1; done
+
+      - name: Report failure as annotation
+        if: failure()
+        shell: bash
+        run: |
+          [ -f ci-step.log ] || { echo "::error title=${{ matrix.os }} ${{ matrix.preset }}::failed before any logged step"; exit 0; }
+          msg=$(grep -E 'error[ :]|FAILED|fatal' ci-step.log | grep -v '^FAILED: ' | sort -u | head -40 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}' | cut -c1-6000)
+          echo "::error title=${{ matrix.os }} ${{ matrix.preset }} (errors)::$msg"
+
+      - name: Upload vcpkg logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs-${{ matrix.os }}-${{ matrix.preset }}
+          path: |
+            ${{ env.BRIDGER_VCPKG_DIR }}/buildtrees/**/*.log
+            build/${{ matrix.preset }}/vcpkg-manifest-install.log
+          if-no-files-found: ignore

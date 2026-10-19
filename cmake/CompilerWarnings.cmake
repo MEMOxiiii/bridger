@@ -46,5 +46,13 @@ function(bridger_set_warnings target)
             -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align
             -Wunused -Woverloaded-virtual -Wconversion -Wsign-conversion
             -Wnull-dereference -Wdouble-promotion -Wimplicit-fallthrough)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            # GCC derives these from optimizer data flow, so -O2 and sanitizer builds report false positives, all
+            # inside libstdc++ and nlohmann/json inlined into our code (GCC reports them even from system headers),
+            # e.g. vector::insert from an initializer list and the memcmp in operator<=>. Clang keeps
+            # -Wnull-dereference (a frontend check), MSVC keeps C4700/C4701, and ASan/UBSan catch these at run time.
+            target_compile_options(${target} PRIVATE -Wno-null-dereference -Wno-maybe-uninitialized
+                                                     -Wno-stringop-overflow -Wno-stringop-overread)
+        endif()
     endif()
 endfunction()

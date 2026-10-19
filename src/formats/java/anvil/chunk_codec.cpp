@@ -122,8 +122,8 @@ Result<JavaChunk> decode_old_chunk(NbtCompoundView level, i32 data_version, std:
         const u32 key = (u32{id} << 4) | dv;
         if (const auto it = numeric.find(key); it != numeric.end()) return it->second;
         std::optional<std::string> text = legacy->block(id, dv);
-        if (!text && (dv & 8)) { text = legacy->block(id, static_cast<u8>(dv & 7)); approximated += text ? 1 : 0; }
-        if (!text && dv != 0) { text = legacy->block(id, 0); approximated += text ? 1 : 0; }
+        if (!text && (dv & 8)) { text = legacy->block(id, static_cast<u8>(dv & 7)); approximated += text ? 1u : 0u; }
+        if (!text && dv != 0) { text = legacy->block(id, 0); approximated += text ? 1u : 0u; }
         std::optional<BlockState> st;
         if (text) if (auto parsed = BlockState::parse(*text)) st = std::move(*parsed);
         if (!st) {

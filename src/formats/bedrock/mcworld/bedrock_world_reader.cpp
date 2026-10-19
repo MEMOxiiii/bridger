@@ -228,10 +228,10 @@ Result<BedrockWorldReader> BedrockWorldReader::open_unpacked(BedrockWorldReader 
             m.chunks.push_back({io::load_le<i32>(key.data()), io::load_le<i32>(key.data() + 4)});
         } else if (key.size() == 13 && (static_cast<u8>(key[12]) == static_cast<u8>(ChunkTag::Version) ||
                                         static_cast<u8>(key[12]) == kLegacyVersionTag)) {
-            const ChunkPos c{io::load_le<i32>(key.data()), io::load_le<i32>(key.data() + 4)};
+            const ChunkPos cp{io::load_le<i32>(key.data()), io::load_le<i32>(key.data() + 4)};
             const i32 dim = io::load_le<i32>(key.data() + 8);
-            if (dim == static_cast<i32>(Dimension::Nether)) m.nether.push_back(c);
-            else if (dim == static_cast<i32>(Dimension::End)) m.end.push_back(c);
+            if (dim == static_cast<i32>(Dimension::Nether)) m.nether.push_back(cp);
+            else if (dim == static_cast<i32>(Dimension::End)) m.end.push_back(cp);
             m.other_dimensions = true;
         } else if (key.starts_with("actorprefix")) {
             ++m.entities;

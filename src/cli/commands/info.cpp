@@ -225,7 +225,7 @@ int info_java_world(const std::string& name, const std::filesystem::path& path) 
         for (const auto& rp : regions)
             if (auto r = formats::java::RegionFile::open(rp))
                 for (u32 lz = 0; lz < 32; ++lz)
-                    for (u32 lx = 0; lx < 32; ++lx) n += r->has_chunk(lx, lz) ? 1 : 0;
+                    for (u32 lx = 0; lx < 32; ++lx) n += r->has_chunk(lx, lz) ? 1u : 0u;
         return n;
     };
     const usize chunks = count_chunks(world->overworld_regions);

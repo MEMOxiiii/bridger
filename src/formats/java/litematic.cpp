@@ -51,7 +51,7 @@ Result<StructureFile> read_litematic(std::span<const u8> file_bytes, std::shared
         if (!pos || !size) return bad("region without Position/Size");
         Region region;
         BRIDGER_TRY(region.name, detail::utf8(e.name));
-        for (int a = 0; a < 3; ++a) {
+        for (usize a = 0; a < 3; ++a) {
             const i64 s = (*size)[a];
             if (s == 0) return bad("region has a zero size");
             const i64 end = i64{(*pos)[a]} + (s > 0 ? s - 1 : s + 1);
@@ -65,7 +65,7 @@ Result<StructureFile> read_litematic(std::span<const u8> file_bytes, std::shared
 
     std::array<i64, 3> lo{INT64_MAX, INT64_MAX, INT64_MAX}, hi{INT64_MIN, INT64_MIN, INT64_MIN};
     for (const Region& r : regions)
-        for (int a = 0; a < 3; ++a) {
+        for (usize a = 0; a < 3; ++a) {
             lo[a] = std::min<i64>(lo[a], r.min[a]);
             hi[a] = std::max<i64>(hi[a], i64{r.min[a]} + r.size[a] - 1);
         }

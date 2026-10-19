@@ -160,11 +160,11 @@ void NbtWriter::write_payload(const NbtValue& root) {
         }
     };
 
-    struct Frame {
+    struct ValueFrame {
         const NbtValue* value;
         usize next; // index of the next child to write
     };
-    std::vector<Frame> stack;
+    std::vector<ValueFrame> stack;
 
     // Writes a list header (on entering a list) and pushes containers.
     auto enter = [&](const NbtValue& v) -> bool {
@@ -194,7 +194,7 @@ void NbtWriter::write_payload(const NbtValue& root) {
 
     if (!enter(root)) return;
     while (!stack.empty() && error_ == nullptr) {
-        Frame& f = stack.back();
+        ValueFrame& f = stack.back();
         if (const auto* list = f.value->get_if<NbtList>()) {
             if (f.next == list->items.size()) {
                 stack.pop_back();

@@ -255,10 +255,10 @@ Result<Structure> translate_to_java(const Structure& bedrock, const MappingData&
     };
     auto set_prop = [&](JavaStateId j, std::string_view k, std::string_view v) {
         // k and v are always string literals here (see the rotation rule), so their addresses identify them.
-        const PropKey key{j, k.data(), v.data()};
-        if (const auto it = prop_cache.find(key); it != prop_cache.end()) return it->second;
+        const PropKey pk{j, k.data(), v.data()};
+        if (const auto it = prop_cache.find(pk); it != prop_cache.end()) return it->second;
         const JavaStateId r = m.with_property(j, k, v).value_or(j);
-        prop_cache.emplace(key, r);
+        prop_cache.emplace(pk, r);
         return r;
     };
 

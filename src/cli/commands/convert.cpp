@@ -66,7 +66,7 @@ bool same_path(const std::filesystem::path& a, const std::filesystem::path& b) {
     auto norm = [](const std::filesystem::path& p) {
         std::error_code e;
         std::wstring w = std::filesystem::weakly_canonical(std::filesystem::absolute(p, e), e).wstring();
-        for (wchar_t& c : w) c = static_cast<wchar_t>(std::towlower(c));
+        for (wchar_t& c : w) c = static_cast<wchar_t>(std::towlower(static_cast<wint_t>(c)));
         while (!w.empty() && (w.back() == L'\\' || w.back() == L'/')) w.pop_back();
         return w;
     };
