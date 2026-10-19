@@ -67,6 +67,12 @@ else()
         ${LEVELDB_DIR}/port/port_posix.cc
         ${LEVELDB_DIR}/util/env_posix.cc)
     target_compile_definitions(leveldb_mcpe PUBLIC LEVELDB_PLATFORM_POSIX)
+    # The OS macro upstream's build_detect_platform sets: port_posix.h picks the byte-order header with it.
+    if(APPLE)
+        target_compile_definitions(leveldb_mcpe PRIVATE OS_MACOSX)
+    else()
+        target_compile_definitions(leveldb_mcpe PRIVATE OS_LINUX)
+    endif()
 endif()
 
 # DLLX is the fork's export macro; empty for a static build (consumers need it too).
