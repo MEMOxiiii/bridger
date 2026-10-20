@@ -138,10 +138,17 @@ using bridger::app::HostCocoaState;
         [task didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorFileDoesNotExist userInfo:nil]];
         return;
     }
-    NSURLResponse* response = [[NSURLResponse alloc] initWithURL:task.request.URL
-                                                        MIMEType:ns(file->mime)
-                                           expectedContentLength:static_cast<NSInteger>(file->bytes.size())
-                                                textEncodingName:nil];
+    // An HTTP response with CORS allowed: Vite's module scripts are loaded with `crossorigin`, which WebKit refuses
+    // from a custom scheme without Access-Control-Allow-Origin.
+    NSDictionary* headers = @{
+        @"Content-Type" : ns(file->mime),
+        @"Content-Length" : [NSString stringWithFormat:@"%zu", file->bytes.size()],
+        @"Access-Control-Allow-Origin" : @"*",
+    };
+    NSHTTPURLResponse* response = [[NSHTTPURLResponse alloc] initWithURL:task.request.URL
+                                                              statusCode:200
+                                                             HTTPVersion:@"HTTP/1.1"
+                                                            headerFields:headers];
     [task didReceiveResponse:response];
     // The bytes belong to the embedded bundle and live as long as the program.
     [task didReceiveData:[NSData dataWithBytesNoCopy:const_cast<bridger::u8*>(file->bytes.data())

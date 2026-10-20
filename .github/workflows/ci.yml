@@ -245,14 +245,15 @@ jobs:
             # Ubuntu 24.04 runners forbid unprivileged user namespaces, which WebKit's sandbox (bubblewrap) needs.
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
             timeout 300 xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- \
-              build/${{ matrix.preset }}/bin/bridger-gui --smoke-test=1 "$file"
+              build/${{ matrix.preset }}/bin/bridger-gui --smoke-test=1 "$file" 2>&1 | tee smoke.log
           else
             # MoltenVK goes into the bundle as in the release (a CI runner may have no GPU; the app still opens).
             app=build/${{ matrix.preset }}/bin/Bridger.app
             mkdir -p "$app/Contents/Frameworks"
             cp "$(brew --prefix molten-vk)/lib/libMoltenVK.dylib" "$app/Contents/Frameworks/"
-            gtimeout 300 "$app/Contents/MacOS/Bridger" --smoke-test=1 "$file"
+            gtimeout 300 "$app/Contents/MacOS/Bridger" --smoke-test=1 "$file" 2>&1 | tee smoke.log
           fi
+          exit ${PIPESTATUS[0]}
 
       - name: Benchmark smoke run
         if: matrix.bench
@@ -264,6 +265,10 @@ jobs:
         if: failure()
         shell: bash
         run: |
+          if [ -f smoke.log ]; then # the app smoke test: its whole output (the stage it reached, errors)
+            msg=$(tail -40 smoke.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}' | cut -c1-6000)
+            echo "::error title=${{ matrix.os }} ${{ matrix.preset }} (smoke test)::$msg"
+          fi
           [ -f ci-step.log ] || { echo "::error title=${{ matrix.os }} ${{ matrix.preset }}::failed before any logged step"; exit 0; }
           msg=$(grep -E 'error[ :]|FAILED|fatal' ci-step.log | grep -v '^FAILED: ' | sort -u | head -40 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}' | cut -c1-6000)
           echo "::error title=${{ matrix.os }} ${{ matrix.preset }} (errors)::$msg"
