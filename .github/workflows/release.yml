@@ -59,7 +59,7 @@ jobs:
             sudo apt-get install -y -q ninja-build zip unzip pkg-config libgtk-4-dev libwebkitgtk-6.0-dev \
               mesa-vulkan-drivers xvfb xauth dbus-x11
           else
-            brew install ninja pkg-config
+            brew install ninja pkg-config coreutils # coreutils: gtimeout
           fi
 
       - name: Restore vcpkg binary cache
@@ -167,7 +167,7 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 # WebKit's sandbox needs user namespaces
             timeout 300 xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- "$DIR/bridger-gui" --smoke-test=1 "$file"
           else
-            timeout 300 "$DIR/Bridger.app/Contents/MacOS/Bridger" --smoke-test=1 "$file"
+            gtimeout 300 "$DIR/Bridger.app/Contents/MacOS/Bridger" --smoke-test=1 "$file"
           fi
 
       - uses: actions/upload-artifact@v4

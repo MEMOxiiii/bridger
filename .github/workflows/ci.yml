@@ -204,7 +204,7 @@ jobs:
             sudo apt-get install -y -q ninja-build zip unzip pkg-config libgtk-4-dev libwebkitgtk-6.0-dev \
               mesa-vulkan-drivers xvfb xauth dbus-x11
           else
-            brew install ninja pkg-config molten-vk
+            brew install ninja pkg-config molten-vk coreutils # coreutils: gtimeout
           fi
 
       - name: Restore vcpkg binary cache
@@ -251,7 +251,7 @@ jobs:
             app=build/${{ matrix.preset }}/bin/Bridger.app
             mkdir -p "$app/Contents/Frameworks"
             cp "$(brew --prefix molten-vk)/lib/libMoltenVK.dylib" "$app/Contents/Frameworks/"
-            timeout 300 "$app/Contents/MacOS/Bridger" --smoke-test=1 "$file"
+            gtimeout 300 "$app/Contents/MacOS/Bridger" --smoke-test=1 "$file"
           fi
 
       - name: Benchmark smoke run
