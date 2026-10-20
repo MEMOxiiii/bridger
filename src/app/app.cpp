@@ -524,7 +524,8 @@ struct App::Impl {
         auto stamp = [&](const fs::path& p) {
             mix(utf8(p));
             mix(std::to_string(fs::is_regular_file(p, ec) ? fs::file_size(p, ec) : 0));
-            mix(std::to_string(fs::last_write_time(p, ec).time_since_epoch().count()));
+            // libc++ counts file times in a 128-bit integer; 64 bits of it are plenty for a cache key.
+            mix(std::to_string(static_cast<long long>(fs::last_write_time(p, ec).time_since_epoch().count())));
         };
         stamp(fs::is_directory(world, ec) ? world / "level.dat" : world); // saving a world rewrites level.dat
         for (const fs::path& a : asset_paths) stamp(a);

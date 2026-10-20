@@ -24,7 +24,8 @@ struct HostCocoaState; // the C++ side the Objective-C delegates call into
 namespace {
 
 NSString* ns(std::string_view s) {
-    return [[NSString alloc] initWithBytes:s.data() length:s.size() encoding:NSUTF8StringEncoding] ?: @"";
+    NSString* str = [[NSString alloc] initWithBytes:s.data() length:s.size() encoding:NSUTF8StringEncoding];
+    return str != nil ? str : @"";
 }
 
 std::string utf8(NSString* s) { return s != nil ? std::string([s UTF8String]) : std::string(); }
