@@ -264,6 +264,14 @@ Writing for an older version adds one palette-stage pass per chunk (blocks, biom
 `--target-version 1.20.80` 16.5 s / 8.8 s. The machine was busy (the same command varied by up to 2x), so the
 measurement only shows that the pass is not a visible cost; no number is claimed for it.
 
+### Desktop app on Linux: the scene through memory (2026-10-20, Machine A under WSL2, `posix-release`)
+
+ADR 0010 shows the 3D scene on Linux and macOS by reading each frame back and handing it to the window system. Measured
+by the smoke test on the Java test world (`bridger-gui --smoke-test=3 tests/data/javaworld/basic`, llvmpipe software
+Vulkan, window 1440 x 900): 56 frames, **0.88 ms per frame** to copy the 5.2 MB frame into a `GdkMemoryTexture`, after
+5.13 ms waiting for the (software) GPU to finish it. GTK's upload of the texture happens in its own frame and is not
+included. The app draws only when something changes, so an idle window costs nothing.
+
 ### Linux (2026-10-19, Machine A under WSL2, `posix-release`, medians of 3)
 
 The same laptop as Machine A, running Ubuntu 24.04 in WSL2 (16 threads, 15 GB given to the VM, files on the VM's

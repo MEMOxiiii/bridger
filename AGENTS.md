@@ -4,13 +4,13 @@ The single source of truth for any AI agent (or human) working on this repositor
 
 ## Purpose
 
-Bridger is a Windows desktop tool, written in C++20, that converts Minecraft structures and worlds between Java
+Bridger is a desktop tool for Windows, Linux and macOS, written in C++20, that converts Minecraft structures and worlds between Java
 formats (`.schem`, `.schematic`, `.litematic`, structure `.nbt`, Anvil worlds) and Bedrock formats
 (`.mcstructure`, `.mcworld`), and renders them in 3D. Speed is a core feature, and every speed claim needs a
 benchmark behind it. A conversion must never corrupt or silently lose user data.
 **Released: 1.2.0. Current phase: after 1.0 (items and block entities in both directions, the Nether and the End,
-item frames, paintings and the player, the self-updater, the command line on Linux and macOS), on top of the Vulkan
-viewer and the desktop app `bridger-gui.exe` (ADR 0009, Windows only).** All
+item frames, paintings and the player, the self-updater, the command line and the desktop app on Linux and macOS),
+on top of the Vulkan viewer and the desktop app (ADR 0009 on Windows, ADR 0010 on Linux and macOS).** All
 automated checks pass; the in-game and app checklists (`docs/testing.md`) gate release 0.4.0. Phase 0.5's questions are folded
 into that checklist (`docs/formats/bedrock-world.md`, "Open questions").
 
@@ -38,13 +38,16 @@ in `src/app/ui`.
 | Profile | configure with `-DBRIDGER_ENABLE_TRACY=ON`, then connect the Tracy GUI |
 | UI in a browser | `cd src/app/ui && npm run dev` (mock bridge; `#convert`, `#done`, `#report`, ... show states) |
 | Screenshot | `build\msvc-release\bin\bridger.exe render <file or world> out.png` (needs the 26.3 client jar) |
+| App smoke test | `bridger-gui --smoke-test=2 <file>`: starts, waits for the interface and the 3D preview's first frame, prints a summary, exit code 0 when all came up (`BRIDGER_SMOKE_SCREENSHOT=<png>`: the window's own picture on Linux). `BRIDGER_VULKAN_VALIDATION=1`: Vulkan validation layers |
 
 clang-cl presets need the VS component "C++ Clang Compiler for Windows" (Microsoft.VisualStudio.Component.VC.Llvm.Clang).
 
-**Linux and macOS** (the command line, the libraries, tests and benchmarks; no renderer or app yet): GCC 13+ or
-Apple Clang 16+, CMake 3.28+, Ninja, `zip`, `unzip`, `pkg-config` and the same vcpkg tag. Presets `posix-debug`,
-`posix-release`, `posix-asan` (ASan + UBSan), e.g. `cmake --preset posix-release && cmake --build --preset
-posix-release && ctest --preset posix-release`; binaries land in `build/posix-release/bin/`. GCC builds drop its
+**Linux and macOS** (everything, the app included; ADR 0010): GCC 13+ or Apple Clang 16+, CMake 3.28+, Ninja, `zip`,
+`unzip`, `pkg-config`, Node.js 22+ and the same vcpkg tag; on Linux also GTK 4.14+ and WebKitGTK 6.0 development
+packages (Ubuntu: `libgtk-4-dev libwebkitgtk-6.0-dev`). Presets `posix-debug`, `posix-release`, `posix-asan` (ASan +
+UBSan), e.g. `cmake --preset posix-release && cmake --build --preset posix-release && ctest --preset posix-release`;
+binaries land in `build/posix-release/bin/` (`bridger-gui`; on macOS `Bridger.app`). A build directory configured
+before the app was added keeps `BRIDGER_BUILD_APP=OFF` in its cache: delete `CMakeCache.txt` once. GCC builds drop its
 optimizer-based warnings (`-Wnull-dereference`, `-Wmaybe-uninitialized`, `-Wstringop-*`), which give false
 positives inside libstdc++ (`cmake/CompilerWarnings.cmake`).
 
@@ -85,7 +88,7 @@ third_party/    leveldb-mcpe (git submodule) + CMakeLists.txt
 src/<module>/   include/bridger/<module>/*.hpp, *.cpp, CMakeLists.txt   (platform: win32/, posix/)
 src/render/shaders/   GLSL, compiled to SPIR-V and embedded at build time
 src/cli/        bridger.exe — main.cpp, commands/{info,convert,render}.cpp
-src/app/        bridger-gui.exe — main.cpp, app.{hpp,cpp}, viewer, settings, ui_bundle, win32/, ui/ (React, npm)
+src/app/        desktop app — main.cpp, app.{hpp,cpp}, host.hpp, viewer, settings, ui_bundle, win32/, gtk/, cocoa/, ui/
 tools/spike/    Phase 0.5 Bedrock world experiment      tools/mapgen/  mapping data -> .brmap
 tests/          unit/<module>/*_test.cpp, golden/, roundtrip/, integration/ (env-var paths), data/
 fuzz/           fuzz_<target>.cpp (libFuzzer)           bench/  bench_<area>.cpp (Google Benchmark)
@@ -134,7 +137,13 @@ additions to it are recorded here as required:
 - `render/lod_cache.hpp` (+ `.cpp`): the distant terrain cache (`docs/formats/assets.md`, "Distant terrain");
   `tests/unit/render/lod_test.cpp`.
 - `platform/net.hpp` + `win32/net_win32.cpp` (HTTPS via WinHTTP, SHA-1 via BCrypt) and `render/asset_download.hpp`
-  (the client jar download on request; `docs/safety.md`, "Network access").
+  (the client jar download on request; `docs/safety.md`, "Network access"); `posix/net_posix.cpp` (libcurl loaded at
+  run time), `platform/hash.hpp` + `hash.cpp` (portable SHA-1/SHA-256, `tests/unit/platform/hash_test.cpp`),
+  `platform/library.hpp` + `win32/library_win32.cpp`, `posix/library_posix.cpp` (MoltenVK in the macOS bundle).
+- Linux and macOS app (ADR 0010): `src/app/host.hpp` (the OS boundary of the app; `app.cpp` has no OS calls),
+  `win32/host_win32.cpp`, `gtk/host_gtk.cpp`, `cocoa/host_cocoa.mm` + `cocoa/Info.plist.in`, `webkit_bridge.hpp` (the
+  `chrome.webview` shim for WebKit); the UI's `src/fly.ts` (fly mode driven by the page); `render/vma.hpp` (VMA's header
+  path differs between installs); `docs/adr/0010-desktop-app-on-linux-and-macos.md`.
 - Self-update: `src/app/updater.{hpp,cpp}` (OS-free, unit-tested from `tests/unit/app/updater_test.cpp`), the UI's
   `components/UpdateCard.tsx`, `platform/process.hpp` + `win32/process_win32.cpp` (own path, start a process),
   `docs/app/updates.md`.

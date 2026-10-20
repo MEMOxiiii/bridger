@@ -1,12 +1,10 @@
 #include "app.hpp"
 
+#include "host.hpp"
 #include "settings.hpp"
 #include "ui_bundle.hpp"
 #include "updater.hpp"
 #include "viewer.hpp"
-#include "win32/compositor.hpp"
-#include "win32/shell.hpp"
-#include "win32/webview_host.hpp"
 
 #include <bridger/convert/pipeline.hpp>
 #include <bridger/convert/view_world.hpp>
@@ -22,7 +20,6 @@
 #include <bridger/translate/targets.hpp>
 #include <bridger/translate/mapping_data.hpp>
 
-#include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -41,11 +38,18 @@ using json = nlohmann::json;
 using formats::FormatId;
 namespace fs = std::filesystem;
 
-constexpr u32 kCharcoal = 0x0F1217; // --bg in src/app/ui/src/styles/tokens.css
 constexpr glm::vec3 kCharcoalLinear{0.059f, 0.071f, 0.090f};
 constexpr glm::vec3 kSky{0.62f, 0.76f, 1.0f};
 
 std::string utf8(const fs::path& p) { return platform::path_to_utf8(p).value_or(std::string()); }
+
+// "<stem> (<n>)<ext>" next to `like`: a free name for an output that must not be the input.
+fs::path numbered(const fs::path& like, int n) {
+    fs::path name = like.stem();
+    name += platform::path_from_utf8(" (" + std::to_string(n) + ")").value_or(fs::path());
+    name += like.extension();
+    return like.parent_path() / name;
+}
 
 std::string format_key(FormatId id) { return std::string(formats::info(id).name); }
 
@@ -164,31 +168,37 @@ struct Document {
     std::shared_ptr<render::LodCache> distant_cache;
 };
 
-const SDL_DialogFileFilter kOpenFilters[] = {
+const FileFilter kOpenFilters[] = {
     {"Minecraft structures and worlds", "schem;litematic;nbt;schematic;mcstructure;mcworld;dat"},
     {"All files", "*"},
 };
-const SDL_DialogFileFilter kJarFilter[] = {{"Minecraft client jar", "jar"}};
-const SDL_DialogFileFilter kPackFilter[] = {{"Resource pack", "zip"}};
-const SDL_DialogFileFilter kWorldFilter[] = {{"Bedrock world", "mcworld"}};
-const SDL_DialogFileFilter kSaveFilters[] = {
+const FileFilter kJarFilter[] = {{"Minecraft client jar", "jar"}};
+const FileFilter kPackFilter[] = {{"Resource pack", "zip"}};
+const FileFilter kWorldFilter[] = {{"Bedrock world", "mcworld"}};
+const FileFilter kSaveFilters[] = {
     {"Bedrock world", "mcworld"},          {"Bedrock structure", "mcstructure"}, {"Sponge schematic", "schem"},
     {"Litematica schematic", "litematic"}, {"Structure block file", "nbt"},
 };
 
+const char* platform_name() {
+#if defined(_WIN32)
+    return "windows";
+#elif defined(__APPLE__)
+    return "macos";
+#else
+    return "linux";
+#endif
+}
+
 } // namespace
 
 struct App::Impl {
-    SDL_Window* window = nullptr;
-    void* hwnd = nullptr;
+    std::unique_ptr<Host> host; // the window, the web view and everything else from the OS (host.hpp)
     std::optional<render::Renderer> renderer; // empty without a usable GPU: the app still converts
     std::string viewer_error;
-    std::unique_ptr<Compositor> compositor;
-    std::unique_ptr<WebViewHost> web;
     UiBundle bundle;
     TaskQueue tasks;
     Settings settings;
-    bool running = true;
     bool ui_ready = false;
     std::vector<std::string> outbox; // messages posted before the page is ready
 
@@ -201,6 +211,7 @@ struct App::Impl {
     bool dirty = true;
     std::optional<float> slice;
     bool fly = false;
+    FlyKeys page_keys; // fly-mode keys sent by the page (FlyInput::Page)
     // The 3D view runs only while the UI shows it (docs/app/bridge.md, `preview`): no rendering and no
     // world streaming while the user is on the convert page.
     bool previewing = false;
@@ -249,22 +260,19 @@ struct App::Impl {
         if (open_worker.joinable()) open_worker.join();
         doc.streaming.reset();
         doc.view_world.reset();
-        web.reset();
-        renderer.reset();
-        compositor.reset();
-        if (window != nullptr) SDL_DestroyWindow(window);
-        SDL_Quit();
+        renderer.reset(); // before the host: on Windows it draws into the host's shared texture
+        host.reset();
     }
 
     // ---- Messages -------------------------------------------------------------------------
 
     void send(const json& j) {
         std::string text = j.dump(-1, ' ', false, json::error_handler_t::replace);
-        if (!ui_ready || !web) {
+        if (!ui_ready || !host) {
             outbox.push_back(std::move(text));
             return;
         }
-        web->post_json(text);
+        host->post_json(text);
     }
 
     void toast(std::string_view kind, std::string_view message) { send({{"type", "toast"}, {"kind", kind}, {"message", message}}); }
@@ -291,6 +299,8 @@ struct App::Impl {
     void send_hello() {
         send({{"type", "hello"},
               {"version", BRIDGER_VERSION_STRING},
+              {"platform", platform_name()},
+              {"fly_input", host->fly_input() == FlyInput::Native ? "native" : "page"},
               {"gpu", renderer ? renderer->device_name() : std::string()},
               {"assets", assets_json()},
               {"settings", settings_json()}});
@@ -306,10 +316,15 @@ struct App::Impl {
         if (type == "ready") {
             ui_ready = true;
             send_hello();
-            for (auto& s : outbox) web->post_json(s);
+            for (auto& s : outbox) host->post_json(s);
             outbox.clear();
             if (!pending_open.empty()) open(std::exchange(pending_open, {}));
-            check_for_update(false);
+            if (smoke) {
+                smoke_stage = "interface ready";
+                if (smoke_open.empty()) smoke_reached("interface ready");
+            } else {
+                check_for_update(false); // never from a smoke test
+            }
         } else if (type == "update_check") {
             check_for_update(true);
         } else if (type == "update_install") {
@@ -325,7 +340,7 @@ struct App::Impl {
             install_update(true);
         } else if (type == "update_page") {
             if (update_release && update_release->page_url.starts_with("https://github.com/" + std::string(update::kRepository) + "/"))
-                open_url(update_release->page_url);
+                host->open_url(update_release->page_url);
         } else if (type == "orbit") {
             viewer.orbit(num("dx"), num("dy"));
         } else if (type == "pan") {
@@ -338,6 +353,12 @@ struct App::Impl {
             set_preview(m.value("on", false));
         } else if (type == "fly") {
             if (previewing) set_fly(m.value("on", false));
+        } else if (type == "look") { // fly mode driven by the page (pointer lock)
+            if (fly) viewer.look(num("dx"), num("dy"));
+        } else if (type == "fly_keys") {
+            const json k = m.value("keys", json::object());
+            auto key = [&](const char* name) { return k.contains(name) && k[name].is_boolean() && k[name].get<bool>(); };
+            page_keys = {key("forward"), key("back"), key("left"), key("right"), key("up"), key("down"), key("fast")};
         } else if (type == "view") {
             if (m.contains("map") && m["map"].is_boolean()) viewer.set_map(m["map"].get<bool>());
             if (m.contains("slice")) slice = m["slice"].is_number() ? std::optional<float>(m["slice"].get<float>()) : std::nullopt;
@@ -350,22 +371,28 @@ struct App::Impl {
         } else if (type == "open") {
             open(str("path"));
         } else if (type == "open_dialog") {
-            if (m.value("folder", false)) SDL_ShowOpenFolderDialog(&Impl::on_open_picked, this, window, nullptr, false);
-            else SDL_ShowOpenFileDialog(&Impl::on_open_picked, this, window, kOpenFilters, 2, nullptr, false);
+            if (m.value("folder", false)) host->open_folder({}, on_ui([this](std::string f) { open(f); }));
+            else host->open_file(kOpenFilters, on_ui([this](std::string f) { open(f); }));
         } else if (type == "pick_output") {
             pick_output(str("format"));
         } else if (type == "pick_into_world") {
-            SDL_ShowOpenFileDialog(&Impl::on_into_world_picked, this, window, kWorldFilter, 1, nullptr, false);
+            host->open_file(kWorldFilter, on_ui([this](std::string f) { send({{"type", "into_world_picked"}, {"path", f}}); }));
         } else if (type == "convert") {
             start_convert(m);
         } else if (type == "cancel_convert") {
             convert_cancel = true;
         } else if (type == "reveal") {
-            reveal_in_explorer(str("path"));
+            host->reveal(str("path"));
         } else if (type == "pick_client_jar") {
-            SDL_ShowOpenFileDialog(&Impl::on_jar_picked, this, window, kJarFilter, 1, nullptr, false);
+            host->open_file(kJarFilter, on_ui([this](std::string f) {
+                settings.client_jar = f;
+                settings_changed(true);
+            }));
         } else if (type == "add_pack") {
-            SDL_ShowOpenFileDialog(&Impl::on_pack_picked, this, window, kPackFilter, 1, nullptr, false);
+            host->open_file(kPackFilter, on_ui([this](std::string f) {
+                if (std::find(settings.packs.begin(), settings.packs.end(), f) == settings.packs.end()) settings.packs.push_back(f);
+                settings_changed(true);
+            }));
         } else if (type == "download_textures") {
             start_texture_download();
         } else if (type == "cancel_textures") {
@@ -375,51 +402,25 @@ struct App::Impl {
         }
     }
 
-    // ---- Dialog callbacks (any thread) ------------------------------------------------------
+    // ---- Dialog answers ---------------------------------------------------------------------------
 
-    static std::optional<std::string> first_file(const char* const* list) {
-        if (list == nullptr || list[0] == nullptr) return std::nullopt;
-        return std::string(list[0]);
+    // A dialog callback (any thread) that runs `f` with the chosen path on the UI thread; nothing when cancelled.
+    PathCallback on_ui(std::function<void(std::string)> f) {
+        return [this, f = std::move(f)](std::optional<std::string> path) {
+            if (path) tasks.post([f, p = std::move(*path)] { f(p); });
+        };
     }
-    static void on_open_picked(void* self, const char* const* list, int) {
-        if (auto f = first_file(list)) static_cast<Impl*>(self)->tasks.post([s = static_cast<Impl*>(self), f = *f] { s->open(f); });
-    }
-    static void on_into_world_picked(void* self, const char* const* list, int) {
-        if (auto f = first_file(list))
-            static_cast<Impl*>(self)->tasks.post([s = static_cast<Impl*>(self), f = *f] { s->send({{"type", "into_world_picked"}, {"path", f}}); });
-    }
-    static void on_output_picked(void* self, const char* const* list, int) {
-        auto* s = static_cast<Impl*>(self);
-        auto f = first_file(list);
-        s->tasks.post([s, f] { s->send({{"type", "output_picked"}, {"path", f ? json(*f) : json(nullptr)}}); });
-    }
-    static void on_output_folder_picked(void* self, const char* const* list, int) {
-        auto* s = static_cast<Impl*>(self);
-        auto f = first_file(list);
-        s->tasks.post([s, f] {
-            if (!f) return s->send({{"type", "output_picked"}, {"path", nullptr}});
-            // A new world folder inside the chosen folder, named after the input.
-            const auto parent = platform::path_from_utf8(*f);
-            const auto input = platform::path_from_utf8(s->doc.path);
-            if (!parent || !input) return;
-            fs::path out = *parent / input->stem();
-            for (int i = 2; fs::exists(out) && i < 100; ++i) out = *parent / (input->stem().wstring() + L" (" + std::to_wstring(i) + L")");
-            s->send({{"type", "output_picked"}, {"path", utf8(out)}});
-        });
-    }
-    static void on_jar_picked(void* self, const char* const* list, int) {
-        if (auto f = first_file(list))
-            static_cast<Impl*>(self)->tasks.post([s = static_cast<Impl*>(self), f = *f] {
-                s->settings.client_jar = f;
-                s->settings_changed(true);
-            });
-    }
-    static void on_pack_picked(void* self, const char* const* list, int) {
-        if (auto f = first_file(list))
-            static_cast<Impl*>(self)->tasks.post([s = static_cast<Impl*>(self), f = *f] {
-                if (std::find(s->settings.packs.begin(), s->settings.packs.end(), f) == s->settings.packs.end()) s->settings.packs.push_back(f);
-                s->settings_changed(true);
-            });
+
+    // The output folder for a Java world: a new world folder inside the chosen one, named after the input.
+    void output_folder_picked(std::optional<std::string> folder) {
+        if (!folder) return send({{"type", "output_picked"}, {"path", nullptr}});
+        const auto parent = platform::path_from_utf8(*folder);
+        const auto input = platform::path_from_utf8(doc.path);
+        if (!parent || !input) return;
+        const fs::path first = *parent / input->stem();
+        fs::path out = first;
+        for (int i = 2; fs::exists(out) && i < 100; ++i) out = numbered(first, i);
+        send({{"type", "output_picked"}, {"path", utf8(out)}});
     }
 
     // ---- Settings and assets ----------------------------------------------------------------
@@ -607,7 +608,7 @@ struct App::Impl {
         const u64 gen = ++open_generation;
         const std::string name = utf8(path->filename());
         send({{"type", "loading"}, {"name", name}, {"step", "Reading"}, {"fraction", 0.05}});
-        SDL_SetWindowTitle(window, ("Bridger \xE2\x80\x94 " + name).c_str());
+        host->set_title("Bridger \xE2\x80\x94 " + name);
         const bool world = convert::is_world_path(*path);
         const std::string full = utf8(*path);
         open_worker = std::thread([this, gen, p = *path, full, name, world] {
@@ -619,7 +620,12 @@ struct App::Impl {
             };
             auto failed = [&](std::string msg) {
                 tasks.post([this, gen, msg = std::move(msg)] {
-                    if (gen == open_generation) send({{"type", "open_failed"}, {"message", msg}});
+                    if (gen != open_generation) return;
+                    send({{"type", "open_failed"}, {"message", msg}});
+                    if (smoke) {
+                        smoke_stage = "opening failed: " + msg;
+                        smoke_failed = true;
+                    }
                 });
             };
             if (world) {
@@ -661,6 +667,7 @@ struct App::Impl {
         }
         dirty = true;
         send({{"type", "preview_ready"}, {"missing_models", models ? models->missing().size() : 0}});
+        smoke_preview_ready();
     }
 
     void opened_structure(const std::string& path, const std::string& name, const convert::ViewStructure& v, u64 blocks) {
@@ -744,6 +751,7 @@ struct App::Impl {
                 {"targets", targets_for(info.format)}}},
               {"settings", settings_json()}});
         send({{"type", "preview_ready"}, {"missing_models", 0}});
+        smoke_preview_ready();
     }
 
     void focus_positions(const json& positions) {
@@ -771,22 +779,23 @@ struct App::Impl {
         const auto input = platform::path_from_utf8(doc.path);
         if (!input) return;
         if (*id == FormatId::JavaWorld) {
-            const std::string dir = utf8(input->parent_path());
-            SDL_ShowOpenFolderDialog(&Impl::on_output_folder_picked, this, window, dir.c_str(), false);
+            host->open_folder(utf8(input->parent_path()), [this](std::optional<std::string> folder) {
+                tasks.post([this, folder] { output_folder_picked(folder); });
+            });
             return;
         }
         const auto& f = formats::info(*id);
-        const fs::path ext = platform::path_from_utf8(f.extension).value_or(fs::path());
-        fs::path suggested = input->parent_path() / input->stem();
+        fs::path first = input->parent_path() / input->stem();
+        first += platform::path_from_utf8(f.extension).value_or(fs::path());
         // The same format (another game version): never suggest the input itself.
-        for (int i = 2; fs::exists(fs::path(suggested).concat(ext.native())) && i < 100; ++i)
-            suggested = input->parent_path() / (input->stem().wstring() + L" (" + std::to_wstring(i) + L")");
-        suggested += ext;
-        const std::string def = utf8(suggested);
-        const SDL_DialogFileFilter* filter = &kSaveFilters[0];
+        fs::path suggested = first;
+        for (int i = 2; fs::exists(suggested) && i < 100; ++i) suggested = numbered(first, i);
+        const FileFilter* filter = &kSaveFilters[0];
         for (const auto& sf : kSaveFilters)
-            if ("." + std::string(sf.pattern) == f.extension) filter = &sf;
-        SDL_ShowSaveFileDialog(&Impl::on_output_picked, this, window, filter, 1, def.c_str());
+            if ("." + sf.patterns == f.extension) filter = &sf;
+        host->save_file(*filter, utf8(suggested), [this](std::optional<std::string> path) {
+            tasks.post([this, path] { send({{"type", "output_picked"}, {"path", path ? json(*path) : json(nullptr)}}); });
+        });
     }
 
     void start_convert(const json& m) {
@@ -925,7 +934,8 @@ struct App::Impl {
                       {"current", current.str()},
                       {"notes", update_release->notes},
                       {"size", update_release->zip_size},
-                      {"installable", !update_release->sha256.empty() || !update_release->sha256_url.empty()}});
+                      // Only the Windows zip installs itself; elsewhere the release page is offered (docs/adr/0010).
+                      {"installable", update::kSelfInstall && (!update_release->sha256.empty() || !update_release->sha256_url.empty())}});
             });
         });
     }
@@ -976,11 +986,12 @@ struct App::Impl {
         }
         update_installed = true;
         if (!restart) return;
-        if (const auto st = platform::launch_detached(*dir / "bridger-gui.exe", {}); !st) {
+        const auto exe = platform::executable_path();
+        if (const auto st = exe ? platform::launch_detached(*exe, {}) : Status(tl::unexpected(exe.error())); !st) {
             toast("error", "Bridger was updated; start it again to use the new version.");
             return;
         }
-        running = false;
+        host->quit();
     }
 
     // ---- Fly mode --------------------------------------------------------------------------
@@ -989,10 +1000,8 @@ struct App::Impl {
         if (on == fly || (on && !has_doc)) return;
         fly = on;
         viewer.set_fly(on);
-        SDL_SetWindowRelativeMouseMode(window, on);
-        if (web) web->set_input_enabled(!on);
-        if (on) focus_window(hwnd);
-        else if (web) web->focus();
+        page_keys = {};
+        if (host->fly_input() == FlyInput::Native) host->set_fly_capture(on);
         send({{"type", "fly"}, {"on", on}});
         dirty = true;
     }
@@ -1000,34 +1009,49 @@ struct App::Impl {
     // ---- Main loop -------------------------------------------------------------------------
 
     bool init() {
-        if (!SDL_Init(SDL_INIT_VIDEO)) {
-            log::error("SDL_Init failed: {}", SDL_GetError());
-            return false;
-        }
-        window = SDL_CreateWindow("Bridger", 1440, 900, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
-        if (window == nullptr) {
-            log::error("SDL_CreateWindow failed: {}", SDL_GetError());
-            return false;
-        }
-        SDL_SetWindowMinimumSize(window, 960, 600);
-        hwnd = SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
-        style_title_bar(hwnd, kCharcoal);
+        HostEvents ev;
+        ev.message = [this](std::string_view text) { on_message(text); };
+        ev.web_ready = [this](bool ok, std::string_view err) {
+            if (!ok) {
+                fatal("The user interface could not start: " + std::string(err));
+                host->quit();
+            }
+        };
+        ev.resized = [this](u32 w, u32 h) {
+            if (renderer) {
+                if (host->scene_mode() == SceneMode::SharedTexture) (void)renderer->set_shared_target(host->shared_handle(), w, h);
+                else (void)renderer->resize(w, h);
+            }
+            dirty = true;
+        };
+        ev.close_requested = [this] { host->quit(); };
+        ev.focus_lost = [this] { set_fly(false); };
+        ev.drop_hover = [this](bool inside) { send({{"type", "drop"}, {"state", inside ? "enter" : "leave"}}); };
+        ev.drop_file = [this](std::string path) { open(path); };
+        ev.fly_look = [this](float dx, float dy) {
+            if (fly) viewer.look(dx, dy);
+        };
+        ev.fly_wheel = [this](float d) {
+            if (fly) viewer.zoom(d);
+        };
+        ev.fly_escape = [this] { set_fly(false); };
+        host = Host::create(std::move(ev));
+        if (!host) return false;
 
-        int w = 0, h = 0;
-        SDL_GetWindowSizeInPixels(window, &w, &h);
         render::RendererConfig cfg;
-        cfg.width = static_cast<u32>(w);
-        cfg.height = static_cast<u32>(h);
-        cfg.shared_target = true;
-        // The 3D preview is optional: without a Vulkan 1.3 GPU (or without texture sharing with
+        cfg.width = host->width();
+        cfg.height = host->height();
+        cfg.shared_target = host->scene_mode() == SceneMode::SharedTexture;
+        cfg.validation = std::getenv("BRIDGER_VULKAN_VALIDATION") != nullptr; // debugging: Vulkan validation layers
+        // The 3D preview is optional: without a Vulkan 1.3 GPU (or, on Windows, without texture sharing with
         // Direct3D) the app still opens files and converts them; the preview says why it is off.
         if (std::getenv("BRIDGER_NO_VIEWER") != nullptr) viewer_error = "turned off by BRIDGER_NO_VIEWER"; // testing
         else if (auto r = render::Renderer::create(cfg)) renderer.emplace(std::move(*r));
         else viewer_error = r.error().describe();
-        compositor = Compositor::create(hwnd, renderer ? renderer->adapter_luid() : std::nullopt, cfg.width, cfg.height);
-        if (!compositor) return fatal("Could not set up the window's drawing surface (Direct3D 11 / DirectComposition).");
-        if (renderer)
-            if (auto s = renderer->set_shared_target(compositor->shared_handle(), cfg.width, cfg.height); !s) {
+        if (!host->attach_scene(renderer ? renderer->adapter_luid() : std::nullopt))
+            return fatal("Could not set up the window's drawing surface (Direct3D 11 / DirectComposition).");
+        if (renderer && cfg.shared_target)
+            if (auto s = renderer->set_shared_target(host->shared_handle(), cfg.width, cfg.height); !s) {
                 viewer_error = s.error().describe();
                 renderer.reset();
             }
@@ -1040,66 +1064,72 @@ struct App::Impl {
 
     bool fatal(const std::string& message) {
         log::error("{}", message);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Bridger", message.c_str(), window);
+        if (host && !smoke) host->error_box(message);
+        smoke_failed = true;
         return false;
     }
 
+    // ---- Smoke test (RunOptions::smoke_test) ------------------------------------------------------
+
+    std::optional<int> smoke; // seconds to keep the window after everything came up
+    std::string smoke_stage = "starting";
+    std::chrono::steady_clock::time_point smoke_started, smoke_done;
+    bool smoke_up = false, smoke_failed = false;
+    double smoke_first_frame_ms = -1.0;
+    double present_ms_sum = 0.0;  // handing a frame's pixels to the host (SceneMode::Pixels)
+    double gpu_wait_ms_sum = 0.0; // waiting for the GPU to finish that frame
+    u64 present_frames = 0;
+    std::string smoke_open;
+
+    void smoke_reached(std::string stage) {
+        if (!smoke || smoke_up) return;
+        smoke_stage = std::move(stage);
+        smoke_up = true;
+        smoke_done = std::chrono::steady_clock::now();
+    }
+
+    // The preview's model is ready: open the preview (a click otherwise), or finish when there is no 3D view.
+    void smoke_preview_ready() {
+        if (!smoke) return;
+        smoke_stage = "3D model ready";
+        if (renderer) send({{"type", "show_preview"}});
+        else smoke_reached("file page shown (no 3D preview)");
+    }
+
+    void smoke_tick() {
+        if (!smoke) return;
+        const auto now = std::chrono::steady_clock::now();
+        const bool timed_out = !smoke_up && now - smoke_started > std::chrono::seconds(90);
+        if (!smoke_failed && !timed_out && (!smoke_up || now - smoke_done < std::chrono::seconds(*smoke))) return;
+        const bool ok = smoke_up && !smoke_failed;
+        const std::string preview = renderer ? renderer->device_name() : "off, " + viewer_error;
+        std::string first = smoke_first_frame_ms >= 0 ? std::format("; first frame {:.0f} ms after opening", smoke_first_frame_ms) : "";
+        if (present_frames > 0 && renderer)
+            first += std::format("; {} frames of {}x{} through memory: GPU wait {:.2f} ms, hand-over {:.2f} ms per frame", present_frames,
+                                 renderer->width(), renderer->height(), gpu_wait_ms_sum / static_cast<double>(present_frames),
+                                 present_ms_sum / static_cast<double>(present_frames));
+        std::printf("smoke test: %s (reached: %s; interface %s; 3D preview: %s%s)\n", ok ? "ok" : "FAILED", smoke_stage.c_str(),
+                    ui_ready ? "ready" : "not ready", preview.c_str(), first.c_str());
+        if (const char* shot = std::getenv("BRIDGER_SMOKE_SCREENSHOT"); shot != nullptr && *shot != 0)
+            std::printf("smoke test: screenshot %s\n", host->save_screenshot(shot) ? shot : "not available on this system");
+        std::fflush(stdout);
+        if (!ok) smoke_failed = true;
+        host->quit();
+    }
+
     void start_web() {
-        WebViewCallbacks cb;
-        cb.resource = [this](std::string_view path) -> std::optional<WebResource> {
-            const auto f = bundle.find(path);
-            if (!f) return std::nullopt;
-            return WebResource{f->bytes, std::string(f->mime)};
-        };
-        cb.on_message = [this](std::string_view json_text) { on_message(json_text); };
-        cb.on_ready = [this](bool ok, std::string_view err) {
-            compositor->commit();
-            if (!ok)
-                fatal("The user interface could not start: " + std::string(err) +
-                      "\n\nBridger needs the Microsoft Edge WebView2 Runtime (included in Windows 11).");
-        };
-        std::string data_dir = "bridger-webview";
-        if (const char* local = std::getenv("LOCALAPPDATA")) data_dir = std::string(local) + "\\Bridger\\WebView2";
 #ifdef NDEBUG
         const bool dev_tools = std::getenv("BRIDGER_DEVTOOLS") != nullptr;
 #else
         const bool dev_tools = true;
 #endif
-        web = WebViewHost::create(hwnd, compositor->ui_visual(), "https://bridger.local/index.html", data_dir, std::move(cb), dev_tools);
-    }
-
-    void handle_event(const SDL_Event& e) {
-        switch (e.type) {
-        case SDL_EVENT_QUIT:
-        case SDL_EVENT_WINDOW_CLOSE_REQUESTED: running = false; break;
-        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
-            const auto w = static_cast<u32>(std::max(1, e.window.data1)), h = static_cast<u32>(std::max(1, e.window.data2));
-            if (compositor->resize(w, h) && renderer) (void)renderer->set_shared_target(compositor->shared_handle(), w, h);
-            if (web) web->resize(e.window.data1, e.window.data2);
-            dirty = true;
-            break;
-        }
-        case SDL_EVENT_WINDOW_FOCUS_LOST:
-            // Focus moving to the WebView inside this window is not "leaving the app".
-            if (!window_is_foreground(hwnd)) set_fly(false);
-            break;
-        case SDL_EVENT_MOUSE_MOTION:
-            if (fly) viewer.look(e.motion.xrel, e.motion.yrel);
-            break;
-        case SDL_EVENT_MOUSE_WHEEL:
-            if (fly) viewer.zoom(e.wheel.y);
-            break;
-        case SDL_EVENT_KEY_DOWN:
-            // Scancodes: physical keys, whatever the keyboard layout (WASD on an Arabic layout too).
-            if (fly && e.key.scancode == SDL_SCANCODE_ESCAPE) set_fly(false);
-            break;
-        case SDL_EVENT_DROP_BEGIN: send({{"type", "drop"}, {"state", "enter"}}); break;
-        case SDL_EVENT_DROP_FILE:
-            if (e.drop.data != nullptr) open(e.drop.data);
-            break;
-        case SDL_EVENT_DROP_COMPLETE: send({{"type", "drop"}, {"state", "leave"}}); break;
-        default: break;
-        }
+        host->start_web(
+            [this](std::string_view path) -> std::optional<Host::WebFile> {
+                const auto f = bundle.find(path);
+                if (!f) return std::nullopt;
+                return Host::WebFile{f->bytes, std::string(f->mime)};
+            },
+            dev_tools);
     }
 
     void tick_stats(double frame_ms, bool rendered) {
@@ -1129,89 +1159,115 @@ struct App::Impl {
         stats_time = now;
     }
 
-    int run(const std::string& open_path) {
-        if (const auto dir = app_dir()) update::cleanup(*dir); // files left by an update installed last time
+    // One pass of the main loop (Host::run): background results, the camera, streaming, and a frame when something
+    // changed. Returns true while the next pass should come as soon as possible.
+    bool tick() {
+        if (tasks.run_all()) dirty = true;
+        smoke_tick();
+        const auto now = std::chrono::steady_clock::now();
+        const float dt = std::chrono::duration<float>(now - last_tick).count();
+        last_tick = now;
+
+        FlyKeys keys;
+        if (fly) {
+            if (host->fly_input() == FlyInput::Native) {
+                const HostFlyKeys k = host->fly_keys();
+                keys = {k.forward, k.back, k.left, k.right, k.up, k.down, k.fast};
+            } else {
+                keys = page_keys;
+            }
+        }
+        viewer.update(dt, keys);
+        const glm::vec3 sky_goal = has_doc ? kSky : kCharcoalLinear;
+        sky = glm::mix(sky_goal, sky, std::exp(-6.0f * dt));
+        const bool sky_moving = glm::length(sky - sky_goal) > 0.002f;
+
+        streaming_busy = false;
+        if (doc.streaming && previewing) {
+            render::Camera center = viewer.camera();
+            center.position = viewer.stream_center();
+            streaming_busy = doc.streaming->update(center, *renderer, settings.render_distance, 32);
+        }
+        const auto busy = [&] { return dirty || fly || (previewing && streaming_busy); };
+
+        const render::Camera& cam = viewer.camera();
+        const bool moved = cam.position != last_camera.position || cam.yaw_degrees != last_camera.yaw_degrees ||
+                           cam.pitch_degrees != last_camera.pitch_degrees || viewer.map_half_extent() != last_extent;
+        if (!renderer || !previewing || !(dirty || moved || sky_moving || streaming_busy || fly)) {
+            tick_stats(0.0, false);
+            return busy();
+        }
+        dirty = false;
+        last_camera = cam;
+        last_extent = viewer.map_half_extent();
+
+        frame.sky_color = sky;
+        frame.map_mode = viewer.map();
+        frame.map_half_extent = viewer.map_half_extent();
+        frame.slice_y = slice;
+        const bool shared = host->scene_mode() == SceneMode::SharedTexture;
+        if (shared) host->begin_frame();
+        auto r = renderer->render(cam, frame);
+        if (!r) log::error("{}", r.error().describe());
+        else last_stats = *r;
+        if (shared) {
+            host->present();
+        } else {
+            // Linux, macOS: the frame goes through memory (docs/adr/0010); its cost is reported by the smoke test.
+            using ms = std::chrono::duration<double, std::milli>;
+            const auto p0 = std::chrono::steady_clock::now();
+            const auto px = renderer->pixels(); // waits for the GPU to finish the frame
+            const auto p1 = std::chrono::steady_clock::now();
+            if (px) host->present_pixels(*px, renderer->width(), renderer->height());
+            gpu_wait_ms_sum += ms(p1 - p0).count();
+            present_ms_sum += ms(std::chrono::steady_clock::now() - p1).count();
+            ++present_frames;
+        }
+        tick_stats(r ? r->cpu_ms : 0.0, true);
+        const auto since_open = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - open_started).count(); };
+        if (ttff_pending && has_doc) {
+            ttff_pending = false;
+            log::info("time to first frame: {:.0f} ms ({})", since_open(), doc.name);
+            if (smoke && !smoke_up) {
+                smoke_first_frame_ms = since_open();
+                smoke_reached("3D preview drew its first frame");
+            }
+        }
+        if (stream_pending && !streaming_busy && doc.streaming) {
+            stream_pending = false;
+            const auto st = doc.streaming->stats();
+            log::info("render distance loaded: {:.0f} ms, {} chunks, {} quads", since_open(), st.loaded, st.quads);
+        }
+        return busy();
+    }
+
+    int run(const RunOptions& options) {
+        smoke = options.smoke_test;
+        smoke_open = options.open_path;
+        smoke_started = std::chrono::steady_clock::now();
+        if (!smoke)
+            if (const auto dir = app_dir()) update::cleanup(*dir); // files left by an update installed last time
         if (!init()) return 1;
         if (bundle.empty()) return fatal("The user interface is missing from this build.") ? 0 : 1;
         start_web();
-        SDL_ShowWindow(window);
-        if (!open_path.empty()) open(open_path);
-        auto last = std::chrono::steady_clock::now();
-        render::Camera last_camera;
-        float last_extent = 0.0f;
-        bool streaming_busy = false;
-        while (running) {
-            SDL_Event e;
-            // Idle: wait for input instead of spinning when nothing moves.
-            const bool idle = !dirty && !fly && !(previewing && streaming_busy);
-            if (idle ? SDL_WaitEventTimeout(&e, 15) : SDL_PollEvent(&e)) {
-                handle_event(e);
-                while (SDL_PollEvent(&e)) handle_event(e);
-            }
-            if (tasks.run_all()) dirty = true;
-            const auto now = std::chrono::steady_clock::now();
-            const float dt = std::chrono::duration<float>(now - last).count();
-            last = now;
-
-            FlyKeys keys;
-            if (fly) {
-                const bool* k = SDL_GetKeyboardState(nullptr);
-                keys = {k[SDL_SCANCODE_W],     k[SDL_SCANCODE_S],
-                        k[SDL_SCANCODE_A],     k[SDL_SCANCODE_D],
-                        k[SDL_SCANCODE_SPACE], k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT],
-                        k[SDL_SCANCODE_LCTRL]};
-            }
-            viewer.update(dt, keys);
-            const glm::vec3 sky_goal = has_doc ? kSky : kCharcoalLinear;
-            sky = glm::mix(sky_goal, sky, std::exp(-6.0f * dt));
-            const bool sky_moving = glm::length(sky - sky_goal) > 0.002f;
-
-            streaming_busy = false;
-            if (doc.streaming && previewing) {
-                render::Camera center = viewer.camera();
-                center.position = viewer.stream_center();
-                streaming_busy = doc.streaming->update(center, *renderer, settings.render_distance, 32);
-            }
-
-            const render::Camera& cam = viewer.camera();
-            const bool moved = cam.position != last_camera.position || cam.yaw_degrees != last_camera.yaw_degrees ||
-                               cam.pitch_degrees != last_camera.pitch_degrees || viewer.map_half_extent() != last_extent;
-            if (!renderer || !previewing || !(dirty || moved || sky_moving || streaming_busy || fly)) {
-                tick_stats(0.0, false);
-                continue;
-            }
-            dirty = false;
-            last_camera = cam;
-            last_extent = viewer.map_half_extent();
-
-            frame.sky_color = sky;
-            frame.map_mode = viewer.map();
-            frame.map_half_extent = viewer.map_half_extent();
-            frame.slice_y = slice;
-            compositor->wait_for_copy();
-            auto r = renderer->render(cam, frame);
-            if (!r) log::error("{}", r.error().describe());
-            else last_stats = *r;
-            compositor->present();
-            tick_stats(r ? r->cpu_ms : 0.0, true);
-            const auto since_open = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - open_started).count(); };
-            if (ttff_pending && has_doc) {
-                ttff_pending = false;
-                log::info("time to first frame: {:.0f} ms ({})", since_open(), doc.name);
-            }
-            if (stream_pending && !streaming_busy && doc.streaming) {
-                stream_pending = false;
-                const auto st = doc.streaming->stats();
-                log::info("render distance loaded: {:.0f} ms, {} chunks, {} quads", since_open(), st.loaded, st.quads);
-            }
-        }
+        host->show();
+        if (!options.open_path.empty()) open(options.open_path);
+        last_tick = std::chrono::steady_clock::now();
+        host->run([this] { return tick(); });
+        if (smoke) return smoke_failed ? 1 : 0;
         install_update(false); // a downloaded update the user did not restart for: installed on the way out
         return 0;
     }
+
+    // Main loop state (tick).
+    std::chrono::steady_clock::time_point last_tick;
+    render::Camera last_camera;
+    float last_extent = 0.0f;
+    bool streaming_busy = false;
 };
 
 App::App() : impl_(std::make_unique<Impl>()) {}
 App::~App() = default;
-int App::run(const std::string& open_path) { return impl_->run(open_path); }
+int App::run(const RunOptions& options) { return impl_->run(options); }
 
 } // namespace bridger::app

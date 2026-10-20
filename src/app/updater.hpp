@@ -19,7 +19,18 @@ namespace bridger::app::update {
 
 inline constexpr std::string_view kRepository = "MEMOxiiii/bridger";
 inline constexpr std::string_view kLatestReleaseApi = "https://api.github.com/repos/MEMOxiiii/bridger/releases/latest";
+// The release file for this system (release.yml). Only the Windows zip installs itself; on Linux and macOS the app
+// offers the release page instead (docs/adr/0010).
+#if defined(_WIN32)
 inline constexpr std::string_view kAssetSuffix = "-windows-x64.zip";
+inline constexpr bool kSelfInstall = true;
+#elif defined(__APPLE__)
+inline constexpr std::string_view kAssetSuffix = "-macos-arm64.tar.gz";
+inline constexpr bool kSelfInstall = false;
+#else
+inline constexpr std::string_view kAssetSuffix = "-linux-x64.tar.gz";
+inline constexpr bool kSelfInstall = false;
+#endif
 
 struct Version {
     i32 major = 0, minor = 0, patch = 0;

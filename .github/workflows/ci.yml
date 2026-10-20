@@ -167,7 +167,8 @@ jobs:
             build/${{ matrix.preset }}/vcpkg-manifest-install.log
           if-no-files-found: ignore
 
-  # Linux and macOS: the command-line tool, the libraries and their tests (no renderer or desktop app yet).
+  # Linux and macOS: the libraries, the command line, the renderer and the desktop app (docs/adr/0010), with their tests
+  # and a smoke test of the app (it starts, loads the interface and opens a file in the 3D preview).
   posix:
     name: ${{ matrix.os }} ${{ matrix.preset }}
     runs-on: ${{ matrix.os }}
@@ -188,12 +189,22 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/app/ui/package-lock.json
+
       - name: Install build tools
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip unzip pkg-config
+            sudo apt-get update -q
+            # GTK 4 and WebKitGTK 6.0 for the app; Mesa's software Vulkan (llvmpipe), Xvfb and D-Bus for its smoke test.
+            sudo apt-get install -y -q ninja-build zip unzip pkg-config libgtk-4-dev libwebkitgtk-6.0-dev \
+              mesa-vulkan-drivers xvfb xauth dbus-x11
           else
-            brew install ninja pkg-config
+            brew install ninja pkg-config molten-vk
           fi
 
       - name: Restore vcpkg binary cache
@@ -223,6 +234,25 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }} 2>&1 | tee -a ci-step.log; exit ${PIPESTATUS[0]}
         shell: bash
+
+      - name: App smoke test
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=0 # GTK, WebKit and AppKit keep process-lifetime allocations on purpose
+        run: |
+          file="$PWD/tests/data/ingame/containers.schem"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # Ubuntu 24.04 runners forbid unprivileged user namespaces, which WebKit's sandbox (bubblewrap) needs.
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            timeout 300 xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- \
+              build/${{ matrix.preset }}/bin/bridger-gui --smoke-test=1 "$file"
+          else
+            # MoltenVK goes into the bundle as in the release (a CI runner may have no GPU; the app still opens).
+            app=build/${{ matrix.preset }}/bin/Bridger.app
+            mkdir -p "$app/Contents/Frameworks"
+            cp "$(brew --prefix molten-vk)/lib/libMoltenVK.dylib" "$app/Contents/Frameworks/"
+            timeout 300 "$app/Contents/MacOS/Bridger" --smoke-test=1 "$file"
+          fi
 
       - name: Benchmark smoke run
         if: matrix.bench

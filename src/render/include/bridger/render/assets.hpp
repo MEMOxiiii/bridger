@@ -29,7 +29,7 @@ public:
     [[nodiscard]] std::optional<std::vector<u8>> read(std::string_view path) const;
     [[nodiscard]] usize pack_count() const noexcept;
 
-    // The launcher's client jar for `version` (e.g. "26.3") under %APPDATA%/.minecraft, if present.
+    // The launcher's client jar for `version` (e.g. "26.3") in the game folder (platform::minecraft_java_dir), if present.
     [[nodiscard]] static std::optional<std::filesystem::path> find_client_jar(std::string_view version);
 
 private:

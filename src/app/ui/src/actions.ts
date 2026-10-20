@@ -1,6 +1,11 @@
 // Navigation between the file page and the 3D preview (the app renders only while previewing).
-import { send } from './bridge'
+import { onMessage, send } from './bridge'
 import { getState, setState } from './store'
+
+// bridger-gui --smoke-test asks for the preview once the 3D model is ready.
+onMessage((m) => {
+  if (m.type === 'show_preview') enterPreview()
+})
 
 export function enterPreview() {
   const s = getState()

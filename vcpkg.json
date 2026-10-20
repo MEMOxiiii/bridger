@@ -55,16 +55,23 @@
       ]
     },
     "app": {
-      "description": "Desktop app (bridger-gui.exe): SDL3 window, WebView2 user interface over the Vulkan viewer",
+      "description": "Desktop app: on Windows SDL3 + WebView2 (docs/adr/0009); Linux and macOS use the system web view (docs/adr/0010)",
       "dependencies": [
         {
           "name": "sdl3",
           "features": [
             "vulkan"
-          ]
+          ],
+          "platform": "windows"
         },
-        "webview2",
-        "wil"
+        {
+          "name": "webview2",
+          "platform": "windows"
+        },
+        {
+          "name": "wil",
+          "platform": "windows"
+        }
       ]
     },
     "tests": {

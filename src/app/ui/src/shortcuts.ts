@@ -2,6 +2,7 @@
 // Ignored while typing in a field.
 import { useEffect } from 'react'
 import { send } from './bridge'
+import { requestFly } from './fly'
 import { enterPreview, exitPreview } from './actions'
 import { getState, setState } from './store'
 
@@ -36,7 +37,7 @@ export function useShortcuts() {
       }
       switch (e.code) {
         case 'KeyF':
-          send({ type: 'fly', on: true })
+          requestFly()
           break
         case 'KeyM': {
           const map = !s.map

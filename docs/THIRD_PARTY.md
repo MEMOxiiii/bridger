@@ -37,11 +37,23 @@ distributed. Release zips include the license texts of all shipped components (`
 
 `vulkan-1.dll` is never linked or shipped: volk loads the GPU driver's loader at runtime.
 
+**Desktop app on Linux and macOS** (`docs/adr/0010`):
+
+| Component | Version | License | Shipped | Used for |
+|---|---|---|---|---|
+| [GTK](https://gtk.org) 4 | 4.14 or newer, the system's (tested with 4.14.5) | LGPL-2.1-or-later | no (dynamically linked system library) | The Linux app's window, dialogs and drops |
+| [WebKitGTK](https://webkitgtk.org) 6.0 API | the system's (tested with 2.52) | LGPL-2.1-or-later and BSD-2-Clause | no (dynamically linked system library) | Shows the HTML interface on Linux |
+| [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | 1.4.2 | Apache-2.0 | yes (macOS, `Bridger.app/Contents/Frameworks`) | Vulkan on Metal for the 3D preview on macOS |
+| [libcurl](https://curl.se) | the system's | curl (MIT-style) | no (loaded at run time when present) | HTTPS on Linux and macOS: the texture download and the update check |
+
+AppKit, WebKit (WKWebView), QuartzCore and UniformTypeIdentifiers are macOS system frameworks.
+
 The Linux command line links GCC's `libstdc++` and `libgcc` statically (`-static-libstdc++ -static-libgcc`), so it
 needs only the system's glibc. Both are under GPL-3.0 with the GCC Runtime Library Exception, which allows this for
 programs compiled with GCC under any license. The Linux and macOS archives ship the license files of the libraries
 above that the command line uses (libdeflate, minizip-ng, zlib, oneTBB, tl-expected, xxHash, spdlog, fmt, CLI11,
-leveldb-mcpe) and of the mapping data.
+leveldb-mcpe) and of the mapping data; with the desktop app also those of the renderer's libraries, the web interface and, on macOS,
+MoltenVK.
 
 ## Web user interface (npm, embedded in `bridger-gui.exe`)
 

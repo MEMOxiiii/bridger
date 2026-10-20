@@ -5,6 +5,23 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+### Added
+
+- The desktop app on Linux and macOS (`docs/adr/0010`): the same interface and 3D preview as on Windows, in a GTK 4 +
+  WebKitGTK window on Linux and an AppKit + WKWebView window on macOS (`Bridger.app`, MoltenVK inside). Fly mode uses
+  pointer lock there. Updates are announced with the release page (no self-install). Texture download and the update
+  check use the system's libcurl.
+- `bridger-gui --smoke-test[=seconds] [file]`: starts the app, opens the file in the 3D preview and exits with 0 when
+  everything came up; CI runs it on Linux and macOS.
+- `bridger render` on Linux and macOS.
+
+### Fixed
+
+- 3D preview: a section replaced before its upload reached the GPU had its buffer freed while a copy into it was
+  still queued, and a removed section's buffer could be freed while the previous frame still drew from it (found by
+  the Vulkan validation layers; a crash on Mesa's software driver). The shaders' `discard` now has the Vulkan 1.3
+  feature it needs enabled, and offscreen rendering no longer enables the swapchain extension.
+
 ## [1.2.0] - 2026-10-19
 
 ### Added

@@ -4,6 +4,7 @@
 #include "../test_util.hpp"
 
 #include <bridger/io/zip_archive.hpp>
+#include <bridger/platform/net.hpp>
 
 #include <updater.hpp>
 
@@ -49,20 +50,21 @@ TEST_CASE("Update versions parse and compare", "[app][update]") {
 
 TEST_CASE("The latest release JSON gives the zip, its digest or checksum file", "[app][update]") {
     const std::string digest(64, 'a');
+    const std::string asset = "bridger-1.1.0" + std::string(bridger::app::update::kAssetSuffix); // this system's file
     const auto r = parse_release(release_json(
-        "v1.1.0", R"({"name":"bridger-1.1.0-windows-x64.zip","size":123,"digest":"sha256:)" + digest +
-                      R"(","browser_download_url":"https://github.com/MEMOxiiii/bridger/releases/download/v1.1.0/bridger-1.1.0-windows-x64.zip"},
-                     {"name":"bridger-1.1.0-windows-x64.zip.sha256","browser_download_url":"https://github.com/MEMOxiiii/bridger/releases/download/v1.1.0/bridger-1.1.0-windows-x64.zip.sha256"})"));
+        "v1.1.0", R"({"name":")" + asset + R"(","size":123,"digest":"sha256:)" + digest +
+                      R"(","browser_download_url":"https://github.com/MEMOxiiii/bridger/releases/download/v1.1.0/)" + asset + R"("},
+                     {"name":")" + asset + R"(.sha256","browser_download_url":"https://github.com/MEMOxiiii/bridger/releases/download/v1.1.0/)" + asset + R"(.sha256"})"));
     REQUIRE(r);
     CHECK(r->version == *Version::parse("1.1.0"));
     CHECK(r->zip_size == 123);
     CHECK(r->sha256 == digest);
-    CHECK(r->sha256_url.ends_with(".zip.sha256"));
+    CHECK(r->sha256_url.ends_with(asset + ".sha256"));
     CHECK(r->notes == "Notes");
 
     // Assets from anywhere else are ignored; without our zip the release is refused.
     CHECK_FALSE(parse_release(release_json(
-        "v1.1.0", R"({"name":"bridger-1.1.0-windows-x64.zip","browser_download_url":"https://evil.example/bridger-1.1.0-windows-x64.zip"})")));
+        "v1.1.0", R"({"name":")" + asset + R"(","browser_download_url":"https://evil.example/)" + asset + R"("})")));
     CHECK_FALSE(parse_release(release_json("v1.1.0", "", /*prerelease=*/true)));
     CHECK_FALSE(parse_release("not json"));
 
@@ -147,6 +149,13 @@ TEST_CASE("The latest real release downloads, verifies and unpacks", "[.network]
     const auto release = fetch_latest();
     REQUIRE(release);
     CHECK_FALSE(release->sha256.empty());
+    if (!kSelfInstall) {
+        // Linux and macOS only offer the release page; what they share with Windows is the download and the check.
+        const auto bytes = platform::https_get(release->zip_url, 512ull << 20);
+        REQUIRE(bytes);
+        CHECK(platform::sha256_hex(*bytes).value() == release->sha256);
+        return;
+    }
     test::TempDir dir;
     const auto root = download_and_stage(*release, dir.path / "staging", {});
     REQUIRE(root);

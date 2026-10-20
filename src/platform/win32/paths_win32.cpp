@@ -79,5 +79,10 @@ std::optional<std::filesystem::path> known_folder(const KNOWNFOLDERID& id) {
 
 std::optional<std::filesystem::path> roaming_app_data_dir() { return known_folder(FOLDERID_RoamingAppData); }
 std::optional<std::filesystem::path> local_app_data_dir() { return known_folder(FOLDERID_LocalAppData); }
+std::optional<std::filesystem::path> minecraft_java_dir() {
+    const auto roaming = roaming_app_data_dir();
+    if (!roaming) return std::nullopt;
+    return *roaming / L".minecraft";
+}
 
 } // namespace bridger::platform

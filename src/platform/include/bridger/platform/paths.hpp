@@ -35,5 +35,9 @@ namespace bridger::platform {
 [[nodiscard]] std::optional<std::filesystem::path> roaming_app_data_dir();
 // The user's local (not roaming) application-data folder (%LOCALAPPDATA%), for caches.
 [[nodiscard]] std::optional<std::filesystem::path> local_app_data_dir();
+// The Minecraft Java launcher's game folder: %APPDATA%\.minecraft on Windows, ~/.minecraft on Linux,
+// ~/Library/Application Support/minecraft on macOS (the launcher's defaults; minecraft.wiki ".minecraft").
+// nullopt if the base folder is unknown; the folder itself may not exist.
+[[nodiscard]] std::optional<std::filesystem::path> minecraft_java_dir();
 
 } // namespace bridger::platform

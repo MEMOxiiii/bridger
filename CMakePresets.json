@@ -107,9 +107,7 @@
       "cacheVariables": {
         "VCPKG_INSTALLED_DIR": "${sourceDir}/build/vcpkg_installed_${hostSystemName}",
         "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tests;benchmarks",
-        "BRIDGER_BUILD_APP": "OFF",
-        "BRIDGER_BUILD_RENDER": "OFF"
+        "VCPKG_MANIFEST_FEATURES": "render;app;tests;benchmarks"
       },
       "condition": {
         "type": "notEquals",
@@ -119,7 +117,7 @@
     },
     {
       "name": "posix-debug",
-      "displayName": "Linux/macOS Debug (command line and tests)",
+      "displayName": "Linux/macOS Debug",
       "inherits": "posix",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
@@ -127,7 +125,7 @@
     },
     {
       "name": "posix-release",
-      "displayName": "Linux/macOS Release (command line and tests)",
+      "displayName": "Linux/macOS Release",
       "inherits": "posix",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"

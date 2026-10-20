@@ -3,6 +3,7 @@
 // double-click: enter fly mode. Deltas are batched to one message per animation frame.
 import { useEffect, useRef } from 'react'
 import { send } from '../bridge'
+import { requestFly } from '../fly'
 import { getState } from '../store'
 
 export function Viewport() {
@@ -27,7 +28,7 @@ export function Viewport() {
       if (!frame) frame = requestAnimationFrame(flush)
     }
     const down = (e: PointerEvent) => {
-      if (!getState().doc) return
+      if (!getState().doc || getState().fly) return // fly mode reads the mouse itself (src/fly.ts)
       const pan = e.button === 1 || e.button === 2 || (e.button === 0 && (e.shiftKey || getState().map))
       mode = pan ? 'pan' : 'orbit'
       el.setPointerCapture(e.pointerId)
@@ -52,7 +53,7 @@ export function Viewport() {
       schedule()
     }
     const dbl = () => {
-      if (getState().doc && !getState().map) send({ type: 'fly', on: true })
+      if (getState().doc && !getState().map) requestFly()
     }
     const menu = (e: Event) => e.preventDefault()
     el.addEventListener('pointerdown', down)

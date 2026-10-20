@@ -77,9 +77,18 @@ if(BRIDGER_BUILD_RENDER)
 endif()
 
 if(BRIDGER_BUILD_APP)
-    find_package(SDL3 CONFIG REQUIRED)
-    find_package(unofficial-webview2 CONFIG REQUIRED)
-    find_package(wil CONFIG REQUIRED)
+    if(WIN32)
+        find_package(SDL3 CONFIG REQUIRED)
+        find_package(unofficial-webview2 CONFIG REQUIRED)
+        find_package(wil CONFIG REQUIRED)
+    elseif(APPLE)
+        enable_language(OBJCXX) # src/app/cocoa/host_cocoa.mm
+    else()
+        # The system's GTK 4 and WebKitGTK 6.0 (docs/adr/0010): never built by vcpkg, never shipped.
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.14)
+        pkg_check_modules(WEBKITGTK REQUIRED IMPORTED_TARGET webkitgtk-6.0)
+    endif()
 endif()
 
 # leveldb-mcpe (git submodule, built by our own CMake file — see third_party/CMakeLists.txt)

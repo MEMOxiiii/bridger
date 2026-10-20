@@ -57,7 +57,7 @@ Result<std::vector<MeshedSection>> mesh_structure(const Structure& java, BlockMo
         stats->non_empty = 0;
         stats->quads = 0;
         for (const MeshedSection& m : out) {
-            stats->non_empty += m.mesh.empty() ? 0 : 1;
+            stats->non_empty += m.mesh.empty() ? 0u : 1u;
             stats->quads += (m.mesh.solid.size() + m.mesh.cutout.size() + m.mesh.translucent.size()) / 4;
         }
         stats->bake_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

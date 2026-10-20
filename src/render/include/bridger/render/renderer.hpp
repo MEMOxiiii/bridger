@@ -3,8 +3,9 @@
 // Vulkan 1.3 renderer (docs/adr/0005): dynamic rendering, one texture array, three passes per
 // frame (solid, cutout, translucent back-to-front), frustum culling per section, fog, a Y slice
 // (hide everything above a height), outline boxes, and an orthographic top-down "map" mode.
-// Three targets: a window surface, an offscreen image (CLI screenshots and tests), or a texture
-// shared with Direct3D 11 (the desktop app composites it under its user interface; docs/adr/0009).
+// Three targets: a window surface, an offscreen image (CLI screenshots, tests, and the desktop app on Linux and
+// macOS, docs/adr/0010), or a texture shared with Direct3D 11 (the Windows desktop app composites it under its user
+// interface; docs/adr/0009).
 // No Vulkan types in this header.
 
 #include <bridger/core/result.hpp>
@@ -92,6 +93,9 @@ public:
 
     // Offscreen target only: the last rendered frame as RGBA8 rows (top to bottom).
     [[nodiscard]] Result<std::vector<u8>> read_pixels();
+    // The same without a copy: a view of the mapped readback buffer, valid until the next render() or resize()
+    // (the desktop app on Linux and macOS hands it to the window system, docs/adr/0010).
+    [[nodiscard]] Result<std::span<const u8>> pixels();
 
     [[nodiscard]] std::string device_name() const;
     [[nodiscard]] u32 width() const noexcept;

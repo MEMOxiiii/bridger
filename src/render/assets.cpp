@@ -69,11 +69,11 @@ std::optional<std::vector<u8>> AssetSource::read(std::string_view path) const {
 }
 
 std::optional<fs::path> AssetSource::find_client_jar(std::string_view version) {
-    const auto app_data = platform::roaming_app_data_dir();
-    if (!app_data) return std::nullopt;
+    const auto game_dir = platform::minecraft_java_dir();
+    if (!game_dir) return std::nullopt;
     auto v = platform::path_from_utf8(version);
     if (!v) return std::nullopt;
-    fs::path jar = *app_data / ".minecraft" / "versions" / *v / *v;
+    fs::path jar = *game_dir / "versions" / *v / *v;
     jar += ".jar";
     std::error_code ec;
     if (!fs::is_regular_file(jar, ec)) return std::nullopt;

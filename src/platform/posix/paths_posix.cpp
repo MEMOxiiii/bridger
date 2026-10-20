@@ -67,4 +67,14 @@ std::optional<std::filesystem::path> local_app_data_dir() {
 #endif
 }
 
+std::optional<std::filesystem::path> minecraft_java_dir() {
+    const auto h = home();
+    if (!h) return std::nullopt;
+#ifdef __APPLE__
+    return *h / "Library" / "Application Support" / "minecraft";
+#else
+    return *h / ".minecraft";
+#endif
+}
+
 } // namespace bridger::platform

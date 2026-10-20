@@ -135,20 +135,26 @@ without a checksum it is refused. The new files are swapped in with rollback; us
 never touched.
 
 **Textures**: when the textures for the 3D preview are missing, the user can press **Download from Mojang**. Then
-(`src/render/asset_download.cpp`, `src/platform/win32/net_win32.cpp`):
+(`src/render/asset_download.cpp`, `src/platform/win32/net_win32.cpp`, `src/platform/posix/net_posix.cpp`):
 
 - Only `https://` URLs on Mojang's download hosts are contacted (`piston-meta.mojang.com`,
   `piston-data.mojang.com`, `launchermeta.mojang.com`, `launcher.mojang.com`); every URL, including those read
   from Mojang's own files, is checked against that list, and redirects to plain http are refused.
 - The version file is checked against the SHA-1 in Mojang's manifest, and the client jar against the SHA-1 and size
   in the version file. Sizes are capped (manifest 8 MB, version file 4 MB, jar 256 MB).
-- The jar is saved with the atomic writer to `%APPDATA%/Bridger/assets/<version>/client.jar` after it opened as a
+- The jar is saved with the atomic writer to `<application data>/Bridger/assets/<version>/client.jar`
+  (`%APPDATA%` on Windows, `~/.config` on Linux, `~/Library/Application Support` on macOS) after it opened as a
   client jar with block models. `.minecraft` is never written. The jar is read as a zip for textures and models
   and is **never executed**.
 - Cancelling stops the download; nothing is saved.
 
 Windows' own components do the work (WinHTTP for HTTPS, BCrypt for SHA-1 and SHA-256); no third-party networking
-code is shipped.
+code is shipped. On Linux and macOS the system's libcurl does HTTPS (loaded at run time from `libcurl.so.4` or
+`/usr/lib/libcurl.4.dylib`, with certificate checks left at libcurl's defaults; only `https` is allowed, for the first
+request and every redirect), and Bridger's own SHA-1/SHA-256 code (`src/platform/hash.cpp`, tested against the NIST
+examples) does the hashing. Without libcurl the two downloads report that and nothing else changes. The desktop app on
+Linux and macOS checks for updates the same way but only offers the release page; it never replaces its own files
+(`docs/adr/0010`).
 
 ## 7. Untrusted input
 

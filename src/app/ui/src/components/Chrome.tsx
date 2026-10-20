@@ -2,6 +2,7 @@
 // stats HUD.
 import { useEffect, useRef, useState } from 'react'
 import { send } from '../bridge'
+import { requestFly } from '../fly'
 import { exitPreview, openFile, openFolder } from '../actions'
 import { formatMeta } from '../formats'
 import { setState, useStore } from '../store'
@@ -115,7 +116,7 @@ export function Dock() {
             <Icon name="orbit" />
             <span className="dock-label">Orbit</span>
           </button>
-          <button className={`dock-btn ${fly ? 'is-active' : ''}`} onClick={() => send({ type: 'fly', on: true })} aria-pressed={fly} title="Fly (F)">
+          <button className={`dock-btn ${fly ? 'is-active' : ''}`} onClick={() => requestFly()} aria-pressed={fly} title="Fly (F)">
             <Icon name="fly" />
             <span className="dock-label">Fly</span>
           </button>

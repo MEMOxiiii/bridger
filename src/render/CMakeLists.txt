@@ -5,8 +5,8 @@ bridger_add_module(render
 
 target_include_directories(bridger_render SYSTEM PRIVATE ${Stb_INCLUDE_DIR})
 # Vulkan structs are initialised as `VkFoo info{VK_STRUCTURE_TYPE_FOO}` (the rest zeroed on purpose);
-# clang's -Wmissing-field-initializers flags every one of them.
-target_compile_options(bridger_render PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-missing-field-initializers>)
+# clang's and GCC's -Wmissing-field-initializers flag every one of them.
+target_compile_options(bridger_render PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-Wno-missing-field-initializers>)
 # GLM: Vulkan depth range (0..1).
 target_compile_definitions(bridger_render PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 

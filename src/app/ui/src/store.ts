@@ -1,6 +1,7 @@
 // App state: one small external store (useSyncExternalStore), fed by bridge messages.
 import { useSyncExternalStore } from 'react'
 import { onMessage, type Assets, type Doc, type Settings, type Stats, type Summary } from './bridge'
+import { flyChanged, setFlyInput } from './fly'
 
 export type ConvertPhase = 'setup' | 'running' | 'done' | 'failed'
 
@@ -133,6 +134,7 @@ export function useStore<T>(select: (s: State) => T): T {
 onMessage((m) => {
   switch (m.type) {
     case 'hello':
+      setFlyInput(m.fly_input)
       setState({ connected: true, version: m.version, gpu: m.gpu, assets: m.assets, settings: m.settings })
       break
     case 'settings':
@@ -161,6 +163,7 @@ onMessage((m) => {
       break
     }
     case 'fly':
+      flyChanged(m.on)
       setState({ fly: m.on, map: m.on ? false : state.map })
       break
     case 'drop':

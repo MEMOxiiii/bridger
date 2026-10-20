@@ -21,7 +21,7 @@ env:
   MCDATA_COMMIT: "dd01127457231e7da629d645b3c6738068018eb0"
 
 jobs:
-  # The command line for Linux and macOS (no desktop app there yet): bridger-<version>-<os>.tar.gz + .sha256.
+  # Linux and macOS: the desktop app and the command line (docs/adr/0010), bridger-<version>-<os>.tar.gz + .sha256.
   posix:
     name: package ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -37,15 +37,27 @@ jobs:
       # macOS: run on 13.3 and later (the oldest with the C++20 library features Bridger uses), dependencies included.
       MACOSX_DEPLOYMENT_TARGET: "13.3"
       VCPKG_KEEP_ENV_VARS: MACOSX_DEPLOYMENT_TARGET
+      # Vulkan for the macOS app (shipped in Bridger.app); the hash is GitHub's digest of the release asset.
+      MOLTENVK_VERSION: "v1.4.2"
+      MOLTENVK_SHA256: "f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/app/ui/package-lock.json
+
       - name: Install build tools
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip unzip pkg-config
+            sudo apt-get update -q
+            sudo apt-get install -y -q ninja-build zip unzip pkg-config libgtk-4-dev libwebkitgtk-6.0-dev \
+              mesa-vulkan-drivers xvfb xauth dbus-x11
           else
             brew install ninja pkg-config
           fi
@@ -68,7 +80,7 @@ jobs:
 
       - name: Configure, build, test
         run: |
-          # Linux: libstdc++ and libgcc linked in, so the binary needs only glibc.
+          # Linux: libstdc++ and libgcc linked in, so the binaries need only glibc (and GTK/WebKitGTK for the app).
           extra=()
           if [ "$RUNNER_OS" = "Linux" ]; then extra=("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"); fi
           cmake --preset posix-release "${extra[@]}"
@@ -80,17 +92,47 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           name="bridger-$version-${{ matrix.name }}"
           dir="dist/$name"
+          bin=build/posix-release/bin
           mkdir -p "$dir/licenses"
-          cp build/posix-release/bin/bridger "$dir/"
+          cp "$bin/bridger" "$dir/"
           strip "$dir/bridger"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp "$bin/bridger-gui" "$dir/"
+            strip "$dir/bridger-gui"
+          else
+            # Bridger.app with MoltenVK inside (Contents/Frameworks, loaded directly; docs/adr/0010).
+            cp -R "$bin/Bridger.app" "$dir/"
+            curl -sSfL "https://github.com/KhronosGroup/MoltenVK/releases/download/$MOLTENVK_VERSION/MoltenVK-macos.tar" -o moltenvk.tar
+            echo "$MOLTENVK_SHA256  moltenvk.tar" | shasum -a 256 -c -
+            tar -xf moltenvk.tar MoltenVK/LICENSE MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib
+            mkdir -p "$dir/Bridger.app/Contents/Frameworks"
+            cp MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib "$dir/Bridger.app/Contents/Frameworks/"
+            cp MoltenVK/LICENSE "$dir/licenses/moltenvk.txt"
+            strip -x "$dir/Bridger.app/Contents/MacOS/Bridger"
+            # Not signed with a developer identity (docs/adr/0010): an ad-hoc signature, which Apple Silicon requires.
+            codesign --force --deep --sign - "$dir/Bridger.app"
+            codesign --force --sign - "$dir/bridger"
+          fi
           cp README.md docs/CHANGELOG.md docs/THIRD_PARTY.md "$dir/"
           cp LICENSE "$dir/licenses/bridger-MPL-2.0.txt"
           share=$(dirname "$(ls -d build/vcpkg_installed_*/*/share/zlib | head -1)")
-          for port in libdeflate minizip-ng zlib tbb tl-expected xxhash spdlog fmt cli11; do
+          for port in libdeflate minizip-ng zlib tbb tl-expected xxhash spdlog fmt cli11 \
+                      glm volk vk-bootstrap vulkan-memory-allocator stb nlohmann-json; do
             [ -f "$share/$port/copyright" ] || { echo "missing license for $port"; exit 1; }
             cp "$share/$port/copyright" "$dir/licenses/$port.txt"
           done
           cp third_party/leveldb-mcpe/LICENSE "$dir/licenses/leveldb-mcpe.txt"
+          # The app's embedded web interface (docs/THIRD_PARTY.md, "Web user interface").
+          npm=src/app/ui/node_modules
+          for pkg in react react-dom scheduler lenis @fontsource-variable/inter @fontsource/jetbrains-mono; do
+            [ -f "$npm/$pkg/LICENSE" ] || { echo "missing license for $pkg"; exit 1; }
+            cp "$npm/$pkg/LICENSE" "$dir/licenses/npm-$(echo "$pkg" | tr '@/' '--' | sed 's/^-*//').txt"
+          done
+          # GSAP ships no license file; its license is the Standard "no charge" license, published online.
+          { echo "GSAP $(node -p "require('./$npm/gsap/package.json').version") and @gsap/react $(node -p "require('./$npm/@gsap/react/package.json').version")"
+            echo "Copyright (c) 2008-2026, GreenSock / Webflow. All rights reserved."
+            echo "Used under the GSAP Standard 'no charge' license: https://gsap.com/standard-license"
+          } > "$dir/licenses/npm-gsap.txt"
           cp tools/mapgen/sources/geyser-mappings/LICENSE "$dir/licenses/geysermc-mappings.txt"
           curl -sSfL "https://raw.githubusercontent.com/GeyserMC/Geyser/$GEYSER_COMMIT/LICENSE" -o "$dir/licenses/geysermc-geyser.txt"
           # minecraft-data has no LICENSE file; its README states the license. Ship that section verbatim.
@@ -101,15 +143,32 @@ jobs:
           grep -q '## License' "$dir/licenses/minecraft-data.txt" || { echo "minecraft-data README has no License section"; exit 1; }
           "$dir/bridger" --version
           if [ "$RUNNER_OS" = "Linux" ]; then
-            ldd "$dir/bridger"
-            ! ldd "$dir/bridger" | grep -q 'libstdc++' || { echo "libstdc++ must be linked in"; exit 1; }
-            echo "newest glibc symbol: $(objdump -T "$dir/bridger" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)"
+            "$dir/bridger-gui" --version
+            for exe in bridger bridger-gui; do
+              # Direct dependencies only (WebKit itself brings its own libstdc++ to the app's process).
+              ! readelf -d "$dir/$exe" | grep NEEDED | grep -q 'libstdc++' || { echo "libstdc++ must be linked into $exe"; exit 1; }
+              echo "$exe: newest glibc symbol $(objdump -T "$dir/$exe" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)"
+            done
           else
-            otool -L "$dir/bridger"
+            "$dir/Bridger.app/Contents/MacOS/Bridger" --version
+            otool -L "$dir/bridger" "$dir/Bridger.app/Contents/MacOS/Bridger"
             vtool -show-build "$dir/bridger" | grep -E 'minos|platform'
           fi
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          echo "DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Smoke test the packaged app
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          file="$PWD/tests/data/ingame/containers.schem"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 # WebKit's sandbox needs user namespaces
+            timeout 300 xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- "$DIR/bridger-gui" --smoke-test=1 "$file"
+          else
+            timeout 300 "$DIR/Bridger.app/Contents/MacOS/Bridger" --smoke-test=1 "$file"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

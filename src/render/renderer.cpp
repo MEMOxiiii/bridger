@@ -6,10 +6,13 @@
 
 #include "external_image.hpp"
 
+#include <bridger/platform/library.hpp>
+#include <bridger/platform/process.hpp>
+
 #include <volk.h>
 
 #include <VkBootstrap.h>
-#include <vma/vk_mem_alloc.h>
+#include "vma.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -174,6 +177,9 @@ struct Renderer::Impl {
 
     std::unordered_map<u64, GpuSection> sections;
     std::vector<PendingCopy> pending;
+    // Section buffers removed since the last submit. Frames before it may still draw from them, so they join the next
+    // submitted frame's garbage and are freed once that frame has finished on the GPU (queue order covers the rest).
+    std::vector<Buffer> retired;
     std::vector<OutlineBox> outlines;
     std::array<Frame, kFramesInFlight> frames{};
     u32 frame = 0;
@@ -475,6 +481,8 @@ struct Renderer::Impl {
         for (auto& [k, s] : sections) free_buffer(s.vertices);
         sections.clear();
         for (PendingCopy& p : pending) free_buffer(p.staging);
+        for (Buffer& b : retired) free_buffer(b);
+        retired.clear();
         pending.clear();
         for (Frame& f : frames) {
             for (Buffer& b : f.garbage) free_buffer(b);
@@ -502,11 +510,27 @@ struct Renderer::Impl {
         instance = {};
     }
 
+    // The Vulkan library: the system loader (vulkan-1.dll, libvulkan.so.1). On macOS, MoltenVK from the app bundle
+    // (Contents/Frameworks, docs/adr/0010) is tried first; it exports the Vulkan entry points itself.
+    static Status load_vulkan() {
+#ifdef __APPLE__
+        if (const auto exe = platform::executable_path()) {
+            const std::filesystem::path dir = exe->parent_path();
+            for (const auto& lib : {dir / ".." / "Frameworks" / "libMoltenVK.dylib", dir / "libMoltenVK.dylib"})
+                if (void* gipa = platform::load_library_symbol(lib, "vkGetInstanceProcAddr")) {
+                    volkInitializeCustom(reinterpret_cast<PFN_vkGetInstanceProcAddr>(gipa));
+                    return {};
+                }
+        }
+#endif
+        return vk_check(volkInitialize(), "loading the Vulkan driver (vulkan-1.dll, libvulkan.so.1)");
+    }
+
     Status init(const RendererConfig& cfg) {
         config = cfg;
         shared = cfg.shared_target;
         offscreen = !cfg.make_surface && !shared;
-        BRIDGER_TRY_STATUS(vk_check(volkInitialize(), "loading the Vulkan driver (vulkan-1.dll)"));
+        BRIDGER_TRY_STATUS(load_vulkan());
 
         vkb::InstanceBuilder ib(vkGetInstanceProcAddr);
         ib.set_app_name("Bridger").set_engine_name("Bridger").require_api_version(1, 3, 0);
@@ -523,9 +547,10 @@ struct Renderer::Impl {
         VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
         f13.dynamicRendering = VK_TRUE;
         f13.synchronization2 = VK_TRUE;
+        f13.shaderDemoteToHelperInvocation = VK_TRUE; // `discard` in the shaders (SPIR-V 1.6); required in Vulkan 1.3
         vkb::PhysicalDeviceSelector sel = !cfg.make_surface ? vkb::PhysicalDeviceSelector(instance) : vkb::PhysicalDeviceSelector(instance, surface);
         sel.set_minimum_version(1, 3).set_required_features_13(f13).prefer_gpu_device_type(vkb::PreferredDeviceType::discrete);
-        if (!cfg.make_surface) sel.defer_surface_initialization();
+        if (!cfg.make_surface) sel.require_present(false); // headless: no swapchain extension (it needs VK_KHR_surface)
         if (shared) sel.add_required_extension(detail::kExternalMemoryExtension);
         auto phys = sel.select();
         BRIDGER_TRY_STATUS(vkb_check(phys, "selecting a GPU"));
@@ -723,6 +748,7 @@ struct Renderer::Impl {
         BRIDGER_TRY(Buffer staging, make_buffer(bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true));
         auto* dst = static_cast<u8*>(staging.mapped);
         for (const auto* part : {&mesh.solid, &mesh.cutout, &mesh.translucent}) {
+            if (part->empty()) continue; // data() may be null: memcpy from null is undefined even for 0 bytes
             std::memcpy(dst, part->data(), part->size() * sizeof(Vertex));
             dst += part->size() * sizeof(Vertex);
         }
@@ -734,8 +760,23 @@ struct Renderer::Impl {
     void remove_section(glm::ivec3 origin) {
         const auto it = sections.find(section_key(origin));
         if (it == sections.end()) return;
-        frames[frame].garbage.push_back(it->second.vertices);
+        retire(it->second.vertices);
         sections.erase(it);
+    }
+
+    void retire(const Buffer& vertices) {
+        // An upload into it that was never recorded is dropped; the GPU has not seen its staging buffer.
+        std::erase_if(pending, [&](PendingCopy& p) {
+            if (p.dst != vertices.buffer) return false;
+            free_buffer(p.staging);
+            return true;
+        });
+        retired.push_back(vertices);
+    }
+
+    void clear_sections() {
+        for (auto& [k, sec] : sections) retire(sec.vertices);
+        sections.clear();
     }
 
     Result<FrameStats> render(const Camera& camera, const FrameSettings& fs) {
@@ -972,6 +1013,8 @@ struct Renderer::Impl {
             si.pSignalSemaphoreInfos = &signal;
         }
         BRIDGER_TRY_STATUS(vk_check(vkQueueSubmit2(queue, 1, &si, f.fence), "vkQueueSubmit2"));
+        f.garbage.insert(f.garbage.end(), retired.begin(), retired.end()); // freed after this frame (see `retired`)
+        retired.clear();
         if (shared) {
             vkWaitForFences(dev(), 1, &f.fence, VK_TRUE, UINT64_MAX); // Direct3D reads the image next
         } else if (swap) {
@@ -1006,13 +1049,17 @@ struct Renderer::Impl {
         return create_targets(w, h);
     }
 
-    Result<std::vector<u8>> read_pixels() {
-        if (!offscreen) return make_error(ErrorCode::InvalidArgument, "read_pixels needs the offscreen target");
+    Result<std::span<const u8>> pixels() {
+        if (!offscreen) return make_error(ErrorCode::InvalidArgument, "reading pixels needs the offscreen target");
         if (!readback_ready) return make_error(ErrorCode::InvalidArgument, "no frame rendered yet");
         vkWaitForFences(dev(), 1, &frames[last_frame].fence, VK_TRUE, UINT64_MAX);
         vmaInvalidateAllocation(vma, readback.alloc, 0, VK_WHOLE_SIZE);
-        const auto* p = static_cast<const u8*>(readback.mapped);
-        return std::vector<u8>(p, p + static_cast<usize>(width) * height * 4);
+        return std::span<const u8>(static_cast<const u8*>(readback.mapped), static_cast<usize>(width) * height * 4);
+    }
+
+    Result<std::vector<u8>> read_pixels() {
+        BRIDGER_TRY(const std::span<const u8> p, pixels());
+        return std::vector<u8>(p.begin(), p.end());
     }
 };
 
@@ -1030,10 +1077,7 @@ Result<Renderer> Renderer::create(const RendererConfig& config) {
 Status Renderer::upload_textures(std::span<const u32> rgba, u32 layers) { return impl_->upload_textures(rgba, layers); }
 Status Renderer::upload_section(glm::ivec3 origin, const SectionMesh& mesh) { return impl_->upload_section(origin, mesh); }
 void Renderer::remove_section(glm::ivec3 origin) { impl_->remove_section(origin); }
-void Renderer::clear_sections() {
-    for (auto& [k, s] : impl_->sections) impl_->frames[impl_->frame].garbage.push_back(s.vertices);
-    impl_->sections.clear();
-}
+void Renderer::clear_sections() { impl_->clear_sections(); }
 usize Renderer::section_count() const noexcept { return impl_->sections.size(); }
 u64 Renderer::gpu_bytes() const noexcept {
     u64 n = 0;
@@ -1046,6 +1090,7 @@ Status Renderer::set_shared_target(void* handle, u32 w, u32 h) { return impl_->s
 std::optional<u64> Renderer::adapter_luid() const { return impl_->adapter_luid(); }
 Result<FrameStats> Renderer::render(const Camera& camera, const FrameSettings& settings) { return impl_->render(camera, settings); }
 Result<std::vector<u8>> Renderer::read_pixels() { return impl_->read_pixels(); }
+Result<std::span<const u8>> Renderer::pixels() { return impl_->pixels(); }
 std::string Renderer::device_name() const { return impl_->physical.properties.deviceName; }
 u32 Renderer::width() const noexcept { return impl_->width; }
 u32 Renderer::height() const noexcept { return impl_->height; }

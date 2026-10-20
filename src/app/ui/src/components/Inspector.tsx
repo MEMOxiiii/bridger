@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { send, type Doc, type Report } from '../bridge'
+import { requestFly } from '../fly'
 import { formatMeta, issueLabel, issueTotal } from '../formats'
 import { Counter, dur, gsap, SmoothScroll, useGSAP } from '../motion'
 import { setState, useStore } from '../store'
@@ -144,7 +145,7 @@ function ViewTab({ doc }: { doc: Doc }) {
     send({ type: 'view', slice: v })
   }
   const setMode = (mode: 'orbit' | 'fly' | 'map') => {
-    if (mode === 'fly') return send({ type: 'fly', on: true })
+    if (mode === 'fly') return requestFly()
     const m = mode === 'map'
     setState({ map: m })
     send({ type: 'view', map: m })

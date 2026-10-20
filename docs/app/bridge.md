@@ -1,8 +1,13 @@
-# Desktop app bridge: messages between the UI and `bridger-gui.exe`
+# Desktop app bridge: messages between the UI and the desktop app
 
 The web UI (`src/app/ui`) and the native app (`src/app/app.cpp`) exchange JSON objects with a `type` field
-(`docs/adr/0009-hybrid-desktop-ui.md`). TypeScript types: `src/app/ui/src/bridge.ts`. Paths are UTF-8 strings.
-Unknown types and malformed messages are ignored on both sides.
+(`docs/adr/0009-hybrid-desktop-ui.md`, `docs/adr/0010-desktop-app-on-linux-and-macos.md`). TypeScript types:
+`src/app/ui/src/bridge.ts`. Paths are UTF-8 strings. Unknown types and malformed messages are ignored on both sides.
+
+The channel is `window.chrome.webview` on every system: WebView2 provides it on Windows; on Linux (WebKitGTK) and
+macOS (WKWebView) the host injects a script at document start that provides it over WebKit's message handler
+(`src/app/webkit_bridge.hpp`), and the page is served from memory under `bridger://app/` instead of
+`https://bridger.local/`.
 
 ## UI → app
 
@@ -14,7 +19,9 @@ Unknown types and malformed messages are ignored on both sides.
 | `zoom` | `delta` (wheel steps, > 0 = in) | Zoom; in fly mode changes the speed. |
 | `reset_camera` | | Animate back to the whole document. |
 | `preview` | `on` | Show or hide the 3D preview. The app renders and streams worlds only while it is on; the file page covers the window otherwise. |
-| `fly` | `on` | Enter fly mode, in the preview only (the app leaves it on Esc or when the window loses focus). |
+| `fly` | `on` | Enter fly mode, in the preview only (the app leaves it on Esc or when the window loses focus). With `hello.fly_input` `"page"` the page also sends `on: false` (Esc, lost pointer lock, lost focus). |
+| `look` | `dx`, `dy` (pixels) | Fly mode driven by the page (`hello.fly_input` `"page"`, `src/app/ui/src/fly.ts`): mouse movement under pointer lock, or while a button is held when the lock is refused. |
+| `fly_keys` | `keys` (`forward`, `back`, `left`, `right`, `up`, `down`, `fast`: bool) | The same mode: the movement keys held now, read by `KeyboardEvent.code` (W, S, A, D, Space, Shift, left Ctrl), sent when they change. |
 | `view` | `map?` (bool), `slice?` (number or `null`) | Top-down map; hide blocks at and above `slice`. |
 | `focus` | `positions` ([[x,y,z], ...]) | Outline these blocks and fly the camera to them (report highlights). |
 | `clear_focus` | | Remove the outlines. |
@@ -40,7 +47,7 @@ Unknown types and malformed messages are ignored on both sides.
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `hello` | `version`, `gpu`, `assets`, `settings` | Answer to `ready`. `assets.viewer` is false when the computer has no usable GPU for the 3D preview (`assets.viewer_error` says why); opening and converting still work and `preview` is ignored. `BRIDGER_NO_VIEWER=1` simulates it. `assets.can_download`: textures missing and the user may fetch them from Mojang; `assets.downloaded`: the loaded jar is one Bridger downloaded. `BRIDGER_SKIP_LAUNCHER_JAR=1` (testing) ignores the launcher's jar. |
+| `hello` | `version`, `gpu`, `assets`, `settings`, `platform` (`windows`/`linux`/`macos`), `fly_input` (`native`/`page`) | Answer to `ready`. `fly_input` `native`: the app captures the mouse and reads the keys in fly mode (Windows); `page`: the page does, with pointer lock (`look`, `fly_keys`). `assets.viewer` is false when the computer has no usable GPU for the 3D preview (`assets.viewer_error` says why); opening and converting still work and `preview` is ignored. `BRIDGER_NO_VIEWER=1` simulates it. `assets.can_download`: textures missing and the user may fetch them from Mojang; `assets.downloaded`: the loaded jar is one Bridger downloaded. `BRIDGER_SKIP_LAUNCHER_JAR=1` (testing) ignores the launcher's jar. |
 | `settings` | `settings`, `assets` | Settings or assets changed. |
 | `loading` | `name`, `step`, `fraction` | Opening progress. |
 | `opened` | `doc`, `settings` | A document is open; the UI shows its file page. `doc`: `kind` (`structure`/`world`), `path`, `name`, `format`, `edition`, `size`, `blocks`, `block_entities`, `entities`, `data_version`, `source_version` {`edition`, `name`, `detail`, `exact`, `text`} (which game version saved it), `chunks`, `spawn`, `seed`, `warnings`, `report`, `targets` (each {`id`, `ext`, `edition`, `description`, `versions`: [{`name`, `checked` (`game`/`data`)}], newest first}). |
@@ -49,6 +56,7 @@ Unknown types and malformed messages are ignored on both sides.
 | `stats` | `fps`, `frame_ms`, `sections`, `quads`, `gpu_mb`, `chunks_loaded?`, `chunks_distant?`, `chunks_total?`, `chunks_pending?` | Twice a second. `chunks_distant`: columns shown as distant terrain. `fps` counts rendered frames: an idle viewer renders none. |
 | `fly` | `on` | Fly mode changed. |
 | `drop` | `state` (`enter`/`leave`) | Files dragged over the window (the app opens what is dropped). |
+| `show_preview` | | Only from `--smoke-test`: open the 3D preview as the "Open the 3D preview" button would. |
 | `output_picked` | `path` or `null` | Save dialog result. |
 | `into_world_picked` | `path` | |
 | `convert_progress` | `fraction`, `step` | |
@@ -58,7 +66,7 @@ Unknown types and malformed messages are ignored on both sides.
 | `textures_progress` | `fraction`, `step` | Texture download progress. |
 | `textures_done` | | The jar is saved and loaded (a `settings` message with the new `assets` comes first). |
 | `textures_failed` | `message`, `cancelled` | |
-| `update_available` | `version`, `current`, `notes`, `size`, `installable` | A newer release was found (`docs/app/updates.md`); `installable` is false when it has no checksum (then only the release page is offered). |
+| `update_available` | `version`, `current`, `notes`, `size`, `installable` | A newer release was found (`docs/app/updates.md`); `installable` is false when it has no checksum, and always on Linux and macOS (then only the release page is offered). |
 | `update_none` | `current` | "Check now": Bridger is up to date. |
 | `update_progress` | `fraction`, `step` | Downloading, checking or unpacking the update. |
 | `update_ready` | `version` | The update is verified and unpacked; it is installed on "Restart now" or when the app closes. |

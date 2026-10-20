@@ -41,9 +41,13 @@ and unzip it anywhere. No installer; the Visual C++ runtime is included.
   Windows 10). The 3D preview needs a GPU with Vulkan 1.3; without one the app still opens and converts files.
 - **`bridger.exe`** — the command line, for scripts and batch jobs.
 
-**Linux and macOS (command line only):** `bridger-<version>-linux-x64.tar.gz` (glibc 2.38 or newer, e.g. Ubuntu
-24.04) or `bridger-<version>-macos-arm64.tar.gz` (Apple Silicon, macOS 13.3 or newer). Unpack and run `./bridger`.
-The macOS build is not signed: run `xattr -d com.apple.quarantine bridger` once before the first start.
+**Linux:** `bridger-<version>-linux-x64.tar.gz` holds `bridger-gui` (the desktop app) and `bridger`. Needs glibc 2.38
+or newer plus GTK 4.14 and WebKitGTK 6.0 from your distribution (Ubuntu 24.04: `sudo apt install libgtk-4-1
+libwebkitgtk-6.0-4`; Fedora: `gtk4 webkitgtk6.0`). The 3D preview needs Vulkan 1.3 (Mesa or your GPU vendor's driver).
+
+**macOS (Apple Silicon, 13.3 or newer):** `bridger-<version>-macos-arm64.tar.gz` holds `Bridger.app` (with MoltenVK
+inside for the 3D preview) and `bridger`. Neither is signed by Apple: the first time, right-click `Bridger.app` →
+Open, or run `xattr -dr com.apple.quarantine Bridger.app bridger`.
 
 ## Desktop app
 
@@ -61,8 +65,9 @@ The macOS build is not signed: run `xattr -d com.apple.quarantine bridger` once 
    position) and where to save. Progress can be cancelled; nothing is written then. The report links every
    approximation to its blocks in 3D.
 
-The 3D preview uses the textures of your own Minecraft Java 26.3 installation
-(`%APPDATA%/.minecraft/versions/26.3/26.3.jar`, or a client jar you choose in Settings) plus any resource packs you
+The 3D preview uses the textures of your own Minecraft Java 26.3 installation (`.minecraft/versions/26.3/26.3.jar`
+in the launcher's folder: `%APPDATA%` on Windows, your home folder on Linux, `~/Library/Application Support/minecraft`
+on macOS; or a client jar you choose in Settings) plus any resource packs you
 add. Without Minecraft Java, the app offers to download that file (about 40 MB) from Mojang's official servers, only
 when you ask, verified against Mojang's published hash. Converting works without any of it.
 
@@ -149,8 +154,9 @@ Against [Chunker](https://github.com/HiveGamesOSS/Chunker) 1.21.0 converting the
   are listed in the report by type. The single-player player converts (inventory, armor, position); a server's
   `playerdata` is not read. Text formatting (colours, bold) is reduced to plain text.
 - Bedrock-only blocks have no Java equivalent: they are replaced and reported.
-- One Java and one Bedrock version at a time. The desktop app and `bridger render` are Windows x64 only; the
-  command line also runs on Linux x64 and Apple Silicon Macs.
+- One Java and one Bedrock version at a time. The app and the command line run on Windows x64, Linux x64 and Apple
+  Silicon Macs. The Linux and macOS apps check for updates but update by download (no self-install); the macOS app has
+  had automated checks only so far (`docs/testing.md`).
 
 ## Building from source
 
@@ -172,8 +178,9 @@ ctest --preset msvc-release
 The first configure builds every dependency with vcpkg, which takes a while. Other presets: `msvc-debug`,
 `msvc-asan`, `clangcl-release`, `clangcl-fuzz`.
 
-**Linux and macOS** (command line only): GCC 13+ or Apple Clang 16+, CMake 3.28+, Ninja, `zip`, `unzip`,
-`pkg-config` and vcpkg at the same tag.
+**Linux and macOS:** GCC 13+ or Apple Clang 16+, CMake 3.28+, Ninja, `zip`, `unzip`, `pkg-config`, Node.js 22+ and
+vcpkg at the same tag; on Linux also the GTK 4 and WebKitGTK 6.0 development packages (Ubuntu 24.04:
+`sudo apt install libgtk-4-dev libwebkitgtk-6.0-dev`).
 
 ```sh
 git clone --recursive https://github.com/MEMOxiiii/bridger.git
@@ -183,6 +190,7 @@ cmake --preset posix-release
 cmake --build --preset posix-release
 ctest --preset posix-release
 build/posix-release/bin/bridger --help
+build/posix-release/bin/bridger-gui        # macOS: open build/posix-release/bin/Bridger.app
 ```
 
 ## Documentation

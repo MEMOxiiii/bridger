@@ -46,6 +46,9 @@ outside the program folder (`%APPDATA%/Bridger`) and are never touched by an upd
 
 ## Limits
 
+- Linux and macOS (`docs/adr/0010`): the check, the notes and "skip this version" work the same way, but the card
+  offers the release page instead of installing (`update::kSelfInstall` is false there): a system's GTK/WebKit and an
+  app bundle in `/Applications` are not folders Bridger should rewrite itself.
 - The program folder must be writable (the portable zip unpacked somewhere the user owns). Where it is not (for
   example under `Program Files`), the download step fails with that message and the card offers the release page.
 - The new program is not signed; Windows SmartScreen may ask once when it first runs, as with a manual download.

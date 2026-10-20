@@ -5,6 +5,7 @@
 | Layer | Where | Runs in CI |
 |---|---|---|
 | Unit tests (Catch2) | `tests/unit/<module>/` | yes: `msvc-asan`, `msvc-release`, `clangcl-release`; Ubuntu `posix-release` and `posix-asan`, macOS `posix-release` |
+| App smoke test (`bridger-gui --smoke-test`) | `src/app/app.cpp` | yes: Ubuntu (Xvfb, llvmpipe) and macOS, in CI and in the release job |
 | Golden tests | `tests/golden/` + inputs in `tests/data/` | yes (from Phase 2) |
 | Round-trip tests | `tests/roundtrip/` | yes (from Phase 6) |
 | Integration (large real worlds) | `tests/integration/`, path in `BRIDGER_INTEGRATION_DATA` | no, local only |
@@ -176,6 +177,19 @@ Run `bridger-gui.exe` from the release zip on a machine with Minecraft Java 26.3
 | 18 | Same edition: a 26.3 Java world converted to a Java 1.19.4 world opens in 1.19.4 with cherry wood as birch and a crafter as a dropper with its items; a `.mcworld` converted to 1.20.0 and back to 26.50 opens with every block intact. ⚠ Bedrock "unknown" placeholder: a world with cherry planks written for 1.19.80 still shows cherry planks after the current Bedrock opens it (the kept block comes back). |
 | 20 | Entities and player: a Java world with item frames (one holding a map, one rotated), glow item frames and paintings of every size on all four walls converted to Bedrock: frames show their items at the same rotation, paintings hang on the same blocks; back to Java the same. The single-player player spawns where they were, with their inventory, armor and offhand. ⚠ |
 | 19 | Dimensions: a Java world with a built-up Nether and End converted to Bedrock: going through a Nether portal and the End portal reaches the converted builds (not new terrain), Nether biomes (crimson forest, soul sand valley) look right, nothing is missing below y 128 in the Nether. The `.mcworld` converted back to Java opens with the same Nether and End. ⚠ |
+
+### Linux and macOS desktop app (ADR 0010)
+
+Automated on every CI run and in the release job: `bridger-gui --smoke-test=1 tests/data/ingame/containers.schem`
+starts the app (Linux under Xvfb with Mesa's software Vulkan, macOS on the runner), waits for the interface, opens the
+3D preview and draws a frame, then exits with 0 (`App::RunOptions::smoke_test`). It proves the window, the web view,
+the `chrome.webview` channel, the scheme handler and the renderer path; it does not click anything.
+
+Checked by hand so far: Linux (Ubuntu 24.04 in WSLg, llvmpipe, 2026-10-20): the file page, the 3D preview of
+`containers.schem` with the launcher's textures found in `~/.minecraft`, a Java world streaming, the window picture
+taken by the app (`BRIDGER_SMOKE_SCREENSHOT`). Not yet checked by a person: mouse and keyboard input (orbit, fly with
+pointer lock, Esc), file dialogs, drag and drop, "Show in folder" on Linux; **everything on macOS** (only built and
+smoke-tested by CI). Items 1–16 of the checklist above apply to both systems.
 
 ### Procedure
 

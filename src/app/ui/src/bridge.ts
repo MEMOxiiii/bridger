@@ -111,7 +111,15 @@ export interface Summary {
 }
 
 export type Incoming =
-  | { type: 'hello'; version: string; gpu: string; assets: Assets; settings: Settings }
+  | {
+      type: 'hello'
+      version: string
+      gpu: string
+      assets: Assets
+      settings: Settings
+      platform?: 'windows' | 'linux' | 'macos'
+      fly_input?: 'native' | 'page' // who reads the mouse and keys in fly mode (src/fly.ts)
+    }
   | { type: 'settings'; settings: Settings; assets: Assets }
   | { type: 'loading'; name: string; step: string; fraction: number }
   | { type: 'opened'; doc: Doc; settings: Settings }
@@ -120,6 +128,7 @@ export type Incoming =
   | { type: 'stats' } & Stats
   | { type: 'fly'; on: boolean }
   | { type: 'drop'; state: 'enter' | 'leave' }
+  | { type: 'show_preview' } // bridger-gui --smoke-test: open the 3D preview without a click
   | { type: 'output_picked'; path: string | null }
   | { type: 'into_world_picked'; path: string }
   | { type: 'convert_progress'; fraction: number; step: string }
@@ -155,6 +164,8 @@ export type Outgoing =
   | { type: 'zoom'; delta: number }
   | { type: 'reset_camera' }
   | { type: 'fly'; on: boolean }
+  | { type: 'look'; dx: number; dy: number }
+  | { type: 'fly_keys'; keys: Record<string, boolean> }
   | { type: 'preview'; on: boolean }
   | { type: 'view'; map?: boolean; slice?: number | null }
   | { type: 'focus'; positions: [number, number, number][] }
