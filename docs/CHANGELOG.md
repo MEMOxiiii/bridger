@@ -5,6 +5,8 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-21
+
 ### Added
 
 - The desktop app on Linux and macOS (`docs/adr/0010`): the same interface and 3D preview as on Windows, in a GTK 4 +
@@ -21,6 +23,14 @@ versions follow the release plan in `docs/release.md`.
   still queued, and a removed section's buffer could be freed while the previous frame still drew from it (found by
   the Vulkan validation layers; a crash on Mesa's software driver). The shaders' `discard` now has the Vulkan 1.3
   feature it needs enabled, and offscreen rendering no longer enables the swapchain extension.
+
+### Known limitations
+
+- Linux: needs GTK 4.14+ and WebKitGTK 6.0 from the distribution (Ubuntu 24.04, Debian 13, Fedora 40 and later). Mouse
+  and keyboard input, file dialogs and drag and drop were not yet checked by a person (`docs/testing.md`).
+- macOS: built and smoke-tested by CI only; nobody on the project has run it on a Mac yet. Not signed or notarized
+  (right-click → Open the first time). Apple Silicon only.
+- Linux and macOS update by download: the app announces a new version and opens the release page.
 
 ## [1.2.0] - 2026-10-19
 
