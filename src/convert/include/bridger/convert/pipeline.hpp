@@ -29,6 +29,10 @@ struct ConvertOptions {
     std::optional<formats::FormatId> output_format; // default: from the output extension
     std::optional<std::filesystem::path> into_world; // place into a copy of this existing .mcworld
     translate::Fallback fallback = translate::Fallback::Air;
+    // Which entities are written (`--entities`): item frames and paintings (the default), also mobs, dropped items,
+    // armor stands and end crystals, or none. Bedrock -> Bedrock copies every actor as it is unless None.
+    translate::EntityMode entities = translate::EntityMode::Decorations;
+    bool player = true; // the single-player player of a world: position, inventory (`--no-player`)
     PlacementPolicy placement;
     std::string level_name; // new worlds; default: the input file name
     // Game version to write for ("1.20.1", "1.21.50", "26.50"); empty: the newest (the pinned version).

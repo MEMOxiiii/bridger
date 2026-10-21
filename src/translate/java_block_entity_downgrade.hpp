@@ -18,4 +18,10 @@ namespace bridger::translate::detail {
                                                                         const JavaTarget& target, std::vector<std::string>& lossy,
                                                                         std::vector<std::string>& dropped);
 
+// A mob or object entity (`id`, its NBT) as `target` stores it; nullopt: unchanged; an empty vector: the entity cannot
+// exist there (a dropped item the target lacks).
+[[nodiscard]] std::optional<std::vector<u8>> downgrade_java_mob(const std::string& id, const RawNbt& data, const JavaTargets& targets,
+                                                                const JavaTarget& target, std::vector<std::string>& lossy,
+                                                                std::vector<std::string>& dropped);
+
 } // namespace bridger::translate::detail

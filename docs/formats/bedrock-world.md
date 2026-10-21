@@ -107,8 +107,90 @@ y = 0 for an even height else −0.5. Reading Bedrock runs it forward (Pos += of
 storage keys of the actors in that chunk (an actor is listed in the chunk its position is in). Bridger assigns
 `UniqueID` = (world start count 0, flipped) << 32 | counter and the storage key 0x100000000 + (UniqueID ^
 0xFFFFFFFF00000000), big-endian (Chunker `generateStorageKeyForEntity`) [3][1]. Worlds before 1.18.30 keep a chunk's
-entities as concatenated NBT under its Entity key (0x32); both are read. Every other entity is reported
-("unmapped entity"); within an edition (Bedrock → Bedrock) actors are copied as they are, as Chunker does.
+entities as concatenated NBT under its Entity key (0x32); both are read. Mobs and objects convert only with
+`--entities all` ("Mobs" below); otherwise they are reported ("unmapped entity"). Within an edition (Bedrock → Bedrock)
+actors are copied as they are, as Chunker does, unless `--entities none`.
+
+## Mobs
+
+With `--entities all` (the app's Advanced → Entities → "Everything"; the default stays item frames and paintings)
+mobs, dropped items, armor stands and end crystals convert in both directions (`translate/mob_translator.cpp`). Chunker
+does not convert these [3: its maintainers say so in issues #704, #1478, #1565, #2191], so every detail below comes
+from the sources listed and from actors in worlds the game itself saved; **all of it still needs the in-game check**
+(`docs/testing.md`, row 21).
+
+**Types.** Each entity type's identifier in both editions and the version it appeared in: Chunker's
+`JavaEntityTypeResolver` / `BedrockEntityTypeResolver` [3], generated into `translate/entity_types.inc` by
+`tools/mapgen/build_entity_types.py` (`iron_golem`/`villager_golem`, `evoker`/`evocation_illager`,
+`zombified_piglin`/`zombie_pigman`, `villager`/`villager_v2`, ...). A type that the target version does not have yet is
+removed and reported; an older target gets the type's older name.
+
+**Common tags** [9]:
+
+| Java | Bedrock |
+|---|---|
+| `Pos`, `Motion` (Doubles), `Rotation` | `Pos`, `Motion` (Floats), `Rotation` |
+| `CustomName` (text component; formatting is reported), `CustomNameVisible` | `CustomName` (plain string), `CustomNameVisible` |
+| `Invulnerable`, `OnGround`, `fall_distance` (Double; `FallDistance` Float before 1.21.5), `Fire`, `Air`, `Tags` | the same names (`FallDistance` Float) |
+| `PersistenceRequired` (or a custom name) | `Persistent` |
+| baby: `Age` < 0, or `IsBaby` for the zombie family and piglins | `IsBaby` |
+| `Health`, `attributes` `minecraft:max_health` | `Attributes` entry `{Base, Current, DefaultMax, DefaultMin, Max, Min, Name: "minecraft:health"}`; the maximum is the behavior pack's unless the Java mob changed it |
+| `equipment` {head, chest, legs, feet, body, mainhand, offhand, saddle} (1.21.5+; `ArmorItems`/`HandItems` before) | `Armor` [head, chest, legs, feet, body] (five slots, as 26.x worlds store them), `Mainhand` [1], `Offhand` [1]; an empty slot is `{Count: 0b, Damage: 0s, Name: "", WasPickedUp: 0b}`; the saddle is the `Saddled` flag |
+| `Owner` (UUID of the tamer) | `IsTamed`, `OwnerNew`: only the world's own player can be named (see below) |
+
+Items in equipment and dropped items (`Item`, `Age`, `Health`, `PickupDelay`) go through the item translator ("Items").
+
+**Looks** (Bedrock numbers from the vanilla behavior pack's component groups [10]; Java names from the 26.3 server's
+registries and [9]):
+
+| Mob | Java | Bedrock |
+|---|---|---|
+| sheep | `Color` (dye 0..15), `Sheared` | `Color` (the same numbers: `sheep_white` 0 ... `sheep_black` 15), `Sheared` |
+| horse | `Variant` = colour \| markings << 8 | `Variant` colour (`base_white` 0 ... `base_darkbrown` 6), `MarkVariant` markings (`markings_none` 0 ... `markings_black_dots` 4) |
+| llama, trader llama | `Variant` 0..3, `Strength` | `Variant` (`llama_creamy` 0, white 1, brown 2, gray 3), `Strength` |
+| donkey, mule, llama | `ChestedHorse` | `Chested` (the chest's contents are reported) |
+| cat | `variant` (white, black, red, siamese, british_shorthair, calico, persian, ragdoll, tabby, all_black, jellie), `CollarColor` | `Variant` 0..10 in that order (`cat_white` 0, `cat_tuxedo` 1 = Java `black`, ... `cat_black` 9 = Java `all_black`), `Color` |
+| wolf | `variant` (pale, ashen, black, chestnut, rusty, snowy, spotted, striped, woods), `CollarColor` | `Variant` 0..8 in that order, `Color` |
+| frog | `variant` temperate/cold/warm | `Variant` 0/1/2 |
+| fox | `Type` red/snow | `Variant` 0/1 |
+| mooshroom | `Type` red/brown | `Variant` 0/1 |
+| goat | `IsScreamingGoat` | `Variant` 1 (`goat_screamer`) / 0 |
+| parrot | `Variant` 0..4 | `Variant` (the same order) |
+| rabbit | `RabbitType` 0..5 (99, the killer bunny, is reported) | `Variant` (the same order) |
+| axolotl | `Variant` 0 lucy, 1 wild, 2 gold, 3 cyan, 4 blue | `Variant` lucy 0, cyan 1, gold 2, wild 3, blue 4 |
+| slime, magma cube | `Size` (0 = smallest) | `Size` and `Variant` = Java size + 1 (`slime_small` 1, medium 2, large 4) |
+| shulker | `Color` (dye, 16 = none) | `Variant` = 15 − dye (`shulker_black` 0 ... `shulker_white` 15), 16 = none |
+| panda | `MainGene` (`HiddenGene` is reported when different) | `Variant` (normal 0, lazy 1, worried 2, playful 3, brown 4, weak 5, aggressive 6) |
+| tropical fish | `Variant` = size \| pattern << 8 \| body colour << 16 \| pattern colour << 24 | `Variant` size, `MarkVariant` pattern, `Color`, `Color2` |
+| villager, zombie villager | `VillagerData` {profession, type, level 1..5}, `Xp` | `Variant` profession (`unskilled` 0 ... `nitwit` 14), `MarkVariant` biome (plains 0, desert 1, jungle 2, savanna 3, snow 4, swamp 5, taiga 6), `TradeTier` = level − 1, `TradeExperience`; trades are reported (the game gives new ones) |
+| pig, cow, chicken | `variant` temperate/warm/cold, `sound_variant` | `properties` `minecraft:climate_variant` (same names), `minecraft:sound_variant` (Java `classic` = Bedrock `default`) |
+
+**`definitions` and `properties`.** Bedrock saves with each actor the component groups its behavior file added to it,
+for example a gray adult sheep: `["+minecraft:sheep", "+minecraft:sheep_adult", "+minecraft:sheep_dyeable",
+"+minecraft:rideable_wooly", "+minecraft:loot_wooly", "+minecraft:sheep_gray"]` (read from worlds the game saved), and
+the entity properties it declares (`properties`: `minecraft:climate_variant`, `minecraft:sound_variant`, ...).
+`tools/mapgen/build_bedrock_entities.py` walks every outcome of each mob's `minecraft:entity_spawned` (and
+`entity_born`) event in the behavior pack [10] (`randomize` and undecidable filters branch; `has_component` and
+`is_difficulty` (assumed Normal) are decided) and stores, per outcome, the groups and the state they give (variant,
+mark variant, colours, skin, baby, tamed, saddled, chested, sheared), plus the declared properties and the maximum
+health: `translate/data/bedrock-entities.nbt`. Bridger writes the outcome that matches the converted mob best (adult
+or baby must match; ties go to the likeliest outcome). Checked against 19 definition sets from three worlds the game
+saved: the 14 that differ in no behaviour-only group match exactly; the other five differ only in groups that set no
+state (a random "can break doors", a spider's day/night group, a villager's random skin). Bedrock → Java reads the plain
+tags (`Variant`, `Color`, `IsBaby`, `properties`); `definitions` are not needed there.
+
+**Owners.** Bedrock names a tamed animal's owner by the owner's `UniqueID`. The converted single-player player gets
+`UniqueID` 0xFFFFFFFF00000001 (counter 1, as the game numbers the local player; the writer numbers other actors from 2),
+so an animal whose Java `Owner` is the world's player (level.dat `Player.UUID`) stays tamed. Other owners are reported
+and the animal is written untamed. The other way the owner cannot be carried at all (Java needs the player's account
+UUID, which a Bedrock world does not know): reported, untamed.
+
+**Reported, not converted:** riders (`Passengers` / `LinksTag`), leashes, potion effects, the no-AI, glowing,
+no-gravity, silent and left-handed flags, equipment drop chances, villager trades and reputation, chest contents of
+donkeys, mules and llamas, armor stand poses (Bedrock has preset poses), the small/no-base-plate/invisible/marker
+flags, who may pick up a dropped item, an end crystal's beam. **Not converted yet, reported as unmapped:** boats and
+minecarts (the wood type is only documented as an item alias, and no world at hand had one to confirm the actor's tag),
+projectiles, experience orbs, falling blocks, area clouds, leash knots, display entities and markers.
 
 ## Player
 
@@ -378,3 +460,8 @@ chunks without seams, and double chests open as one.
    `src/world/format/io/leveldb/{LevelDB,ChunkVersion,SubChunkVersion,ChunkDataKey}.php`,
    `src/data/bedrock/block/upgrade/*.php`; pmmp/ext-chunkutils2 `lib/SubChunkConverter.h` (index and nibble order).
    Tomcc's "Beta 1.2.13 format" gist (by a Mojang developer, linked from [1]) for subchunk versions 0, 1 and 8.
+9. minecraft.wiki, "Entity format" (Java) and "Bedrock Edition level format/Entity format" (checked 2026-10-21):
+   https://minecraft.wiki/w/Entity_format, https://minecraft.wiki/w/Bedrock_Edition_level_format/Entity_format
+10. Mojang/bedrock-samples, tag `v1.26.50.4` (commit `46ba6ea9`, 2026-09-16), `behavior_pack/entities/*.json`: the
+    vanilla behavior pack (component groups, spawn events, entity properties). Read by the build script only; nothing of
+    it is committed except the derived table. https://github.com/Mojang/bedrock-samples

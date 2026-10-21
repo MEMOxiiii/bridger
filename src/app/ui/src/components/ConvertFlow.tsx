@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { send, type ConvertRequest, type Doc, type Target } from '../bridge'
+import { send, type ConvertRequest, type Doc, type EntityMode, type Fallback, type Target } from '../bridge'
 import { VersionPicker } from './VersionPicker'
 import { basename, dirname, formatMeta, issueTotal } from '../formats'
 import { dur, gsap, useGSAP } from '../motion'
@@ -71,6 +71,24 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
   const [clearEntities, setClearEntities] = useState(false)
   const [pos, setPos] = useState<[string, string, string]>(['0', '64', '0'])
   const [advanced, setAdvanced] = useState(false)
+  // Advanced options, remembered in the settings.
+  const settings = useStore((s) => s.settings)
+  const [entities, setEntitiesState] = useState<EntityMode>(settings?.convert_entities ?? 'decorations')
+  const [player, setPlayerState] = useState(settings?.convert_player ?? true)
+  const [fallback, setFallbackState] = useState<Fallback>(settings?.convert_fallback ?? 'air')
+  const setEntities = (v: EntityMode) => {
+    setEntitiesState(v)
+    send({ type: 'settings', convert_entities: v })
+  }
+  const setPlayer = (v: boolean) => {
+    setPlayerState(v)
+    send({ type: 'settings', convert_player: v })
+  }
+  const setFallback = (v: Fallback) => {
+    setFallbackState(v)
+    send({ type: 'settings', convert_fallback: v })
+  }
+  const isWorld = doc.kind === 'world'
   const structureToWorld = doc.kind === 'structure' && target === 'mcworld'
   const into = structureToWorld && placement === 'into'
   const posValid = pos.every((p) => /^-?\d+$/.test(p.trim()))
@@ -85,6 +103,9 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
       air,
       height,
       clear_entities: into && clearEntities,
+      entities,
+      player,
+      fallback,
       overwrite: true, // the save dialog already asked before replacing a file
     }
     if (version && !into) req.target_version = version // placing into a world writes for that world's game
@@ -186,32 +207,75 @@ function Setup({ doc, convert }: { doc: Doc; convert: ConvertState }) {
             )}
           </div>
         )}
-        {structureToWorld && (
-          <div className="advanced">
-            <button className="advanced-toggle" onClick={() => setAdvanced((a) => !a)} aria-expanded={advanced}>
-              <Icon name="chevron" size={16} />
-              Advanced placement
-            </button>
-            {advanced && (
-              <div className="advanced-body">
-                <div className="field">
-                  <span className="field-label">Air in the build</span>
-                  <Segmented label="Air in the build" value={air} onChange={setAir} options={[['keep', 'Keeps what is there'], ['replace', 'Clears it']]} />
-                </div>
-                <div className="field">
-                  <span className="field-label">If it does not fit the build height</span>
-                  <Segmented label="Build height" value={height} onChange={setHeight} options={[['fail', 'Stop'], ['shift', 'Move it'], ['clip', 'Cut it']]} />
-                </div>
-                {into && (
-                  <label className="check">
-                    <input type="checkbox" checked={clearEntities} onChange={(e) => setClearEntities(e.target.checked)} />
-                    <span>Remove mobs and items inside the build's area</span>
-                  </label>
-                )}
+        <div className="advanced">
+          <button className="advanced-toggle" onClick={() => setAdvanced((a) => !a)} aria-expanded={advanced}>
+            <Icon name="chevron" size={16} />
+            Advanced
+            {(entities !== 'decorations' || !player || fallback !== 'air') && <span className="advanced-badge">changed</span>}
+          </button>
+          {advanced && (
+            <div className="advanced-body">
+              <div className="field">
+                <span className="field-label">Entities</span>
+                <Segmented<EntityMode>
+                  label="Entities"
+                  value={entities}
+                  onChange={setEntities}
+                  options={[
+                    ['decorations', 'Frames and paintings'],
+                    ['all', 'Everything'],
+                    ['none', 'None'],
+                  ]}
+                />
+                <p className="field-hint">
+                  {entities === 'decorations' && 'Item frames and paintings are converted; mobs and dropped items are listed in the report.'}
+                  {entities === 'all' &&
+                    'Also mobs, villagers, pets, armor stands and dropped items, with their look, names, health and equipment. New: check them in the game.'}
+                  {entities === 'none' && 'No entities are written; each one is listed in the report.'}
+                </p>
               </div>
-            )}
-          </div>
-        )}
+              {isWorld && (
+                <label className="check">
+                  <input type="checkbox" checked={player} onChange={(e) => setPlayer(e.target.checked)} />
+                  <span>Keep the player's position and inventory</span>
+                </label>
+              )}
+              <div className="field">
+                <span className="field-label">Blocks with no counterpart</span>
+                <Segmented<Fallback>
+                  label="Blocks with no counterpart"
+                  value={fallback}
+                  onChange={setFallback}
+                  options={[
+                    ['air', 'Leave empty'],
+                    ['marker', 'Marker block'],
+                  ]}
+                />
+                <p className="field-hint">
+                  {fallback === 'air' ? 'They become air and are listed in the report.' : 'A marker block shows where each one was, so you can find them in the game.'}
+                </p>
+              </div>
+              {structureToWorld && (
+                <>
+                  <div className="field">
+                    <span className="field-label">Air in the build</span>
+                    <Segmented label="Air in the build" value={air} onChange={setAir} options={[['keep', 'Keeps what is there'], ['replace', 'Clears it']]} />
+                  </div>
+                  <div className="field">
+                    <span className="field-label">If it does not fit the build height</span>
+                    <Segmented label="Build height" value={height} onChange={setHeight} options={[['fail', 'Stop'], ['shift', 'Move it'], ['clip', 'Cut it']]} />
+                  </div>
+                  {into && (
+                    <label className="check">
+                      <input type="checkbox" checked={clearEntities} onChange={(e) => setClearEntities(e.target.checked)} />
+                      <span>Remove mobs and items inside the build's area</span>
+                    </label>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="flow-section">

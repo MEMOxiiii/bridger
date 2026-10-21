@@ -105,9 +105,7 @@ json version_json(const convert::GameVersionInfo& v) {
 json report_json(const translate::ConversionReport& report) {
     using translate::IssueKind;
     json out = json::object();
-    for (const IssueKind kind : {IssueKind::UnmappedBlock, IssueKind::LossyBlock, IssueKind::UnmappedBlockEntity, IssueKind::UnmappedEntity,
-                                 IssueKind::UnmappedBiome, IssueKind::DroppedSecondaryLayer, IssueKind::RemovedBlockEntity,
-                                 IssueKind::RemovedEntity, IssueKind::ClippedBlock}) {
+    for (const IssueKind kind : translate::kAllIssueKinds) {
         const auto* subjects = report.issues(kind);
         if (subjects == nullptr || subjects->empty()) continue;
         std::vector<std::pair<const std::string*, const translate::IssueEntry*>> sorted;
@@ -292,8 +290,11 @@ struct App::Impl {
     }
 
     json settings_json() const {
-        return {{"client_jar", settings.client_jar}, {"packs", settings.packs}, {"render_distance", settings.render_distance},
-                {"distant_terrain", settings.distant_terrain}, {"recent", settings.recent}, {"check_updates", settings.check_updates}};
+        return {{"client_jar", settings.client_jar},       {"packs", settings.packs},
+                {"render_distance", settings.render_distance}, {"distant_terrain", settings.distant_terrain},
+                {"recent", settings.recent},               {"check_updates", settings.check_updates},
+                {"convert_entities", settings.convert_entities}, {"convert_player", settings.convert_player},
+                {"convert_fallback", settings.convert_fallback}};
     }
 
     void send_hello() {
@@ -443,6 +444,10 @@ struct App::Impl {
         if (m.contains("distant_terrain") && m["distant_terrain"].is_number_integer())
             settings.distant_terrain = std::clamp(m["distant_terrain"].get<int>(), 0, 96);
         if (m.contains("check_updates") && m["check_updates"].is_boolean()) settings.check_updates = m["check_updates"].get<bool>();
+        if (const std::string v = m.value("convert_entities", std::string()); v == "decorations" || v == "all" || v == "none")
+            settings.convert_entities = v;
+        if (m.contains("convert_player") && m["convert_player"].is_boolean()) settings.convert_player = m["convert_player"].get<bool>();
+        if (const std::string v = m.value("convert_fallback", std::string()); v == "air" || v == "marker") settings.convert_fallback = v;
         apply_view_distance();
         settings_changed(assets_changed);
     }
@@ -822,7 +827,13 @@ struct App::Impl {
             o.placement.place_at = BlockPos{m["place_at"][0].get<i32>(), m["place_at"][1].get<i32>(), m["place_at"][2].get<i32>()};
         if (const std::string into = m.value("into_world", std::string()); !into.empty())
             if (auto p = platform::path_from_utf8(into)) o.into_world = *p;
-        o.fallback = translate::Fallback::Air;
+        // Advanced options (the convert page; remembered in the settings).
+        o.fallback = m.value("fallback", std::string("air")) == "marker" ? translate::Fallback::Marker : translate::Fallback::Air;
+        const std::string entities = m.value("entities", std::string("decorations"));
+        o.entities = entities == "all"    ? translate::EntityMode::All
+                     : entities == "none" ? translate::EntityMode::None
+                                          : translate::EntityMode::Decorations;
+        o.player = m.value("player", true);
         convert_cancel = false;
         o.cancel = &convert_cancel;
         auto last = std::make_shared<std::pair<float, std::string>>(-1.0f, std::string());

@@ -54,6 +54,11 @@ int main(int argc, char** argv) {
     convert_cmd->add_option("--format", conv.format, "Output format name (overrides the extension)");
     convert_cmd->add_option("--report", conv.report_path, "Write the conversion report as JSON");
     convert_cmd->add_option("--fallback", conv.fallback, "Block for unmapped states: air|marker")->capture_default_str();
+    convert_cmd->add_option("--entities", conv.entities,
+                            "Entities to write: decorations (item frames, paintings) | all (also mobs, dropped items, armor stands, "
+                            "end crystals) | none")
+        ->capture_default_str();
+    convert_cmd->add_flag("--no-player", conv.no_player, "Leave out the single-player player (position, inventory) of a world");
     convert_cmd->add_option("--air", conv.air, "Structure air: keep|replace existing blocks")->capture_default_str();
     convert_cmd->add_option("--place-at", conv.place_at, "World position x,y,z of the structure's corner");
     convert_cmd->add_option("--into-world", conv.into_world, "Place into a copy of an existing .mcworld (needs --place-at)");

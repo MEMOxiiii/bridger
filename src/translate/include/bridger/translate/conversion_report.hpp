@@ -6,6 +6,7 @@
 
 #include <bridger/core/types.hpp>
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -23,7 +24,14 @@ enum class IssueKind : u8 {
     RemovedBlockEntity,     // placement overwrote an existing block entity
     RemovedEntity,          // --clear-entities
     ClippedBlock,           // --clip
+    LossyEntity,            // converted, but some of its data has no counterpart (or was not carried)
 };
+
+// Every kind, in the order reports list them.
+inline constexpr std::array<IssueKind, 10> kAllIssueKinds{
+    IssueKind::UnmappedBlock,      IssueKind::LossyBlock,     IssueKind::UnmappedBlockEntity, IssueKind::UnmappedEntity,
+    IssueKind::LossyEntity,        IssueKind::UnmappedBiome,  IssueKind::DroppedSecondaryLayer, IssueKind::RemovedBlockEntity,
+    IssueKind::RemovedEntity,      IssueKind::ClippedBlock};
 
 [[nodiscard]] std::string_view to_string(IssueKind kind) noexcept;
 

@@ -160,7 +160,7 @@ Result<Structure> translate_to_bedrock(const Structure& java, const MappingData&
     }
 
     // --- Entities: item frames (Bedrock blocks) and paintings (actors); every other entity is reported.
-    for (const Entity& e : java.entities) detail::translate_entity(e, out, map, *air, *water, report);
+    for (const Entity& e : java.entities) detail::translate_entity(e, out, map, *air, *water, options, report);
 
     return out;
 }

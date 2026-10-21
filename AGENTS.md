@@ -167,6 +167,10 @@ additions to it are recorded here as required:
   region, level.dat and world_gen_settings.dat writing. `formats/bedrock/mcworld/bedrock_world_reader.hpp`.
 - `src/translate/entity_translator.{hpp,cpp}` (item frames and paintings, both directions) and
   `translate/player.hpp` + `player.cpp` (the single-player player, both directions).
+- Mobs (`--entities all`): `src/translate/mob_translator.{hpp,cpp}`, `entity_types.{hpp,cpp}` + generated
+  `entity_types.inc` (`tools/mapgen/build_entity_types.py`, from Chunker), `bedrock_entities.{hpp,cpp}` + generated
+  `src/translate/data/bedrock-entities.nbt` (`tools/mapgen/build_bedrock_entities.py`, from Mojang's behavior pack);
+  `tests/unit/translate/mob_test.cpp`.
 - `src/translate/item_translator.{hpp,cpp}` (item data in both directions, shared by every block entity),
   `tests/unit/translate/item_test.cpp` and `reverse_item_test.cpp`.
 - `src/translate/reverse_translator.cpp`, `reverse_block_entities.cpp` (Bedrock → Java) and `tables.hpp`

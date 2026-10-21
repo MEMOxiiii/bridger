@@ -546,4 +546,83 @@ std::optional<std::vector<u8>> downgrade_java_block_entity(const BlockEntity& be
     return std::move(*bytes);
 }
 
+
+// Mobs and objects (mob_translator.cpp output, or Java entities copied as they are) for an older Java version:
+// minecraft.wiki "Entity format" and its history. Before 1.21.5: ArmorItems [feet, legs, chest, head] and HandItems
+// [main, off] instead of "equipment", body_armor_item (1.20.5+) or ArmorItem (horses, before), SaddleItem (horses) or
+// Saddle (pig, strider), FallDistance (Float) instead of fall_distance, CustomName as a JSON string; sound variants and
+// the pig/cow/chicken variants are new in 1.21.5, wolf variants in 1.20.5; cats use CatType (Int) before 1.19.
+std::optional<std::vector<u8>> downgrade_java_mob(const std::string& id, const RawNbt& data, const JavaTargets& targets, const JavaTarget& target,
+                                                  std::vector<std::string>& lossy, std::vector<std::string>& dropped) {
+    if (target.pinned) return std::nullopt;
+    const auto doc = io::nbt::NbtDocument::parse(data.bytes, data.endian);
+    if (!doc || !doc->root().is(TagType::Compound)) return std::nullopt;
+    const NbtCompoundView root = doc->root().entries();
+    Ctx c{data.endian, targets, target, lossy, dropped};
+    const i32 dv = target.data_version;
+    const bool old_equipment = dv < kTextAsNbt; // 1.21.5
+    const std::string_view kind = std::string_view(id).starts_with("minecraft:") ? std::string_view(id).substr(10) : std::string_view(id);
+    const bool horse_like = kind == "horse" || kind == "donkey" || kind == "mule" || kind == "skeleton_horse" || kind == "zombie_horse" ||
+                            kind == "llama" || kind == "trader_llama" || kind == "camel";
+    constexpr std::array<std::string_view, 11> kCatTypes{"tabby", "black", "red", "siamese", "british_shorthair", "calico",
+                                                         "persian", "ragdoll", "white", "jellie", "all_black"};
+    NbtWriter w(data.endian);
+    w.begin_root_compound();
+    auto one_item = [&](NbtWriter& out, std::string_view name, NbtView v) {
+        if (const auto item = v.as_compound(); item && write_item(out, name, *item, c)) return;
+        out.begin_compound(name); // an empty slot
+        out.end_compound();
+    };
+    for (const io::nbt::NbtEntry& e : root) {
+        const std::string_view k = e.name;
+        if (k == "equipment" && old_equipment) {
+            const NbtCompoundView eq = e.value.entries();
+            w.begin_list("ArmorItems", TagType::Compound, 4);
+            for (const char* slot : {"feet", "legs", "chest", "head"}) one_item(w, {}, eq.find(slot));
+            w.end_list();
+            w.begin_list("HandItems", TagType::Compound, 2);
+            one_item(w, {}, eq.find("mainhand"));
+            one_item(w, {}, eq.find("offhand"));
+            w.end_list();
+            if (const auto body = eq.find("body").as_compound()) {
+                if (dv >= kItemComponents) (void)write_item(w, "body_armor_item", *body, c);
+                else if (horse_like) (void)write_item(w, "ArmorItem", *body, c);
+                else lossy.push_back("body armor");
+            }
+            if (const auto saddle = eq.find("saddle").as_compound()) {
+                if (horse_like) (void)write_item(w, "SaddleItem", *saddle, c);
+                else w.write_byte("Saddle", 1);
+            }
+        } else if (k == "fall_distance" && old_equipment) {
+            w.write_float("FallDistance", static_cast<f32>(e.value.as_double().value_or(0)));
+        } else if (k == "CustomName" && dv < kTextAsNbt) {
+            bool formatted = false;
+            write_text_string(w, "CustomName", text_json(e.value, &formatted));
+        } else if (k == "Item" && e.value.as_compound()) {
+            if (!write_item(w, "Item", *e.value.as_compound(), c)) {
+                w.end_compound();
+                return std::vector<u8>{}; // an item entity whose item the target lacks: removed by the caller
+            }
+        } else if (k == "sound_variant" && dv < kTextAsNbt) {
+            if (e.value.as_string().value_or("minecraft:classic") != "minecraft:classic") lossy.push_back("sound variant");
+        } else if (k == "variant" && ((dv < kTextAsNbt && (kind == "pig" || kind == "cow" || kind == "chicken")) ||
+                                      (dv < kItemComponents && kind == "wolf"))) {
+            const std::string_view v = e.value.as_string().value_or("");
+            if (v != "minecraft:temperate" && v != "minecraft:pale") lossy.push_back("variant");
+        } else if (k == "variant" && kind == "cat" && dv < 3105) { // 1.19
+            const std::string_view v = e.value.as_string().value_or("minecraft:tabby");
+            i32 type = 0;
+            for (usize i = 0; i < kCatTypes.size(); ++i)
+                if (v == "minecraft:" + std::string(kCatTypes[i])) type = static_cast<i32>(i);
+            w.write_int("CatType", type);
+        } else {
+            w.write_view(k, e.value);
+        }
+    }
+    w.end_compound();
+    auto bytes = std::move(w).finish();
+    if (!bytes) return std::nullopt;
+    return std::move(*bytes);
+}
+
 } // namespace bridger::translate::detail

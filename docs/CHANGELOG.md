@@ -5,6 +5,21 @@ versions follow the release plan in `docs/release.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Mobs convert in both directions when asked (`--entities all`; in the app: Advanced → Entities → Everything; the
+  default stays item frames and paintings): every vanilla mob with its position, motion, rotation, name, health,
+  baby/adult state, persistence, scoreboard tags and equipment, and its look: sheep colour, horse coat and markings,
+  cat, wolf, frog, fox, mooshroom, goat, parrot, rabbit, axolotl, llama, slime size, shulker colour, panda, tropical
+  fish, villager profession, biome and level, pig/cow/chicken climate and sound. Dropped items, armor stands (with their
+  equipment) and end crystals too. Bedrock actors get the `definitions` the game would give them, derived from the
+  vanilla behavior pack and checked against worlds the game saved. Tamed animals of the world's player stay tamed in
+  Bedrock. Trades, riders, leashes, poses and other data that cannot be carried are reported per mob ("lossy entity").
+  Types a target version lacks are removed and reported; older Java versions get the older entity format.
+- An Advanced section on the convert page for every conversion: entities (frames and paintings, everything, none), keep
+  the player (worlds), and what replaces blocks with no counterpart (air or a marker block). The choices are remembered.
+- `--entities decorations|all|none` and `--no-player` for `bridger convert`.
+
 ## [1.3.0] - 2026-10-21
 
 ### Added

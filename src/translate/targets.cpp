@@ -7,6 +7,7 @@
 #include <bridger/translate/targets.hpp>
 
 #include "entity_translator.hpp"
+#include "entity_types.hpp"
 #include "bedrock_block_entity_downgrade.hpp"
 #include "java_block_entity_downgrade.hpp"
 
@@ -415,6 +416,33 @@ Result<JavaRewrite> rewrite_for_java_target(Structure& java, const JavaTargets& 
     // JavaPaintingMotiveResolver: block_pos from 1.21.5 (TileX/TileY/TileZ before), "variant"/"facing" from 1.19
     // ("Motive"/"Facing" before); painting variants newer than the target are removed and reported.
     const i32 dv = target.data_version;
+    // Mobs and objects: the type must exist in the target (its name there may be an older one); the NBT in its form.
+    const detail::GameVersion3 java_v = detail::java_version3(target.name);
+    std::erase_if(java.entities, [&](Entity& e) {
+        if (e.id == "minecraft:painting" || e.id == "minecraft:item_frame" || e.id == "minecraft:glow_item_frame") return false;
+        const BlockPos where{static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)};
+        if (const detail::EntityTypeRow* row = detail::entity_type_by_java(e.id)) {
+            bool known = false;
+            for (const detail::IdSince& k : row->java) known = known || (k.id == e.id && k.since <= java_v);
+            const auto id = known ? std::optional<std::string_view>(e.id) : detail::java_entity_id(*row, java_v);
+            if (!id) {
+                report.add(IssueKind::UnmappedEntity, e.id + " (not in Java " + target.name + ")", where);
+                return true;
+            }
+            e.id = std::string(*id);
+        }
+        std::vector<std::string> lossy, dropped;
+        if (auto bytes = detail::downgrade_java_mob(e.id, e.data, targets, target, lossy, dropped)) {
+            if (bytes->empty()) {
+                report.add(IssueKind::UnmappedEntity, e.id + " (its item is not in Java " + target.name + ")", where);
+                return true;
+            }
+            e.data.bytes = std::move(*bytes);
+        }
+        for (const std::string& l : lossy) report.add(IssueKind::LossyEntity, e.id + ": " + l + " (Java " + target.name + ")", where);
+        for (const std::string& d : dropped) report.add(IssueKind::LossyEntity, e.id + ": " + d + " (not in Java " + target.name + ")", where);
+        return false;
+    });
     std::erase_if(java.entities, [&](Entity& e) {
         if (e.id != "minecraft:painting" && e.id != "minecraft:item_frame" && e.id != "minecraft:glow_item_frame") return false;
         const auto doc = io::nbt::NbtDocument::parse(e.data.bytes, e.data.endian);
@@ -717,6 +745,34 @@ Result<u64> rewrite_for_bedrock_target(Structure& bedrock, const BedrockTargets&
     // Paintings: "Motive" until 1.20.60, "Motif" after (Chunker BedrockPaintingEntityHandler); motives newer than the
     // target are removed and reported.
     const std::array<i32, 3> target_v{target.version[0], target.version[1], target.version[2]};
+    std::erase_if(bedrock.entities, [&](Entity& e) {
+        if (e.id == "minecraft:painting") return false;
+        const detail::EntityTypeRow* row = detail::entity_type_by_bedrock(e.id);
+        if (row == nullptr) return false; // unknown here: left as it is (a copied actor of an add-on, for example)
+        const BlockPos where{static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)};
+        // An identifier the target already knows stays (old "villager" actors are not "villager_v2" ones).
+        for (const detail::IdSince& known : row->bedrock)
+            if (known.id == e.id && known.since <= target_v) return false;
+        const auto id = detail::bedrock_entity_id(*row, target_v);
+        if (!id) {
+            report.add(IssueKind::UnmappedEntity, e.id + " (not in Bedrock " + target.name + ")", where);
+            return true;
+        }
+        if (*id != e.id) {
+            const auto doc = io::nbt::NbtDocument::parse(e.data.bytes, e.data.endian);
+            if (!doc) return false;
+            io::nbt::NbtWriter w(e.data.endian);
+            w.begin_root_compound();
+            for (const io::nbt::NbtEntry& en : doc->root().entries()) {
+                if (en.name == "identifier") w.write_string("identifier", *id);
+                else w.write_view(en.name, en.value);
+            }
+            w.end_compound();
+            if (auto bytes = std::move(w).finish()) e.data.bytes = std::move(*bytes);
+            e.id = std::string(*id);
+        }
+        return false;
+    });
     std::erase_if(bedrock.entities, [&](Entity& e) {
         if (e.id != "minecraft:painting") return false;
         const auto doc = io::nbt::NbtDocument::parse(e.data.bytes, e.data.endian);

@@ -1391,6 +1391,17 @@ kbd {
   transform: rotate(90deg);
 }
 
+/* Shown on the closed Advanced section when an option differs from its default. */
+.advanced-badge {
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-active);
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
 .advanced-body {
   display: flex;
   flex-direction: column;

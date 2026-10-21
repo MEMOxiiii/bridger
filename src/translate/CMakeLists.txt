@@ -8,3 +8,6 @@ bridger_embed_resource(bridger_translate data/bedrock-upgrade.nbt bedrock_upgrad
 # Target versions (docs/versions.md): tools/mapgen/build_java_targets.py and build_bedrock_targets.py.
 bridger_embed_resource(bridger_translate data/java-targets.nbt java_targets_nbt)
 bridger_embed_resource(bridger_translate data/bedrock-targets.nbt bedrock_targets_nbt)
+# Mob definitions and properties from Bedrock's vanilla behavior pack (docs/formats/bedrock-world.md, "Mobs"):
+# tools/mapgen/build_bedrock_entities.py.
+bridger_embed_resource(bridger_translate data/bedrock-entities.nbt bedrock_entities_nbt)

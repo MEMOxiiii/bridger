@@ -49,6 +49,15 @@ Settings load_settings() {
     if (auto it = j.find("check_updates"); it != j.end() && it->is_boolean()) s.check_updates = it->get<bool>();
     if (auto it = j.find("last_update_check"); it != j.end() && it->is_number_integer()) s.last_update_check = it->get<i64>();
     if (auto it = j.find("skipped_version"); it != j.end() && it->is_string()) s.skipped_version = it->get<std::string>();
+    if (auto it = j.find("convert_entities"); it != j.end() && it->is_string()) {
+        const std::string v = it->get<std::string>();
+        if (v == "decorations" || v == "all" || v == "none") s.convert_entities = v;
+    }
+    if (auto it = j.find("convert_player"); it != j.end() && it->is_boolean()) s.convert_player = it->get<bool>();
+    if (auto it = j.find("convert_fallback"); it != j.end() && it->is_string()) {
+        const std::string v = it->get<std::string>();
+        if (v == "air" || v == "marker") s.convert_fallback = v;
+    }
     return s;
 }
 
@@ -59,7 +68,9 @@ void save_settings(const Settings& s) {
     std::filesystem::create_directories(path->parent_path(), ec);
     const nlohmann::json j = {{"client_jar", s.client_jar}, {"packs", s.packs}, {"render_distance", s.render_distance},
                               {"distant_terrain", s.distant_terrain}, {"recent", s.recent}, {"check_updates", s.check_updates},
-                              {"last_update_check", s.last_update_check}, {"skipped_version", s.skipped_version}};
+                              {"last_update_check", s.last_update_check}, {"skipped_version", s.skipped_version},
+                              {"convert_entities", s.convert_entities}, {"convert_player", s.convert_player},
+                              {"convert_fallback", s.convert_fallback}};
     std::ofstream out(*path, std::ios::binary | std::ios::trunc);
     out << j.dump(2);
     if (!out) log::warn("settings: could not write {}", platform::path_to_utf8(*path).value_or("settings.json"));

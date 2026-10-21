@@ -6,6 +6,7 @@
 
 #include <bridger/io/nbt/nbt_view.hpp>
 #include <bridger/io/nbt/nbt_writer.hpp>
+#include <bridger/translate/translator.hpp>
 
 #include "item_translator.hpp"
 
@@ -74,6 +75,7 @@ std::optional<std::vector<u8>> java_player_to_bedrock(const RawNbt& java_player,
     const BlockPos where{static_cast<i32>(num(pos, 0)), static_cast<i32>(num(pos, 1)), static_cast<i32>(num(pos, 2))};
     NbtWriter w(Endian::Little);
     w.begin_root_compound();
+    w.write_long("UniqueID", kBedrockLocalPlayerId); // so converted pets can name their owner (translator.hpp)
     write_floats(w, "Pos", {static_cast<f32>(num(pos, 0)), static_cast<f32>(num(pos, 1)) + kPlayerHeight, static_cast<f32>(num(pos, 2))});
     write_floats(w, "Motion", {static_cast<f32>(num(c.find("Motion"), 0)), static_cast<f32>(num(c.find("Motion"), 1)),
                                static_cast<f32>(num(c.find("Motion"), 2))});

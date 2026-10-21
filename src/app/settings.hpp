@@ -21,6 +21,10 @@ struct Settings {
     bool check_updates = true;       // look for a new release once a day (docs/app/updates.md)
     i64 last_update_check = 0;       // Unix seconds of the last automatic check
     std::string skipped_version;     // "1.1.0": not offered again automatically
+    // Advanced convert options, remembered between conversions (the convert page's "Advanced" section).
+    std::string convert_entities = "decorations"; // decorations | all | none (ConvertOptions::entities)
+    bool convert_player = true;                   // the single-player player of a world
+    std::string convert_fallback = "air";         // air | marker: blocks with no counterpart
 
     static constexpr usize kMaxRecent = 6;
     void add_recent(const std::string& path);

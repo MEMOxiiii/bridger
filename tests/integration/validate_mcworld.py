@@ -18,6 +18,7 @@ import argparse
 import gzip
 import io
 import json
+import math
 import struct
 import sys
 import tempfile
@@ -208,7 +209,7 @@ def main():
                 if k not in actors:
                     fail("digp lists an actor that does not exist")
                 pos = actors[k]["Pos"]
-                if (int(float(pos[0])) // 16, int(float(pos[2])) // 16) != (cx, cz):
+                if (math.floor(float(pos[0])) // 16, math.floor(float(pos[2])) // 16) != (cx, cz):
                     fail("actor listed in the digp entry of another chunk")
         if len(actors) != sum(len(v) for v in digp.values()):
             fail("actors not listed in any digp entry")

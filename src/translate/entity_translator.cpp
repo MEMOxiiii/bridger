@@ -10,6 +10,7 @@
 #include <bridger/io/nbt/nbt_writer.hpp>
 
 #include "item_translator.hpp"
+#include "mob_translator.hpp"
 
 #include <algorithm>
 #include <array>
@@ -241,10 +242,14 @@ void frame_to_java(const BlockEntity& be, BedrockStateIndex frame_state, Structu
     }
 }
 
-void actor_to_java(const Entity& actor, Structure& out, ConversionReport& report) {
+void actor_to_java(const Entity& actor, Structure& out, const MappingData& map, const TranslateOptions& options, ConversionReport& report) {
     const BlockPos where{static_cast<i32>(std::floor(actor.pos.x)), static_cast<i32>(std::floor(actor.pos.y)),
                          static_cast<i32>(std::floor(actor.pos.z))};
-    if (actor.id != "minecraft:painting") {
+    if (options.entities == EntityMode::None) {
+        report.add(IssueKind::UnmappedEntity, actor.id + " (entities off)", where);
+        return;
+    }
+    if (actor.id != "minecraft:painting" && options.entities != EntityMode::All) {
         report.add(IssueKind::UnmappedEntity, actor.id, where);
         return;
     }
@@ -254,6 +259,10 @@ void actor_to_java(const Entity& actor, Structure& out, ConversionReport& report
         return;
     }
     const NbtCompoundView c = doc->root().entries();
+    if (actor.id != "minecraft:painting") {
+        if (!bedrock_mob_to_java(actor, c, out, map, options, report)) report.add(IssueKind::UnmappedEntity, actor.id, where);
+        return;
+    }
     std::optional<std::string_view> name = c.find("Motif").as_string();
     if (!name) name = c.find("Motive").as_string();
     const Motive* motive = motive_by_bedrock(name.value_or("Kebab"));
@@ -306,9 +315,14 @@ std::optional<std::array<i32, 3>> painting_motive_since(std::string_view bedrock
 }
 
 void translate_entity(const Entity& e, Structure& out, const MappingData& map, BedrockStateIndex air, BedrockStateIndex water,
-                      ConversionReport& report) {
+                      const TranslateOptions& options, ConversionReport& report) {
     const BlockPos where{static_cast<i32>(e.pos.x), static_cast<i32>(e.pos.y), static_cast<i32>(e.pos.z)};
-    if (e.id != "minecraft:item_frame" && e.id != "minecraft:glow_item_frame" && e.id != "minecraft:painting") {
+    if (options.entities == EntityMode::None) {
+        report.add(IssueKind::UnmappedEntity, e.id + " (entities off)", where);
+        return;
+    }
+    const bool decoration = e.id == "minecraft:item_frame" || e.id == "minecraft:glow_item_frame" || e.id == "minecraft:painting";
+    if (!decoration && options.entities != EntityMode::All) {
         report.add(IssueKind::UnmappedEntity, e.id, where);
         return;
     }
@@ -318,6 +332,10 @@ void translate_entity(const Entity& e, Structure& out, const MappingData& map, B
         return;
     }
     const NbtCompoundView c = doc->root().entries();
+    if (!decoration) {
+        if (!java_mob_to_bedrock(e, c, out, map, options, report)) report.add(IssueKind::UnmappedEntity, e.id, where);
+        return;
+    }
     if (e.id == "minecraft:painting") painting(e, c, out, report);
     else frame(e, c, out, map, air, water, report);
 }

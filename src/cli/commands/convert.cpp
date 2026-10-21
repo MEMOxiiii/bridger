@@ -41,9 +41,7 @@ void print_report(const convert::ConvertSummary& s) {
         return;
     }
     std::puts("Conversion report (not converted exactly):");
-    for (const IssueKind kind : {IssueKind::UnmappedBlock, IssueKind::LossyBlock, IssueKind::UnmappedBlockEntity,
-                                 IssueKind::UnmappedEntity, IssueKind::UnmappedBiome, IssueKind::DroppedSecondaryLayer,
-                                 IssueKind::RemovedBlockEntity, IssueKind::RemovedEntity, IssueKind::ClippedBlock}) {
+    for (const IssueKind kind : translate::kAllIssueKinds) {
         const auto* subjects = s.report.issues(kind);
         if (subjects == nullptr) continue;
         std::puts(std::format("  {}: {}", translate::to_string(kind), s.report.total(kind)).c_str());
@@ -117,6 +115,14 @@ int run_convert(const ConvertArgs& a) {
         log::error("invalid --fallback '{}' (expected air or marker)", a.fallback);
         return kExitError;
     }
+    if (a.entities == "decorations") o.entities = translate::EntityMode::Decorations;
+    else if (a.entities == "all") o.entities = translate::EntityMode::All;
+    else if (a.entities == "none") o.entities = translate::EntityMode::None;
+    else {
+        log::error("invalid --entities '{}' (expected decorations, all or none)", a.entities);
+        return kExitError;
+    }
+    o.player = !a.no_player;
     if (auto air = convert::parse_air_mode(a.air); air) o.placement.air = *air;
     else {
         log::error("{}", air.error().message());

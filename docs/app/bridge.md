@@ -29,7 +29,7 @@ macOS (WKWebView) the host injects a script at document start that provides it o
 | `open_dialog` | `folder` | Show the open-file (or folder) dialog, then open the choice. |
 | `pick_output` | `format` (format name) | Save dialog for that format (folder dialog for `java-world`); answered by `output_picked`. |
 | `pick_into_world` | | Open dialog for a `.mcworld` to place into; answered by `into_world_picked`. |
-| `convert` | `output`, `format`, `level_name`, `air` (`keep`/`replace`), `height` (`fail`/`clip`/`shift`), `clear_entities`, `place_at?`, `into_world?`, `overwrite`, `target_version?` | Start a conversion (`convert::convert`) on a worker thread. `target_version`: a name from the chosen target's `versions` (default: the newest). |
+| `convert` | `output`, `format`, `level_name`, `air` (`keep`/`replace`), `height` (`fail`/`clip`/`shift`), `clear_entities`, `entities` (`decorations`/`all`/`none`), `player`, `fallback` (`air`/`marker`), `place_at?`, `into_world?`, `overwrite`, `target_version?` | Start a conversion (`convert::convert`) on a worker thread. `target_version`: a name from the chosen target's `versions` (default: the newest). `entities`, `player`, `fallback`: the Advanced section (`ConvertOptions::entities`, `player`, `fallback`). |
 | `cancel_convert` | | Ask the running conversion to stop. Nothing is written when it stops (`ConvertOptions::cancel`). |
 | `reveal` | `path` | Show the file in Explorer. |
 | `pick_client_jar`, `add_pack` | | Dialogs for the textures' client jar / a resource pack. |
@@ -41,7 +41,7 @@ macOS (WKWebView) the host injects a script at document start that provides it o
 | `update_skip` | | Do not offer this version again automatically. |
 | `update_restart` | | Install the unpacked update and restart (refused while converting). |
 | `update_page` | | Open the release page in the browser. |
-| `settings` | `client_jar?`, `packs?`, `render_distance?`, `distant_terrain?` | Change and save settings (`%APPDATA%/Bridger/settings.json`). `distant_terrain`: simplified terrain out to this many chunks (0–96; not above `render_distance` = off). |
+| `settings` | `client_jar?`, `packs?`, `render_distance?`, `distant_terrain?`, `check_updates?`, `convert_entities?`, `convert_player?`, `convert_fallback?` | Change and save settings (`%APPDATA%/Bridger/settings.json`). `distant_terrain`: simplified terrain out to this many chunks (0–96; not above `render_distance` = off). `convert_*`: the Advanced section's last choices. |
 
 ## App → UI
 

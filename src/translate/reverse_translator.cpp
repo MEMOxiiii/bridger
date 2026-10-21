@@ -490,14 +490,15 @@ Result<Structure> translate_to_java(const Structure& bedrock, const MappingData&
         if (!out.contains(be.pos)) continue;
         if ((be.id == "ItemFrame" || be.id == "GlowItemFrame") && bedrock.contains(be.pos) &&
             detail::is_bedrock_frame(m.bedrock(bedrock.block(be.pos)).name)) {
-            detail::frame_to_java(be, bedrock.block(be.pos), out, m, report);
+            if (options.entities == EntityMode::None) report.add(IssueKind::UnmappedEntity, "minecraft:item_frame (entities off)", be.pos);
+            else detail::frame_to_java(be, bedrock.block(be.pos), out, m, report);
             continue;
         }
         const StateId id = out.block(be.pos);
         const JavaStateId j = id < java_of_out.size() ? java_of_out[id] : *air_j;
         if (auto translated = translate_block_entity_to_java(be, j, m, report)) out.block_entities.push_back(std::move(*translated));
     }
-    for (const Entity& e : bedrock.entities) detail::actor_to_java(e, out, report);
+    for (const Entity& e : bedrock.entities) detail::actor_to_java(e, out, m, options, report);
     return out;
 }
 

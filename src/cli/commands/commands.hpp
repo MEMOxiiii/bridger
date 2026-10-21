@@ -24,6 +24,8 @@ struct ConvertArgs {
     std::string into_world;
     std::string level_name;
     std::string target_version; // --target-version
+    std::string entities = "decorations"; // --entities decorations|all|none
+    bool no_player = false;               // --no-player
     bool clip = false;
     bool shift_to_fit = false;
     bool clear_entities = false;

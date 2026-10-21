@@ -70,6 +70,9 @@ export interface Assets {
   bedrock_version?: string
 }
 
+export type EntityMode = 'decorations' | 'all' | 'none'
+export type Fallback = 'air' | 'marker'
+
 export interface Settings {
   client_jar: string
   packs: string[]
@@ -77,6 +80,10 @@ export interface Settings {
   distant_terrain: number
   recent: string[]
   check_updates: boolean
+  // Advanced convert options, remembered between conversions.
+  convert_entities?: EntityMode
+  convert_player?: boolean
+  convert_fallback?: Fallback
 }
 
 export interface Stats {
@@ -151,6 +158,9 @@ export interface ConvertRequest {
   air: 'keep' | 'replace'
   height: 'fail' | 'clip' | 'shift'
   clear_entities: boolean
+  entities: EntityMode // which entities are written (docs/app/bridge.md)
+  player: boolean // the single-player player of a world
+  fallback: Fallback // blocks with no counterpart
   place_at?: [number, number, number]
   into_world?: string
   overwrite: boolean
@@ -187,7 +197,17 @@ export type Outgoing =
   | { type: 'update_restart' }
   | { type: 'update_page' }
   | { type: 'add_pack' }
-  | { type: 'settings'; client_jar?: string; packs?: string[]; render_distance?: number; distant_terrain?: number; check_updates?: boolean }
+  | {
+      type: 'settings'
+      client_jar?: string
+      packs?: string[]
+      render_distance?: number
+      distant_terrain?: number
+      check_updates?: boolean
+      convert_entities?: EntityMode
+      convert_player?: boolean
+      convert_fallback?: Fallback
+    }
 
 interface WebView {
   postMessage(message: unknown): void

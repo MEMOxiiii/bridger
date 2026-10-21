@@ -297,7 +297,9 @@ struct WorldBuilder::Impl {
     fs::path dir;
     std::optional<LevelDbStore> db;
     WorldWriteStats stats;
-    u32 next_actor = 0;
+    // Counter 1 is the local player's (translate::kBedrockLocalPlayerId, written by the player conversion), as in worlds
+    // the game saves; tamed animals name it as their owner.
+    u32 next_actor = 2;
     // Actor storage keys per chunk (dimension, x, z), written as "digp" entries by finish(): an actor belongs to the
     // chunk its position is in, which may be a neighbour of the column it came from.
     std::map<std::tuple<i32, i32, i32>, std::vector<u8>> digp;
@@ -328,7 +330,8 @@ struct WorldBuilder::Impl {
         std::string full = "actorprefix";
         full.append(reinterpret_cast<const char*>(key.data()), key.size());
         BRIDGER_TRY_STATUS(db->put(full, bytes));
-        const i32 cx = static_cast<i32>(std::floor(a.x)) >> 4, cz = static_cast<i32>(std::floor(a.z)) >> 4;
+        // The chunk of the position as stored (a Float): rounding can move a position right at an edge into the next one.
+        const i32 cx = static_cast<i32>(std::floor(static_cast<f32>(a.x))) >> 4, cz = static_cast<i32>(std::floor(static_cast<f32>(a.z))) >> 4;
         auto& list = digp[{static_cast<i32>(dim), cx, cz}];
         list.insert(list.end(), key.begin(), key.end());
         ++stats.actors;

@@ -13,6 +13,7 @@ std::string_view to_string(IssueKind kind) noexcept {
     case IssueKind::RemovedBlockEntity: return "removed block entity";
     case IssueKind::RemovedEntity: return "removed entity";
     case IssueKind::ClippedBlock: return "clipped block";
+    case IssueKind::LossyEntity: return "lossy entity";
     }
     return "unknown";
 }
